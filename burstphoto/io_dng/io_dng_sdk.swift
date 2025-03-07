@@ -1,16 +1,38 @@
+/**
+ * @file io_dng_sdk.swift
+ * @brief Swift interface for working with DNG (Digital Negative) files in the burst photography pipeline
+ *
+ * This file provides functionality for loading, converting, and saving DNG images,
+ * interfacing with the C/C++ DNG SDK wrapper. It handles raw camera files,
+ * converts them to Metal textures for GPU processing, and manages caching for
+ * performance optimization. The file focuses on extracting critical metadata
+ * like exposure information, black/white levels, mosaic pattern data, and
+ * color correction factors needed for computational photography.
+ */
 import Foundation
 import MetalKit
 
 /**
- Must create a class to pass into NSCache.
+ * Wrapper class for caching DNG image data in memory.
+ *
+ * Must create a class to pass into NSCache.
+ * Stores both the Metal texture representation of the image and
+ * all relevant metadata extracted from the DNG file.
  */
 class ImageCacheWrapper : NSObject {
+    /// Metal texture containing the image data
     let texture : MTLTexture
+    /// Width of the color filter array pattern (2 for Bayer, 6 for X-Trans)
     let mosaic_pattern_width: Int
+    /// Maximum pixel value for the image sensor
     let white_level: Int
+    /// Black level values for each position in the color filter array pattern
     let black_levels: [Int]
+    /// Exposure bias value in EV*100
     let exposure_bias: Int
+    /// Product of ISO value and exposure time (represents total light gathering)
     let ISO_exposure_time: Double
+    /// RGB color correction factors [r, g, b]
     let color_factors: [Double]
     
     init(texture: MTLTexture, mosaic_pattern_width: Int, white_level: Int, black_levels: [Int], exposure_bias: Int, ISO_exposure_time: Double, color_factors: [Double]) {
@@ -26,15 +48,24 @@ class ImageCacheWrapper : NSObject {
 
 // possible error types
 enum ImageIOError: Error {
+    /// Error loading an image from disk
     case load_error
+    /// Error creating or working with Metal textures
     case metal_error
+    /// Error saving an image to disk
     case save_error
 }
 
 /// Take a list of urls representing non-DNG raw files and converts them using the Adobe DNG Converter.
 /// If the output image already exists, it will not convert it again, unless `override_cache` is set to `true`.
 ///
+/// - Parameter in_urls: Array of URLs pointing to raw image files to be converted
+/// - Parameter dng_converter_path: Path to the Adobe DNG Converter application
+/// - Parameter tmp_dir: Directory where converted DNG files will be stored
+/// - Parameter texture_cache: Cache for storing loaded textures to avoid redundant processing
 /// - Parameter override_cache: Default of `false`. This value should always be set to `true` when outputting the final image.
+/// - Returns: Array of URLs to the converted DNG files
+/// - Throws: AlignmentError.conversion_failed if any conversion fails
 func convert_raws_to_dngs(_ in_urls: [URL], _ dng_converter_path: String, _ tmp_dir: String, _ texture_cache: NSCache<NSString, ImageCacheWrapper>, override_cache: Bool = false) throws -> [URL] {
 
     // create command string
@@ -103,7 +134,25 @@ func convert_raws_to_dngs(_ in_urls: [URL], _ dng_converter_path: String, _ tmp_
     return out_urls
 }
 
-
+/**
+ * Converts a DNG image file to a Metal texture and extracts metadata.
+ *
+ * This function reads a DNG file using the C++ wrapper for Adobe's DNG SDK,
+ * extracts the raw pixel data and important metadata (like black levels,
+ * white levels, and exposure information), and creates a Metal texture.
+ *
+ * @param url The URL of the DNG file to load
+ * @param device The Metal device to create textures with
+ * @returns A tuple containing the texture and metadata:
+ *   - MTLTexture: The created Metal texture containing the raw image data
+ *   - Int: The mosaic pattern width (2 for Bayer, 6 for X-Trans)
+ *   - Int: The white level value (maximum pixel value)
+ *   - [Int]: The black level values for each position in the mosaic pattern
+ *   - Int: The exposure bias value (in EV*100)
+ *   - Double: The product of ISO value and exposure time
+ *   - [Double]: The RGB color correction factors
+ * @throws ImageIOError if loading or texture creation fails
+ */
 func image_url_to_texture(_ url: URL, _ device: MTLDevice) throws -> (MTLTexture, Int, Int, [Int], Int, Double, [Double]) {
     
     // read image
@@ -169,7 +218,25 @@ func image_url_to_texture(_ url: URL, _ device: MTLDevice) throws -> (MTLTexture
     return (texture, mosaic_pattern_width, Int(white_level), black_level, Int(exposure_bias), Double(ISO_exposure_time), color_factors)
 }
 
-
+/**
+ * Loads multiple DNG images from disk or cache into Metal textures and extracts their metadata.
+ *
+ * This function handles loading multiple images in parallel, utilizing both
+ * in-memory caching and disk caching for improved performance. It ensures
+ * all loaded images have consistent dimensions.
+ *
+ * @param urls Array of URLs to DNG files to load
+ * @param textureCache Cache for storing loaded textures to avoid redundant loading
+ * @returns A tuple containing arrays of textures and metadata:
+ *   - [MTLTexture]: Array of Metal textures containing the raw image data
+ *   - Int: The mosaic pattern width (2 for Bayer, 6 for X-Trans)
+ *   - [Int]: Array of white level values for each image
+ *   - [[Int]]: Array of black level arrays for each image
+ *   - [Int]: Array of exposure bias values for each image
+ *   - [Double]: Array of ISO_exposure_time values for each image
+ *   - [[Double]]: Array of RGB color correction factors for each image
+ * @throws ImageIOError if loading fails or AlignmentError.inconsistent_resolutions if images have different dimensions
+ */
 func load_images(_ urls: [URL], textureCache: NSCache<NSString, ImageCacheWrapper>) throws -> ([MTLTexture], Int, [Int], [[Int]], [Int], [Double], [[Double]]) {
     
     var textures_dict: [Int: MTLTexture] = [:]
@@ -273,7 +340,15 @@ func load_images(_ urls: [URL], textureCache: NSCache<NSString, ImageCacheWrappe
     return (textures_list, mosaic_pattern_width!, white_level, black_levels, exposure_bias, ISO_exposure_time, color_factors)
 }
 
-
+/**
+ * Helper function to convert a directory URL to a list of file URLs.
+ *
+ * If a single directory URL is provided, this function returns all files 
+ * in that directory. Otherwise, it returns the original list of URLs.
+ *
+ * @param urls List of URLs that may contain a single directory URL
+ * @returns List of file URLs
+ */
 func optionally_convert_dir_to_urls(_ urls: [URL]) -> [URL] {
     // if the argument is a list of one directory, return the urls withing that directory
     if urls.count == 1 {
@@ -292,6 +367,13 @@ func optionally_convert_dir_to_urls(_ urls: [URL]) -> [URL] {
 
 
 // https://stackoverflow.com/questions/26971240/how-do-i-run-a-terminal-command-in-a-swift-script-e-g-xcodebuild
+/**
+ * Executes a shell command safely and returns its output.
+ *
+ * @param command The shell command to execute
+ * @returns The command's output as a string
+ * @throws An error if the command execution fails
+ */
 @discardableResult // Add to suppress warnings when you don't want/need a result
 func safeShell(_ command: String) throws -> String {
     let task = Process()
@@ -311,7 +393,18 @@ func safeShell(_ command: String) throws -> String {
     return output
 }
 
-
+/**
+ * Writes a Metal texture to a DNG file.
+ *
+ * This function synchronizes GPU and CPU memory, converts the texture to a 
+ * raw bitmap, and then writes it to disk using the DNG SDK wrapper.
+ *
+ * @param texture The Metal texture containing the image data to save
+ * @param in_url URL of the input/template DNG file (metadata will be preserved)
+ * @param out_url URL where the output DNG file will be written
+ * @param white_level The white level value to set in the output DNG
+ * @throws ImageIOError.save_error if saving fails
+ */
 func texture_to_dng(_ texture: MTLTexture, _ in_url: URL, _ out_url: URL, _ white_level: Int32) throws {
     // synchronize GPU and CPU memory
     let command_buffer = command_queue.makeCommandBuffer()!
