@@ -1,11 +1,28 @@
-# This file is intentionally empty and should be deleted.
-# The functionality has been migrated to specialized workflow files:
-#
-# - main.yml: Main build workflow
-# - pr-validation.yml: PR validation
-# - release.yml: Release process
-# - security.yml: Security scanning
-# - performance.yml: Performance benchmarking
-# - documentation.yml: Documentation generation
-# - maintenance.yml: Maintenance tasks
-# - scheduled.yml: Scheduled tasks 
+name: DEPRECATED CI
+
+# This workflow is deprecated and scheduled for removal
+# Please use the specialized workflow files instead:
+# - main.yml
+# - pr-validation.yml
+# - release.yml
+# - security.yml
+# - performance.yml
+# - documentation.yml
+# - maintenance.yml
+# - scheduled.yml
+
+on: 
+  # This workflow is disabled and won't run
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'This workflow is deprecated. Please use the specific workflow files instead.'
+        required: true
+        default: 'Understood'
+
+jobs:
+  notice:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deprecated notice
+        run: echo "This workflow is deprecated. Please use the specialized workflow files instead." 
