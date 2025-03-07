@@ -5,10 +5,21 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:  # Allow manual triggering
+
+# Ensure we don't run multiple workflows on the same branch at the same time
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
-    runs-on: macos-latest
+    strategy:
+      matrix:
+        os: [macos-14, macos-13]  # Test on both macOS 14 (Sonoma) and macOS 13 (Ventura)
+      fail-fast: false  # Continue with other matrix jobs if one fails
+    
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -19,9 +30,9 @@ jobs:
           path: |
             ~/Library/Developer/Xcode/DerivedData
             ~/.swiftpm
-          key: ${{ runner.os }}-spm-deriveddata-${{ hashFiles('**/Package.resolved') }}
+          key: ${{ runner.os }}-${{ matrix.os }}-spm-deriveddata-${{ hashFiles('**/Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-deriveddata-
+            ${{ runner.os }}-${{ matrix.os }}-spm-deriveddata-
       
       - name: Install SwiftLint
         run: |
@@ -43,6 +54,9 @@ jobs:
           # List all files in the root directory to confirm project location
           echo "Files in repository root:"
           ls -la
+          
+          # Show Xcode version
+          xcodebuild -version
           
           # Check if the Xcode project file exists
           if [ -d "burstphoto.xcodeproj" ]; then
@@ -105,7 +119,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-artifacts
+          name: build-artifacts-${{ matrix.os }}
           path: |
             ~/Library/Developer/Xcode/DerivedData/*/Build/Products/Debug/*.app
             ~/Library/Developer/Xcode/DerivedData/*/Build/Products/Debug/*.framework
@@ -114,14 +128,27 @@ jobs:
       - name: Build Summary
         if: always()
         run: |
-          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Build Summary for ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
           echo "- GUI Build: ${{ steps.build_gui.outputs.gui_success == 'true' && '✅ Success' || '❌ Issues' }}" >> $GITHUB_STEP_SUMMARY
           echo "- CLI Build: ${{ steps.build_cli.outputs.cli_success == 'true' && '✅ Success' || '❌ Issues' }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
           echo "Download the artifacts to examine the build output in detail." >> $GITHUB_STEP_SUMMARY
+      
+      - name: Notify on Failure
+        if: failure()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_CHANNEL: ci-alerts
+          SLACK_COLOR: danger
+          SLACK_ICON: https://github.com/rtCamp.png?size=48
+          SLACK_TITLE: "❌ CI build failed"
+          SLACK_MESSAGE: "Build failed for ${{ github.repository }} on ${{ matrix.os }}. Check the logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          SLACK_FOOTER: "Action triggered by ${{ github.actor }}"
+          MSG_MINIMAL: false
 
-  # This job runs only on tags to create GitHub releases
+  # Job to gather all the build artifacts and create release
   release:
     needs: build
     if: startsWith(github.ref, 'refs/tags/')
@@ -130,10 +157,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Download build artifacts
+      - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
-          name: build-artifacts
           path: release-artifacts
       
       - name: List artifacts
@@ -149,36 +175,58 @@ jobs:
           release_name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false
+          body: |
+            # Release ${{ github.ref_name }}
+            
+            Automated release by GitHub Actions.
+            
+            ## Included Builds
+            - macOS 14 (Sonoma) build
+            - macOS 13 (Ventura) build
+            
+            ## How to Install
+            Download the package for your macOS version and unzip it to install.
       
       - name: Zip artifacts
         run: |
+          mkdir -p release-packages
+          
+          # Create separate zip archives for each macOS version
           cd release-artifacts
-          # Create separate zip archives for GUI and CLI builds
-          find . -name "*.app" -path "*gui*" -o -name "*.app" | xargs -I {} zip -r ../burstphoto-gui-${{ github.ref_name }}.zip {}
-          find . -name "*.app" -path "*cli*" -o -name "*.app" | xargs -I {} zip -r ../burstphoto-cli-${{ github.ref_name }}.zip {}
+          
+          for os_dir in *; do
+            if [ -d "$os_dir" ]; then
+              # Create GUI packages
+              find "$os_dir" -name "*.app" -path "*gui*" -o -name "*.app" | \
+                xargs -I {} zip -r "../release-packages/burstphoto-gui-${{ github.ref_name }}-${os_dir}.zip" {}
+              
+              # Create CLI packages
+              find "$os_dir" -name "*.app" -path "*cli*" -o -name "*.app" | \
+                xargs -I {} zip -r "../release-packages/burstphoto-cli-${{ github.ref_name }}-${os_dir}.zip" {}
+            fi
+          done
+          
+          cd ..
+          ls -la release-packages/
       
-      - name: Upload GUI Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./burstphoto-gui-${{ github.ref_name }}.zip
-          asset_name: burstphoto-gui-${{ github.ref_name }}.zip
-          asset_content_type: application/zip
-      
-      - name: Upload CLI Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./burstphoto-cli-${{ github.ref_name }}.zip
-          asset_name: burstphoto-cli-${{ github.ref_name }}.zip
-          asset_content_type: application/zip
+      - name: Upload Release Assets
+        run: |
+          for asset_path in release-packages/*.zip; do
+            asset_name=$(basename "$asset_path")
+            
+            echo "Uploading $asset_name to release..."
+            
+            curl \
+              -X POST \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Content-Type: application/zip" \
+              --data-binary @"$asset_path" \
+              "${{ steps.create_release.outputs.upload_url }}?name=$asset_name"
+          done
 
   # This job creates a status badge for the README
   update-badge:
+    needs: build
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
