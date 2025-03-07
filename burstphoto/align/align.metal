@@ -88,6 +88,7 @@ kernel void avg_pool_normalization(texture2d<float, access::read> in_texture [[t
     int y0 = gid.y * scale;
     
     float const norm_factors[4] = {factor_red, factor_green, factor_green, factor_blue};
+    // QUESTION: Is it safe to assume scale==2 here for norm_factors indexing?
     float const mean_factor = 0.25f*(norm_factors[0]+norm_factors[1]+norm_factors[2]+norm_factors[3]);
      
     for (int dx = 0; dx < scale; dx++) {
@@ -223,6 +224,7 @@ kernel void compute_tile_differences25(texture2d<half, access::read> ref_texture
     float diff_abs0, diff_abs1;
     half tmp_ref0, tmp_ref1;
     half tmp_comp[5*68];
+    // QUESTION: Is the fixed size buffer 'tmp_comp' (of size 5*68) sufficient for all tile sizes?
     
     // loop over first 4 rows of comp_texture
     for (int dy = -2; dy < +2; dy++) {
@@ -600,6 +602,7 @@ kernel void correct_upsampling_error(texture2d<half, access::read> ref_texture [
         float sum_v[3] = {0.0f, 0.0f, 0.0f};
         
         // loop over all rows
+        // QUESTION: Is the loop increment '64/tile_size' safe for all possible tile sizes?
         for (int dy = 0; dy < tile_size; dy += 64/tile_size) {
             
             // copy 64/tile_size rows into temp vector
@@ -667,6 +670,7 @@ kernel void correct_upsampling_error(texture2d<half, access::read> ref_texture [
     }
     
     // store corrected (best) alignment
+    // QUESTION: Should we be using logical && instead of bitwise & in the following condition?
     if(diff[0] < diff[1] & diff[0] < diff[2]) {
         prev_alignment_corrected.write(prev_align0, gid);
         
@@ -794,7 +798,9 @@ kernel void warp_texture_bayer(texture2d<float, access::read> in_texture [[textu
     total_weight += weight_x*weight_y;
     
     // write output pixel
-    out_texture.write(pixel_value/total_weight, gid);
+    // QUESTION: Should we check that total_weight is non-zero to avoid division by zero?
+    float out_intensity = pixel_value / total_weight;
+    out_texture.write(out_intensity, gid);
 }
 
 
@@ -883,6 +889,7 @@ kernel void warp_texture_xtrans(texture2d<float, access::read> in_texture [[text
     }
     
     // write output pixel
+    // QUESTION: Should we check that total_weight is non-zero to avoid division by zero?
     float out_intensity = total_intensity / total_weight;
     out_texture.write(out_intensity, uint2(x1_pix, y1_pix));
 }
