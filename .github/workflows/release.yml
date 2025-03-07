@@ -1,0 +1,141 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  # Job to gather all the build artifacts and create release
+  release:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history and tags for release notes generation
+      
+      - name: Set up Swift environment
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Developer/Xcode/DerivedData
+            ~/.swiftpm
+          key: ${{ runner.os }}-spm-deriveddata-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-deriveddata-
+      
+      - name: Build for Release
+        run: |
+          # Set up environment variables
+          export XCODE_SCHEME_GUI=gui
+          export XCODE_SCHEME_CLI=cli
+          export XCODE_PROJECT=burstphoto.xcodeproj
+          
+          # Build GUI
+          echo "Building GUI for release..."
+          xcodebuild -project $XCODE_PROJECT -scheme $XCODE_SCHEME_GUI -configuration Release build
+          
+          # Build CLI
+          echo "Building CLI for release..."
+          xcodebuild -project $XCODE_PROJECT -scheme $XCODE_SCHEME_CLI -configuration Release build
+          
+          # Find and list built products
+          echo "Built release products:"
+          find ~/Library/Developer/Xcode/DerivedData -path "*/Build/Products/Release/*.app" -o -path "*/Build/Products/Release/*.framework"
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          # Get the previous tag
+          previous_tag=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          if [ -z "$previous_tag" ]; then
+            echo "No previous tag found, including all changes"
+            git log --pretty=format:"- %s (%h)" > RELEASE_NOTES.md
+          else
+            echo "Previous tag: $previous_tag"
+            echo "Changes since $previous_tag:" > RELEASE_NOTES.md
+            git log --pretty=format:"- %s (%h)" $previous_tag..HEAD >> RELEASE_NOTES.md
+          fi
+          
+          # Add a header
+          echo "# Release ${{ github.ref_name }}" > FULL_RELEASE_NOTES.md
+          echo "" >> FULL_RELEASE_NOTES.md
+          echo "Automated release by GitHub Actions." >> FULL_RELEASE_NOTES.md
+          echo "" >> FULL_RELEASE_NOTES.md
+          
+          echo "## Included Builds" >> FULL_RELEASE_NOTES.md
+          echo "- macOS Release build" >> FULL_RELEASE_NOTES.md
+          echo "" >> FULL_RELEASE_NOTES.md
+          
+          echo "## How to Install" >> FULL_RELEASE_NOTES.md
+          echo "Download the package for your macOS version and unzip it to install." >> FULL_RELEASE_NOTES.md
+          echo "" >> FULL_RELEASE_NOTES.md
+          
+          echo "## Changes in this release" >> FULL_RELEASE_NOTES.md
+          cat RELEASE_NOTES.md >> FULL_RELEASE_NOTES.md
+          
+          # Save the contents to the output
+          notes="$(cat FULL_RELEASE_NOTES.md)"
+          notes="${notes//'%'/'%25'}"
+          notes="${notes//$'\n'/'%0A'}"
+          notes="${notes//$'\r'/'%0D'}"
+          echo "notes=$notes" >> $GITHUB_OUTPUT
+      
+      - name: Create Release Packages
+        run: |
+          mkdir -p release-packages
+          
+          # Create package for GUI app
+          echo "Creating GUI package..."
+          find ~/Library/Developer/Xcode/DerivedData -path "*/Build/Products/Release/*.app" | \
+            xargs -I {} zip -r "release-packages/burstphoto-gui-${{ github.ref_name }}.zip" {}
+          
+          # Create package for CLI
+          echo "Creating CLI package..."
+          find ~/Library/Developer/Xcode/DerivedData -path "*/Build/Products/Release/*" -name "*cli*" | \
+            xargs -I {} zip -r "release-packages/burstphoto-cli-${{ github.ref_name }}.zip" {}
+          
+          # List packages
+          echo "Created packages:"
+          ls -la release-packages/
+      
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          body: ${{ steps.release_notes.outputs.notes }}
+      
+      - name: Upload Release Assets
+        run: |
+          for asset_path in release-packages/*.zip; do
+            asset_name=$(basename "$asset_path")
+            
+            echo "Uploading $asset_name to release..."
+            
+            curl \
+              -X POST \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Content-Type: application/zip" \
+              --data-binary @"$asset_path" \
+              "${{ steps.create_release.outputs.upload_url }}?name=$asset_name"
+          done
+          
+      - name: Notify on Release
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_CHANNEL: releases
+          SLACK_COLOR: good
+          SLACK_ICON: https://github.com/rtCamp.png?size=48
+          SLACK_TITLE: "🚀 New Release: ${{ github.ref_name }}"
+          SLACK_MESSAGE: "Version ${{ github.ref_name }} has been released. [View release notes](https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }})"
+          SLACK_FOOTER: "Released by GitHub Actions"
+          MSG_MINIMAL: false 
