@@ -26,6 +26,56 @@ jobs:
           # Specify any additional Swift security queries
           queries: security-and-quality
       
+      - name: Setup Swift environment
+        uses: swift-actions/setup-swift@v1
+        with:
+          swift-version: "5.9"
+      
+      - name: Build Swift code for CodeQL
+        run: |
+          echo "Building Swift code for CodeQL analysis..."
+          
+          # Determine build system - SPM or Xcode
+          if [ -f "Package.swift" ]; then
+            echo "Building with Swift Package Manager"
+            swift build --build-tests
+          elif [ -f "$(find . -name "*.xcodeproj" -maxdepth 2 | head -n 1)" ]; then
+            echo "Building with xcodebuild"
+            
+            # Install xcpretty for cleaner logs
+            gem install xcpretty
+            
+            # Find the main project file
+            XCODEPROJ=$(find . -name "*.xcodeproj" -maxdepth 2 | head -n 1)
+            
+            if [ -n "$XCODEPROJ" ]; then
+              # List available schemes
+              xcodebuild -project "$XCODEPROJ" -list
+              
+              # Get the project name without extension
+              PROJECT_NAME=$(basename "$XCODEPROJ" .xcodeproj)
+              
+              # Build using the project name as the scheme
+              # Disable code signing for CI
+              xcodebuild clean build \
+                -project "$XCODEPROJ" \
+                -scheme "$PROJECT_NAME" \
+                -destination 'platform=macOS' \
+                CODE_SIGNING_REQUIRED=NO \
+                CODE_SIGN_IDENTITY="" | xcpretty
+            else
+              echo "Warning: Could not find Xcode project, building without explicit project."
+              # Try building using default scheme
+              xcodebuild clean build \
+                CODE_SIGNING_REQUIRED=NO \
+                CODE_SIGN_IDENTITY="" | xcpretty
+            fi
+          else
+            echo "Warning: No Swift package or Xcode project found."
+            # Compile individual Swift files to help CodeQL
+            find . -name "*.swift" -type f -exec swiftc -emit-object {} \; || true
+          fi
+      
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v2
         with:
@@ -161,4 +211,51 @@ jobs:
           SLACK_TITLE: "📊 Weekly Dependency Audit"
           SLACK_MESSAGE: "Weekly dependency check completed for ${{ github.repository }}. Check the logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           SLACK_FOOTER: "Automated weekly check"
-          MSG_MINIMAL: false 
+          MSG_MINIMAL: false
+
+  # Add macOS-specific security scan
+  macos-security-scan:
+    runs-on: macos-latest
+    needs: security-scan
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Swift
+        uses: swift-actions/setup-swift@v1
+        with:
+          swift-version: "5.9"
+      
+      - name: Run macOS security scan
+        uses: ./.github/actions/security-scan-macos
+        id: security-scan
+        with:
+          project-path: 'burstphoto.xcodeproj'
+          scheme: 'gui'
+          report-path: 'macos-security-reports'
+      
+      - name: Upload security reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-security-reports
+          path: macos-security-reports/
+          retention-days: 30
+      
+      - name: Add scan results to summary
+        run: |
+          echo "## macOS Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "macos-security-reports/summary.md" ]; then
+            cat macos-security-reports/summary.md >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Summary report not found" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Check issues
+        if: steps.security-scan.outputs.issues-found == 'true'
+        run: |
+          echo "::warning::Found potential security issues in macOS code. See the artifact 'macos-security-reports' for details."
+          # Don't fail the build, just warn about issues
+          # exit 1 

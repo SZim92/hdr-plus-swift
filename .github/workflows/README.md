@@ -26,6 +26,7 @@ The CI/CD system is organized into multiple specialized workflows:
 | [release-candidate.yml](release-candidate.yml) | Release candidate testing | Manual only |
 | [performance-benchmarks.yml](performance-benchmarks.yml) | Performance regression detection | Push to main, PRs, weekly schedule, manual |
 | [cleanup-artifacts.yml](cleanup-artifacts.yml) | Clean up old workflow artifacts | Weekly schedule, manual |
+| [binary-size.yml](binary-size.yml) | Binary size analysis and tracking | Push to main, PRs, manual |
 
 ## Reusable Components
 
@@ -43,6 +44,8 @@ The CI system uses several reusable components:
 - [load-config](../.github/actions/load-config) - Loads shared configuration values from YAML
 - [build-cache](../.github/actions/build-cache) - Advanced caching strategy for Swift/Xcode builds
 - [run-benchmarks](../.github/actions/run-benchmarks) - Runs and analyzes performance benchmarks
+- [setup-macos-build](../.github/actions/setup-macos-build) - Configures macOS build environment with code signing settings
+- [security-scan-macos](../.github/actions/security-scan-macos) - Runs security checks specifically for macOS Swift code
 
 ### Local Development Tools
 - [local-validate.sh](../.github/scripts/local-validate.sh) - Script for validating changes locally
@@ -115,6 +118,32 @@ Clean up old workflow artifacts to save storage space:
 gh workflow run cleanup-artifacts.yml -f days_old=30 -f dry_run=true
 ```
 
+### Binary Size Analysis
+
+Track and analyze binary size of your app builds:
+
+```
+gh workflow run binary-size.yml
+```
+
+This will:
+- Build your app in Release configuration
+- Calculate app bundle and executable sizes
+- Check against defined thresholds
+- Report detailed size information
+
+### Enhanced Security Scanning
+
+The security workflow now includes:
+- CodeQL analysis with Swift support
+- macOS-specific security checks using SwiftLint
+- Detection of insecure API usage
+- Scanning for hardcoded credentials
+
+```
+gh workflow run security.yml
+```
+
 ## Build Optimization
 
 The CI system includes several optimizations to improve build performance:
@@ -130,6 +159,12 @@ Jobs run in parallel where possible, with dependencies declared where needed.
 
 ### Conditional Execution
 Many jobs only run when certain conditions are met, avoiding unnecessary work.
+
+### Code Signing in CI
+The `setup-macos-build` action handles code signing configuration:
+- Disables code signing for CI builds by default
+- Supports actual code signing with team ID when needed
+- Creates custom xcconfig settings for disabling code signing
 
 ## How to Use
 

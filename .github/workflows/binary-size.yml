@@ -1,0 +1,139 @@
+name: Binary Size Check
+
+on:
+  pull_request:
+    paths:
+      - '**.swift'
+      - '**.h'
+      - '**.m'
+      - '**.mm'
+      - '**/*.xcodeproj/**'
+      - 'Package.swift'
+      - '.github/workflows/binary-size.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - '**.swift'
+      - '**.h'
+      - '**.m'
+      - '**.mm'
+      - '**/*.xcodeproj/**'
+      - 'Package.swift'
+      - '.github/workflows/binary-size.yml'
+  workflow_dispatch:
+
+jobs:
+  check-size:
+    name: Check Binary Size
+    runs-on: macos-latest
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      
+      - name: Setup macOS Build Environment
+        uses: ./.github/actions/setup-macos-build
+        with:
+          disable-signing: true
+      
+      - name: Set up Swift
+        uses: ./.github/actions/setup-swift
+        with:
+          xcode-version: latest
+      
+      - name: Build for size analysis
+        run: |
+          echo "Building GUI for size analysis..."
+          
+          # Use the xcconfig file to disable code signing
+          if [ "$DISABLE_SIGNING" == "true" ] && [ -n "$XCCONFIG_PATH" ]; then
+            echo "Building with code signing disabled via xcconfig: $XCCONFIG_PATH"
+            xcodebuild -project burstphoto.xcodeproj -scheme gui -configuration Release build CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS= CODE_SIGNING_ALLOWED=NO
+          else
+            xcodebuild -project burstphoto.xcodeproj -scheme gui -configuration Release build
+          fi
+      
+      - name: Analyze binary size
+        id: size-analysis
+        run: |
+          # Find the built app bundle
+          APP_PATH=$(find $RUNNER_TEMP -name "*.app" 2>/dev/null || find ~/Library/Developer/Xcode/DerivedData -name "*.app" 2>/dev/null || echo "")
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "Searching in default build location..."
+            APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData/burstphoto-*/Build/Products/Release -name "*.app" 2>/dev/null || echo "")
+          fi
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: Could not find built app bundle"
+            exit 1
+          fi
+          
+          echo "Found app at: $APP_PATH"
+          
+          # Get app size
+          APP_SIZE=$(du -sk "$APP_PATH" | cut -f1)
+          APP_SIZE_MB=$(echo "scale=2; $APP_SIZE/1024" | bc)
+          
+          echo "App size: $APP_SIZE_MB MB"
+          
+          # Get executable size
+          EXECUTABLE=$(find "$APP_PATH" -name "*" -type f -perm +111 | head -1)
+          if [ -n "$EXECUTABLE" ]; then
+            EXEC_SIZE=$(du -sk "$EXECUTABLE" | cut -f1)
+            EXEC_SIZE_KB=$EXEC_SIZE
+            echo "Executable size: $EXEC_SIZE_KB KB"
+          else
+            echo "Warning: Could not find executable in app bundle"
+          fi
+          
+          # Output sizes to summary
+          echo "## Binary Size Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| App Bundle | $APP_SIZE_MB MB |" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -n "$EXECUTABLE" ]; then
+            echo "| Main Executable | $EXEC_SIZE_KB KB |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Save size for threshold check
+          echo "app_size=$APP_SIZE" >> $GITHUB_OUTPUT
+          
+          # Optional: Additional analysis of binary size components
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### App Bundle Contents" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Path | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|------|" >> $GITHUB_STEP_SUMMARY
+          
+          find "$APP_PATH" -type f -name "*.dylib" -o -name "*.framework" | while read file; do
+            FILE_SIZE=$(du -sk "$file" | cut -f1)
+            FILE_PATH=$(echo "$file" | sed "s|$APP_PATH/||")
+            echo "| $FILE_PATH | $FILE_SIZE KB |" >> $GITHUB_STEP_SUMMARY
+          done
+      
+      - name: Check size threshold
+        run: |
+          MAX_SIZE_KB=100000  # 100MB threshold, adjust as needed
+          CURRENT_SIZE=${{ steps.size-analysis.outputs.app_size }}
+          
+          echo "Current app size: $CURRENT_SIZE KB"
+          echo "Maximum allowed size: $MAX_SIZE_KB KB"
+          
+          if [ $CURRENT_SIZE -gt $MAX_SIZE_KB ]; then
+            echo "::error::App size ($CURRENT_SIZE KB) exceeds maximum allowed size ($MAX_SIZE_KB KB)"
+            exit 1
+          else
+            echo "App size is within acceptable limits"
+          fi
+      
+      - name: Compare with previous build
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "Comparing app size with base branch..."
+          # This would ideally compare with a previous build size stored as an artifact
+          # For now, we just report the current size
+          echo "Note: Size comparison with previous build not implemented yet." 
