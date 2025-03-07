@@ -1,0 +1,215 @@
+name: Cross-Platform Compatibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform_filter:
+        description: 'Filter for specific platforms to test (comma-separated)'
+        required: false
+        default: 'all'
+  schedule:
+    - cron: '0 0 * * 1'  # Run every Monday at midnight UTC
+  push:
+    branches:
+      - main
+    paths:
+      - '**.swift'
+      - 'Package.swift'
+      - '.github/workflows/cross-platform.yml'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '**.swift'
+      - 'Package.swift'
+      - '.github/workflows/cross-platform.yml'
+
+jobs:
+  matrix-setup:
+    name: Set up test matrix
+    runs-on: ubuntu-latest
+    outputs:
+      platforms: ${{ steps.set-matrix.outputs.platforms }}
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      
+      - name: Set up matrix
+        id: set-matrix
+        run: |
+          PLATFORM_FILTER="${{ github.event.inputs.platform_filter }}"
+          
+          # Define all supported platforms
+          if [ "$PLATFORM_FILTER" = "all" ] || [ -z "$PLATFORM_FILTER" ]; then
+            PLATFORMS=$(cat <<EOF
+            [
+              {"os": "macos-14", "xcode": "15.2", "displayName": "macOS Sonoma (Apple Silicon)"},
+              {"os": "macos-13", "xcode": "15.0", "displayName": "macOS Ventura (Intel)"},
+              {"os": "macos-12", "xcode": "14.2", "displayName": "macOS Monterey"},
+              {"os": "ubuntu-latest", "swift": "5.9", "displayName": "Ubuntu Latest + Swift 5.9"},
+              {"os": "ubuntu-20.04", "swift": "5.8", "displayName": "Ubuntu 20.04 + Swift 5.8"}
+            ]
+            EOF
+            )
+          else
+            # Filter platforms based on input
+            ALL_PLATFORMS=$(cat <<EOF
+            [
+              {"os": "macos-14", "xcode": "15.2", "displayName": "macOS Sonoma (Apple Silicon)"},
+              {"os": "macos-13", "xcode": "15.0", "displayName": "macOS Ventura (Intel)"},
+              {"os": "macos-12", "xcode": "14.2", "displayName": "macOS Monterey"},
+              {"os": "ubuntu-latest", "swift": "5.9", "displayName": "Ubuntu Latest + Swift 5.9"},
+              {"os": "ubuntu-20.04", "swift": "5.8", "displayName": "Ubuntu 20.04 + Swift 5.8"}
+            ]
+            EOF
+            )
+            
+            # Turn comma-separated list into array and filter the platforms
+            IFS=',' read -ra FILTER_ARRAY <<< "$PLATFORM_FILTER"
+            
+            # Start building the filtered array
+            PLATFORMS="["
+            
+            for platform in "${FILTER_ARRAY[@]}"; do
+              case "$platform" in
+                macos-14|sonoma)
+                  PLATFORMS="$PLATFORMS{\"os\": \"macos-14\", \"xcode\": \"15.2\", \"displayName\": \"macOS Sonoma (Apple Silicon)\"},"
+                  ;;
+                macos-13|ventura)
+                  PLATFORMS="$PLATFORMS{\"os\": \"macos-13\", \"xcode\": \"15.0\", \"displayName\": \"macOS Ventura (Intel)\"},"
+                  ;;
+                macos-12|monterey)
+                  PLATFORMS="$PLATFORMS{\"os\": \"macos-12\", \"xcode\": \"14.2\", \"displayName\": \"macOS Monterey\"},"
+                  ;;
+                ubuntu-latest|ubuntu)
+                  PLATFORMS="$PLATFORMS{\"os\": \"ubuntu-latest\", \"swift\": \"5.9\", \"displayName\": \"Ubuntu Latest + Swift 5.9\"},"
+                  ;;
+                ubuntu-20.04)
+                  PLATFORMS="$PLATFORMS{\"os\": \"ubuntu-20.04\", \"swift\": \"5.8\", \"displayName\": \"Ubuntu 20.04 + Swift 5.8\"},"
+                  ;;
+              esac
+            done
+            
+            # Remove trailing comma and close array
+            PLATFORMS="${PLATFORMS%,}]"
+            
+            # If empty, use all platforms
+            if [ "$PLATFORMS" = "[]" ]; then
+              PLATFORMS="$ALL_PLATFORMS"
+            fi
+          fi
+          
+          echo "platforms=$PLATFORMS" >> $GITHUB_OUTPUT
+          echo "Using platforms: $PLATFORMS"
+
+  test-cross-platform:
+    name: Test on ${{ matrix.platform.displayName }}
+    needs: matrix-setup
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJson(needs.matrix-setup.outputs.platforms) }}
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      
+      # macOS-specific setup with Xcode
+      - name: Set up Xcode
+        if: startsWith(matrix.platform.os, 'macos')
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ matrix.platform.xcode }}
+      
+      # Ubuntu-specific setup with Swift
+      - name: Set up Swift
+        if: startsWith(matrix.platform.os, 'ubuntu')
+        uses: swift-actions/setup-swift@v1
+        with:
+          swift-version: ${{ matrix.platform.swift }}
+      
+      # Common setup for all platforms
+      - name: Check Swift version
+        run: swift --version
+      
+      # Cache dependencies
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ matrix.platform.os }}-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-${{ matrix.platform.os }}-
+      
+      # Build and test
+      - name: Build package
+        run: swift build
+      
+      - name: Run tests
+        run: swift test
+      
+      # Platform-specific tests can be added here
+      - name: Run platform-specific tests
+        if: startsWith(matrix.platform.os, 'macos')
+        run: |
+          echo "Running macOS-specific tests on ${{ matrix.platform.displayName }}"
+          # Add your macOS-specific test commands here
+      
+      # Collect test results
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.platform.os }}
+          path: .build/*/test-results
+          retention-days: 7
+  
+  summarize-results:
+    name: Summarize test results
+    needs: test-cross-platform
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: test-results
+      
+      - name: Display structure of downloaded files
+        run: ls -R test-results
+      
+      - name: Generate summary
+        run: |
+          echo "# Cross-Platform Test Results 📊" > $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | Status | Test Count | Failures |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|------------|----------|" >> $GITHUB_STEP_SUMMARY
+          
+          for dir in test-results/*; do
+            platform=$(basename "$dir")
+            platform=${platform#test-results-}
+            
+            if [ -d "$dir" ] && [ -n "$(ls -A "$dir" 2>/dev/null)" ]; then
+              status="✅ Passed"
+              test_count="N/A"
+              failures="0"
+              
+              # Process test results (simplified example)
+              # In a real scenario, you would parse XML or JSON test reports
+              if grep -q "FAILED" "$dir"/*; then
+                status="❌ Failed"
+                failures=$(grep -c "FAILED" "$dir"/*)
+              fi
+              
+              test_count=$(grep -c "test" "$dir"/* || echo "N/A")
+              
+              echo "| $platform | $status | $test_count | $failures |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| $platform | ⚠️ No Results | N/A | N/A |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done 
