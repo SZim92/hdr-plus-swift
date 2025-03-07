@@ -8,12 +8,12 @@
 import SwiftUI
 import AppKit
 
-/**
- * Application settings and user preferences management
+/*
+ * AppSettings - User Preferences and Application Settings
  *
- * This class serves as the central store for user preferences, persisting them
- * using the @AppStorage property wrapper which stores values in UserDefaults.
- * These settings control various aspects of the photo processing algorithms.
+ * This class encapsulates user-configurable settings for the Burst Photo application.
+ * It leverages the @AppStorage property wrapper to persist settings in UserDefaults,
+ * influencing photo processing parameters and user interface behaviors.
  */
 class AppSettings: ObservableObject {
     @AppStorage("tile_size") var tile_size: String = "Medium"
@@ -24,11 +24,10 @@ class AppSettings: ObservableObject {
     @AppStorage("output_bit_depth") var output_bit_depth: String = "Native"
 }
 
-/**
- * Application delegate handling lifecycle events and application-level behaviors
- *
- * This class manages application startup, shutdown, and window behaviors,
- * including directory setup for output files and temporary storage.
+/*
+ * AppDelegate - Application Lifecycle Management
+ * Handles application lifecycle events including launching, termination, and resource management.
+ * Performs essential setup like initializing directories and cleaning up temporary files during termination.
  */
 class AppDelegate: NSObject, NSApplicationDelegate {
     
@@ -85,11 +84,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/**
- * Extension adding window resizability control based on macOS version
- *
- * This extension enables consistent window behavior across different
- * macOS versions by adapting to API changes in macOS 13+.
+/*
+ * Scene Extension
+ * Provides additional window configuration utilities for the application.
+ * Includes functionality to disable window resizing and full-screen mode to ensure a consistent UI layout.
  */
 extension Scene {
     // disables window resizability on macos 13
@@ -103,15 +101,13 @@ extension Scene {
     }
 }
 
-/**
- * Main application structure defining the app's entry point and UI organization
+/*
+ * burstphotoApp - Main Application Entry Point
  *
- * This structure:
- * - Initializes the application delegate
- * - Creates the main window and view hierarchy
- * - Configures window styling and behavior
- * - Sets up application menus
- * - Manages XMP SDK initialization and termination
+ * This struct is the primary entry point for the Burst Photo application. It configures the main window,
+ * sets up the SwiftUI view hierarchy, and bridges necessary AppKit functionalities for window
+ * management and custom command handling. This struct integrates the user settings and application
+ * lifecycle events to provide a cohesive and robust user experience.
  */
 @main
 struct burstphotoApp: App {
@@ -140,11 +136,10 @@ struct burstphotoApp: App {
         }
     }
     
-    /**
-     * Disables window resizing and full-screen functionality
-     *
-     * This method is called when the window updates to ensure consistent
-     * window behavior by hiding the zoom button and preventing full-screen mode.
+    /*
+     * disable_window_resizing
+     * Iterates through application windows to disable resizing and full-screen modes.
+     * This function ensures that the main application window maintains its intended fixed dimensions.
      */
     func disable_window_resizing() {
         for window in NSApplication.shared.windows {
