@@ -13,6 +13,8 @@ jobs:
   # Security scanning for vulnerabilities and best practices
   security-scan:
     runs-on: ubuntu-22.04
+    container:
+      image: swift:5.9-jammy
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -26,10 +28,10 @@ jobs:
           # Specify any additional Swift security queries
           queries: security-and-quality
       
-      - name: Setup Swift environment
-        uses: ./.github/actions/setup-swift-ubuntu
-        with:
-          swift-version: "5.9"
+      - name: Verify Swift installation
+        run: |
+          echo "Verifying Swift installation..."
+          swift --version
       
       - name: Build Swift code for CodeQL
         run: |
@@ -223,9 +225,12 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Set up Swift
-        uses: ./.github/actions/setup-swift
-        with:
-          xcode-version: "latest"
+        run: |
+          echo "Setting up Swift on macOS..."
+          swift --version
+          
+          # Disable code signing for the security scan
+          defaults write com.apple.dt.Xcode IDESkipCodeSigningVerification -bool YES
       
       - name: Run macOS security scan
         uses: ./.github/actions/security-scan-macos

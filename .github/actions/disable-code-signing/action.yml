@@ -17,65 +17,27 @@ runs:
         echo "DEVELOPMENT_TEAM = " >> ci_signing_disabled.xcconfig
         echo "PROVISIONING_PROFILE_SPECIFIER = " >> ci_signing_disabled.xcconfig
         echo "Created xcconfig to disable code signing at: $(pwd)/ci_signing_disabled.xcconfig"
-    
-    - name: Create pre-build script for code signing override
+
+    - name: Modify Xcode project settings
       shell: bash
       run: |
-        echo "Creating pre-build script to forcefully disable code signing..."
-        cat > disable_codesign.sh << 'EOF'
-#!/bin/bash
-# This script forcefully disables code signing for Xcode builds
-
-# Check if we're running on a CI environment
-if [[ -n "$CI" || -n "$GITHUB_ACTIONS" ]]; then
-  echo "Running in CI environment, disabling code signing..."
-  
-  # Create a directory for scripts if it doesn't exist
-  mkdir -p ~/.xcode-hooks
-  
-  # Create a script to modify project settings before build
-  cat > ~/.xcode-hooks/pre-build.sh << 'SCRIPT'
-#!/bin/bash
-echo "Pre-build hook: Disabling code signing..."
-
-# This will be the project file that's being built
-PROJECT_FILE="$1"
-
-# Apply code signing settings via xcodebuild
-if [[ -n "$PROJECT_FILE" && -f "$PROJECT_FILE" ]]; then
-  echo "Disabling code signing for project: $PROJECT_FILE"
-  xcrun xcodebuild -project "$PROJECT_FILE" CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS= CODE_SIGNING_ALLOWED=NO DEVELOPMENT_TEAM= build -dry-run
-fi
-
-# Success
-exit 0
-SCRIPT
-  
-  chmod +x ~/.xcode-hooks/pre-build.sh
-  
-  # Tell Xcode to use our hook
-  XCODE_PLIST="$HOME/Library/Preferences/com.apple.dt.Xcode.plist"
-  
-  # Add the hook to Xcode preferences
-  if [ -f "$XCODE_PLIST" ]; then
-    /usr/libexec/PlistBuddy -c "Delete :DVTPreBuildScripts" "$XCODE_PLIST" 2>/dev/null || true
-    /usr/libexec/PlistBuddy -c "Add :DVTPreBuildScripts array" "$XCODE_PLIST"
-    /usr/libexec/PlistBuddy -c "Add :DVTPreBuildScripts:0 string $HOME/.xcode-hooks/pre-build.sh" "$XCODE_PLIST"
-  else
-    echo "Warning: Xcode preferences file not found at $XCODE_PLIST"
-  fi
-  
-  echo "Code signing should now be disabled for all Xcode builds"
-else
-  echo "Not running in CI environment, skipping code signing disable"
-fi
-EOF
+        echo "Setting up to override code signing requirements..."
         
-        chmod +x disable_codesign.sh
-        ./disable_codesign.sh
+        # Create directory for Xcode-specific scripts if needed
+        mkdir -p ~/.xcode-scripts
         
-        echo "Pre-build script created and executed to ensure code signing is disabled"
-    
+        # Create a simple script to directly modify project settings
+        echo '#!/bin/bash' > ~/.xcode-scripts/disable_codesign.sh
+        echo 'echo "Disabling code signing for Xcode builds"' >> ~/.xcode-scripts/disable_codesign.sh
+        echo 'defaults write com.apple.dt.Xcode IDESkipCodeSigningVerification -bool YES' >> ~/.xcode-scripts/disable_codesign.sh
+        echo 'defaults write com.apple.dt.Xcode IDESkipMacroValidation -bool YES' >> ~/.xcode-scripts/disable_codesign.sh
+        
+        # Make it executable
+        chmod +x ~/.xcode-scripts/disable_codesign.sh
+        
+        # Run the script
+        ~/.xcode-scripts/disable_codesign.sh
+
     - name: Export build environment variables
       shell: bash
       run: |
