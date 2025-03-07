@@ -44,47 +44,58 @@ jobs:
         run: |
           echo "Building GUI for size analysis..."
           
-          # Create a temporary project-specific override xcconfig file
-          echo "CODE_SIGN_IDENTITY = -" > disable_signing_override.xcconfig
-          echo "CODE_SIGNING_REQUIRED = NO" >> disable_signing_override.xcconfig
-          echo "CODE_SIGN_ENTITLEMENTS = " >> disable_signing_override.xcconfig
-          echo "CODE_SIGNING_ALLOWED = NO" >> disable_signing_override.xcconfig
-          echo "DEVELOPMENT_TEAM = " >> disable_signing_override.xcconfig
+          # Override system defaults directly
+          defaults write com.apple.dt.Xcode IDESkipCodeSigningVerification -bool YES
           
-          # Try building with various code signing disable approaches
-          echo "Approach 1: Using xcconfig file with code signing flags"
-          xcodebuild -project burstphoto.xcodeproj -scheme gui -configuration Release build \
-            -xcconfig disable_signing_override.xcconfig \
+          # Try a direct build with code signing fully disabled
+          echo "Building with code signing fully disabled..."
+          
+          xcrun xcodebuild \
+            -project burstphoto.xcodeproj \
+            -scheme gui \
+            -configuration Release \
+            -allowProvisioningUpdates \
             CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_STYLE=Manual \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_ENTITLEMENTS= \
             CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM= \
-            PROVISIONING_PROFILE_SPECIFIER= || true
+            ENABLE_BITCODE=NO \
+            build || true
           
-          # If the first approach failed, try an alternative approach
+          # If that failed, try without code signing flags but with skip code signing
           if [ $? -ne 0 ]; then
-            echo "Approach 2: Using build settings to disable code signing"
-            xcodebuild -project burstphoto.xcodeproj -scheme gui -configuration Release \
-              BUILD_LIBRARIES_FOR_DISTRIBUTION=YES \
-              ENABLE_BITCODE=NO \
-              OTHER_CODE_SIGN_FLAGS="--deep" \
-              CODE_SIGN_STYLE=Manual \
-              CODE_SIGN_IDENTITY=- \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
-              DEVELOPMENT_TEAM= \
+            echo "First approach failed, trying alternate approach..."
+            
+            # Create Xcode settings file to skip code signing
+            cat > skip_codesign.xcconfig << EOF
+            CODE_SIGN_IDENTITY = -
+            CODE_SIGNING_REQUIRED = NO
+            CODE_SIGNING_ALLOWED = NO
+            CODE_SIGN_ENTITLEMENTS = 
+            OTHER_CODE_SIGNING_FLAGS = --deep
+            DEVELOPMENT_TEAM = 
+            EOF
+            
+            xcrun xcodebuild \
+              -project burstphoto.xcodeproj \
+              -scheme gui \
+              -configuration Release \
+              -xcconfig skip_codesign.xcconfig \
+              ENABLE_HARDENED_RUNTIME=NO \
               build || true
           fi
           
-          # If previous approaches failed, try with ad-hoc signing
+          # If both failed, try with ad-hoc signing
           if [ $? -ne 0 ]; then
-            echo "Approach 3: Using ad-hoc signing"
-            xcodebuild -project burstphoto.xcodeproj -scheme gui -configuration Release \
+            echo "Alternative approaches failed, trying ad-hoc signing..."
+            
+            xcrun xcodebuild \
+              -project burstphoto.xcodeproj \
+              -scheme gui \
+              -configuration Release \
+              CODE_SIGN_IDENTITY="Apple Development" \
               CODE_SIGN_STYLE=Automatic \
-              CODE_SIGN_IDENTITY="-" \
-              CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
-              OTHER_CODE_SIGN_FLAGS="--deep" \
+              -allowProvisioningUpdates \
               build
           fi
       

@@ -58,37 +58,60 @@ runs:
         # Convert version format (e.g., 22.04 -> 2204)
         UBUNTU_VERSION_NO_DOTS=$(echo "$UBUNTU_VERSION" | tr -d '.')
         
-        SWIFT_PACKAGE="swift-$SWIFT_VERSION-RELEASE-ubuntu$UBUNTU_VERSION_NO_DOTS"
-        SWIFT_URL="https://download.swift.org/swift-$SWIFT_VERSION-release/ubuntu$UBUNTU_VERSION_NO_DOTS/swift-$SWIFT_VERSION-RELEASE/$SWIFT_PACKAGE.tar.gz"
+        # Official Swift toolchain URLs
+        echo "Attempting to download Swift toolchain..."
         
-        echo "Downloading Swift from: $SWIFT_URL"
+        # Try the official Swift.org URL format
+        SWIFT_TOOLCHAIN_URL="https://download.swift.org/swift-${SWIFT_VERSION}-release/ubuntu${UBUNTU_VERSION_NO_DOTS}/swift-${SWIFT_VERSION}-RELEASE/swift-${SWIFT_VERSION}-RELEASE-ubuntu${UBUNTU_VERSION_NO_DOTS}.tar.gz"
+        echo "Trying to download from: ${SWIFT_TOOLCHAIN_URL}"
         
         # Create a directory for the download
         mkdir -p /tmp/swift-download
         cd /tmp/swift-download
         
-        # Download Swift with better error handling
-        echo "Downloading Swift package..."
-        if ! wget --no-verbose "$SWIFT_URL"; then
-          echo "Failed to download Swift from $SWIFT_URL"
-          echo "Trying alternative location..."
+        if ! wget --tries=3 --timeout=30 --no-verbose "${SWIFT_TOOLCHAIN_URL}"; then
+          echo "Failed to download from primary URL, trying alternative versions..."
           
-          # Try toolchains as a fallback
-          ALT_URL="https://download.swift.org/swift-$SWIFT_VERSION-release/ubuntu$UBUNTU_VERSION_NO_DOTS/swift-$SWIFT_VERSION-RELEASE/swift-$SWIFT_VERSION-RELEASE-ubuntu$UBUNTU_VERSION_NO_DOTS.tar.gz"
-          if ! wget --no-verbose "$ALT_URL"; then
-            echo "Failed to download Swift from alternative location as well."
-            echo "Attempting to download latest release instead..."
+          # Try a list of known Swift versions that are available for Ubuntu
+          declare -a SWIFT_VERSIONS=("5.9.2" "5.8.1" "5.7.3" "5.6.3")
+          
+          for version in "${SWIFT_VERSIONS[@]}"; do
+            echo "Trying Swift ${version}..."
+            ALT_URL="https://download.swift.org/swift-${version}-release/ubuntu${UBUNTU_VERSION_NO_DOTS}/swift-${version}-RELEASE/swift-${version}-RELEASE-ubuntu${UBUNTU_VERSION_NO_DOTS}.tar.gz"
             
-            # Try the latest version instead
-            LATEST_URL="https://download.swift.org/swift-5.9.2-release/ubuntu$UBUNTU_VERSION_NO_DOTS/swift-5.9.2-RELEASE/swift-5.9.2-RELEASE-ubuntu$UBUNTU_VERSION_NO_DOTS.tar.gz"
-            if ! wget --no-verbose "$LATEST_URL"; then
-              echo "All download attempts failed. Aborting."
-              exit 1
-            else
-              SWIFT_PACKAGE="swift-5.9.2-RELEASE-ubuntu$UBUNTU_VERSION_NO_DOTS"
+            if wget --tries=3 --timeout=30 --no-verbose "${ALT_URL}"; then
+              echo "Successfully downloaded Swift ${version}"
+              SWIFT_VERSION="${version}"
+              SWIFT_PACKAGE="swift-${version}-RELEASE-ubuntu${UBUNTU_VERSION_NO_DOTS}"
+              break
             fi
+          done
+        else
+          SWIFT_PACKAGE="swift-${SWIFT_VERSION}-RELEASE-ubuntu${UBUNTU_VERSION_NO_DOTS}"
+          echo "Downloaded Swift ${SWIFT_VERSION} successfully"
+        fi
+        
+        # Check if we have a tar.gz file
+        if ! ls *.tar.gz > /dev/null 2>&1; then
+          echo "No Swift package downloaded. Using pre-installed Swift if available."
+          if command -v swift &> /dev/null; then
+            echo "Pre-installed Swift found:"
+            swift --version
+            exit 0
           else
-            echo "Alternative download successful."
+            echo "No Swift package downloaded and no pre-installed Swift found."
+            echo "Attempting to install Swift using apt..."
+            sudo apt-get update
+            sudo apt-get install -y swift
+            
+            if command -v swift &> /dev/null; then
+              echo "Swift installed via apt:"
+              swift --version
+              exit 0
+            else
+              echo "Failed to install Swift. Aborting."
+              exit 1
+            fi
           fi
         fi
         
@@ -97,28 +120,26 @@ runs:
         ls -la
         
         # Extract Swift with better error handling
-        if ! tar xzf $(ls *.tar.gz); then
+        if ! tar xzf $(ls *.tar.gz | head -n 1); then
           echo "Failed to extract Swift package."
           exit 1
         fi
         
         echo "Installing Swift..."
-        # Check if the extracted package exists
-        if [ ! -d "$SWIFT_PACKAGE" ]; then
-          # Try to find any swift directory
-          SWIFT_PACKAGE=$(find . -maxdepth 1 -type d -name "swift-*" | head -n 1)
-          if [ -z "$SWIFT_PACKAGE" ]; then
-            echo "Could not find extracted Swift package directory."
-            exit 1
-          fi
-          # Remove the leading ./
-          SWIFT_PACKAGE=${SWIFT_PACKAGE#./}
+        # Find the extracted package directory
+        EXTRACTED_DIR=$(find . -maxdepth 1 -type d -name "swift-*" | head -n 1)
+        if [ -z "$EXTRACTED_DIR" ]; then
+          echo "Could not find extracted Swift package directory."
+          exit 1
         fi
+        
+        # Remove the leading ./
+        EXTRACTED_DIR=${EXTRACTED_DIR#./}
         
         # Move Swift to /usr/share and update PATH
         echo "Moving Swift to /usr/share/swift..."
         sudo mkdir -p /usr/share/swift
-        sudo cp -R "$SWIFT_PACKAGE"/* /usr/share/swift/
+        sudo cp -R "$EXTRACTED_DIR"/* /usr/share/swift/
         
         echo "/usr/share/swift/usr/bin" >> $GITHUB_PATH
         
