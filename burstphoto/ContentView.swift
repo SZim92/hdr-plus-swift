@@ -1,10 +1,30 @@
+/**
+ * Main User Interface Views for Burst Photo
+ *
+ * This file defines the user interface components and interactions for the Burst Photo application,
+ * including the main view hierarchy, state management, drag-and-drop functionality, processing
+ * progress indicators, and settings controls.
+ */
 import SwiftUI
 
 
+/**
+ * Enum representing the different states of the application
+ *
+ * - main: Initial state, showing the drag & drop area
+ * - processing: Active state when images are being processed
+ * - image_saved: Final state after successful processing
+ */
 enum AppState {
     case main, processing, image_saved
 }
 
+/**
+ * Alert structure for displaying informational and error messages
+ *
+ * Encapsulates all the properties needed to display an alert dialog to the user,
+ * including title, message text, and a dismiss button.
+ */
 struct MyAlert {
     var show: Bool = false
     var title: String?
@@ -13,6 +33,13 @@ struct MyAlert {
 }
 
 
+/**
+ * Primary view container for the application
+ *
+ * This view manages the overall application state and coordinates between the different
+ * view modes (main, processing, image saved). It handles file drop events, alerts,
+ * and communicates with the processing engine.
+ */
 struct ContentView: View {
     @ObservedObject var settings: AppSettings
     @State private var app_state = AppState.main
@@ -89,6 +116,15 @@ struct ContentView: View {
 }
 
 
+/**
+ * Visual indicator for the drag and drop target area
+ *
+ * Displays an icon that visually indicates where users can drop files.
+ * The icon's appearance changes when files are being dragged over the drop area.
+ *
+ * Parameters:
+ *   - drop_active: Binding to a boolean indicating if files are being dragged over the drop area
+ */
 struct DropIcon: View {
     @Binding var drop_active: Bool
     
@@ -103,6 +139,16 @@ struct DropIcon: View {
 }
 
 
+/**
+ * Initial view shown when the application launches
+ *
+ * Displays instructions for the user to drag and drop RAW image files,
+ * including the supported file formats and a visual drop target.
+ * Also provides access to settings and help.
+ *
+ * Parameters:
+ *   - drop_active: Binding to a boolean indicating if files are being dragged over the drop area
+ */
 struct MainView: View {
     @Binding var drop_active: Bool
     
@@ -139,6 +185,17 @@ struct MainView: View {
 }
 
 
+/**
+ * View displayed after successful image processing
+ *
+ * Shows a confirmation message that the processed image has been saved,
+ * provides a button to view the image in Finder, and allows the user to
+ * drop new files to start processing another burst.
+ *
+ * Parameters:
+ *   - out_url: Binding to the URL of the saved output image
+ *   - drop_active: Binding to a boolean indicating if files are being dragged over the drop area
+ */
 struct ImageSavedView: View {
     @Binding var out_url: URL
     @Binding var drop_active: Bool
@@ -179,10 +236,34 @@ struct ImageSavedView: View {
 }
 
 
+/**
+ * Progress view displayed during image processing
+ *
+ * Shows a progress bar and status text that updates during the different
+ * stages of image processing (conversion, loading, processing, saving).
+ * Provides visual feedback about the current operation and completion percentage.
+ *
+ * Parameters:
+ *   - image_urls: Binding to the array of image URLs being processed
+ *   - progress: Observable object tracking processing progress
+ */
 struct ProcessingView: View {
     @Binding var image_urls: [URL]
     @ObservedObject var progress: ProcessingProgress
 
+    /**
+     * Converts the internal progress integer to a human-readable status message
+     *
+     * Maps progress ranges to different phases of processing:
+     * - Below 10M: Converting images to DNG
+     * - 10M to 20M: Loading images
+     * - 20M to 100M: Processing images with percentage
+     * - Above 100M: Saving processed image
+     *
+     * Parameters:
+     *   - int: The current progress value
+     * Returns: A string describing the current processing stage
+     */
     func progress_int_to_str(_ int: Int) -> String {
         
         if progress.includes_conversion && progress.int < 10000000 {
@@ -211,6 +292,16 @@ struct ProcessingView: View {
 }
 
 
+/**
+ * Settings panel for configuring processing parameters
+ *
+ * Presents user-configurable options for the image processing algorithm,
+ * organized in tabs for exposure/noise and stacking/output settings.
+ * Changes are automatically saved using the AppSettings observable object.
+ *
+ * Parameters:
+ *   - settings: Observable object storing user preference settings
+ */
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     let tile_sizes = ["Small", "Medium", "Large"]
@@ -327,6 +418,26 @@ struct SettingsView: View {
     }
 }
 
+/**
+ * Custom drop delegate handling drag-and-drop operations for image files
+ *
+ * Manages the entire file import process, including:
+ * - Validating dropped files
+ * - Providing visual feedback during drag-and-drop
+ * - Processing the dropped files
+ * - Validating settings
+ * - Showing error alerts if processing fails
+ * - Transitioning between application states
+ *
+ * Parameters:
+ *   - settings: AppSettings object with processing parameters
+ *   - app_state: Current application state (main, processing, image_saved)
+ *   - image_urls: Array of image URLs to process
+ *   - progress: Processing progress tracker
+ *   - active: Indicates if files are being dragged over the drop area
+ *   - my_alert: Alert object for displaying errors and information
+ *   - out_url: URL of the generated output file
+ */
 struct MyDropDelegate: DropDelegate {
     @ObservedObject var settings: AppSettings
     @Binding var app_state: AppState
@@ -337,10 +448,17 @@ struct MyDropDelegate: DropDelegate {
     @Binding var out_url: URL
     
     
+    /**
+     * Validates if the dropped items are file URLs
+     */
     func validateDrop(info: DropInfo) -> Bool {
         return info.hasItemsConforming(to: ["public.file-url"])
     }
     
+    /**
+     * Handles when a dragged item enters the drop area
+     * Activates visual feedback and provides haptic feedback
+     */
     func dropEntered(info: DropInfo) {
         self.active = true
         if (app_state != .processing) {
@@ -348,6 +466,10 @@ struct MyDropDelegate: DropDelegate {
         }
     }
     
+    /**
+     * Handles when a dragged item exits the drop area
+     * Deactivates visual feedback and provides haptic feedback
+     */
     func dropExited(info: DropInfo) {
         self.active = false
         if (app_state != .processing) {
@@ -355,6 +477,18 @@ struct MyDropDelegate: DropDelegate {
         }
     }
     
+    /**
+     * Processes the dropped files
+     * 
+     * This function:
+     * 1. Extracts file URLs from the dropped items
+     * 2. Validates processing parameters
+     * 3. Launches processing on a background thread
+     * 4. Updates the app state based on processing results
+     * 5. Handles errors and displays appropriate alerts
+     *
+     * Returns: True if the drop was handled successfully
+     */
     func performDrop(info: DropInfo) -> Bool {
         // https://swiftwithmajid.com/2020/04/01/drag-and-drop-in-swiftui/
         guard info.hasItemsConforming(to: ["public.file-url"]) else {
@@ -506,6 +640,12 @@ struct MyDropDelegate: DropDelegate {
 }
 
 
+/**
+ * Button that opens the application's help website
+ *
+ * Provides a visually consistent help button with a question mark icon
+ * that opens the Burst Photo help website in the default browser.
+ */
 struct HelpButton: View {
     // https://blog.urtti.com/creating-a-macos-help-button-in-swiftui
     let action: () -> Void = {NSWorkspace.shared.open(URL(string: "https://burst.photo/help/")!)}
@@ -526,6 +666,14 @@ struct HelpButton: View {
 }
 
 
+/**
+ * Button that opens the application's settings panel
+ *
+ * Provides a visually consistent settings button with a gear icon.
+ * Uses macOS-specific approach that adapts to the current version:
+ * - On macOS 14+: Uses the SwiftUI SettingsLink
+ * - On earlier versions: Uses a custom implementation
+ */
 struct SettingsButton: View {
     // make the buttom open the app's settings / preferences window
     // https://stackoverflow.com/a/65356627/6495494

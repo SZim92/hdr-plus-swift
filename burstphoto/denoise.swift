@@ -1,37 +1,60 @@
+/**
+ * Core Image Processing for Multi-Frame Noise Reduction
+ *
+ * This file contains the core algorithms for burst-mode photography denoising,
+ * including image alignment, temporal averaging, and frequency domain merging.
+ * It processes multiple raw images of the same scene to produce a single
+ * high-quality output with reduced noise.
+ */
 import Foundation
 import SwiftUI
 
 
-// possible error types during the alignment
+/**
+ * Error types that may occur during the image alignment and merging process
+ *
+ * These errors represent various failure modes that can occur when
+ * processing a burst of images, from input validation to conversion issues.
+ */
 enum AlignmentError: Error {
-    case less_than_two_images
-    case inconsistent_extensions
-    case inconsistent_resolutions
-    case conversion_failed
-    case missing_dng_converter
-    case non_bayer_exposure_bracketing
+    case less_than_two_images             // Burst must contain at least two images
+    case inconsistent_extensions          // All images must have the same file extension
+    case inconsistent_resolutions         // All images must have the same resolution
+    case conversion_failed                // Conversion from RAW to DNG format failed
+    case missing_dng_converter            // Adobe DNG Converter is not installed
+    case non_bayer_exposure_bracketing    // Exposure bracketing not supported for non-Bayer sensors
 }
 
 
-// all the relevant information about image tiles in a single struct
+/**
+ * Information about image tiles used for alignment and merging
+ *
+ * Contains all parameters needed for tile-based processing such as tile size,
+ * search distance, and overall layout of tiles across the image.
+ */
 struct TileInfo {
-    var tile_size: Int
-    var tile_size_merge: Int
-    var search_dist: Int
-    var n_tiles_x: Int
-    var n_tiles_y: Int
-    var n_pos_1d: Int
-    var n_pos_2d: Int
+    var tile_size: Int       // Size of each processing tile (in pixels)
+    var tile_size_merge: Int // Size of the merged tiles
+    var search_dist: Int     // Maximum search distance for alignment
+    var n_tiles_x: Int       // Number of tiles horizontally
+    var n_tiles_y: Int       // Number of tiles vertically
+    var n_pos_1d: Int        // Number of possible positions in one dimension
+    var n_pos_2d: Int        // Total number of possible positions in two dimensions
 }
 
-// class to store the progress of the align+merge
+/**
+ * Class to track and report processing progress
+ *
+ * Provides observable properties for updating the UI with progress information
+ * and showing various alerts when certain processing conditions are detected.
+ */
 class ProcessingProgress: ObservableObject {
-    @Published var int = 0
-    @Published var includes_conversion = false
-    @Published var show_nonbayer_hq_alert = false
-    @Published var show_nonbayer_exposure_alert = false
-    @Published var show_nonbayer_bit_depth_alert = false
-    @Published var show_exposure_bit_depth_alert = false
+    @Published var int = 0                           // Current progress value
+    @Published var includes_conversion = false       // Whether the process includes RAW to DNG conversion
+    @Published var show_nonbayer_hq_alert = false    // Show alert if higher quality selected with non-Bayer sensor
+    @Published var show_nonbayer_exposure_alert = false // Show alert if exposure control used with non-Bayer sensor
+    @Published var show_nonbayer_bit_depth_alert = false // Show alert if 16-bit selected with non-Bayer sensor
+    @Published var show_exposure_bit_depth_alert = false // Show alert if 16-bit selected with exposure control Off
 }
 
 // set up Metal device
@@ -61,7 +84,32 @@ let search_distance_dict = [
 ]
 
 
-/// Main function of the burst photo app.
+/**
+ * Main denoising function that processes a burst of photos
+ *
+ * This function orchestrates the entire image processing pipeline:
+ * 1. Converts RAW images to DNG format if needed
+ * 2. Loads and validates all images
+ * 3. Determines proper reference image and processing parameters
+ * 4. Performs alignment and merging using the selected algorithm
+ * 5. Applies exposure correction and bit depth conversion
+ * 6. Saves the final processed image
+ *
+ * Parameters:
+ *   - image_urls: Array of URLs to the input images
+ *   - progress: Processing progress tracker for UI updates
+ *   - merging_algorithm: Algorithm to use ("Fast" or "Higher quality")
+ *   - tile_size: Size of processing tiles ("Small", "Medium", or "Large")
+ *   - search_distance: Maximum alignment search distance ("Small", "Medium", or "Large")
+ *   - noise_reduction: Strength of noise reduction (1.0 to 23.0)
+ *   - exposure_control: Type of exposure correction to apply
+ *   - output_bit_depth: Bit depth of output image ("Native" or "16Bit")
+ *   - out_dir: Directory to save the final image
+ *   - tmp_dir: Directory for temporary files
+ *
+ * Returns: URL to the processed output image
+ * Throws: AlignmentError if processing fails at any stage
+ */
 func perform_denoising(image_urls: [URL], progress: ProcessingProgress, merging_algorithm: String = "Fast", tile_size: String = "Medium", search_distance: String = "Medium", noise_reduction: Double = 13.0, exposure_control: String = "LinearFullRange", output_bit_depth: String = "Native", out_dir: String, tmp_dir: String) throws -> URL {
     
     // Maximum size for the caches
@@ -299,7 +347,36 @@ func perform_denoising(image_urls: [URL], progress: ProcessingProgress, merging_
 }
 
 
-/// Convenience function for temporal averaging.
+/**
+ * Performs simple temporal averaging of multiple frames
+ *
+ * This function is called when noise_reduction is set to maximum (23.0),
+ * bypassing the alignment process entirely and simply averaging the frames.
+ * It handles both uniform exposure bursts and exposure-bracketed bursts,
+ * with special processing for highlight regions.
+ *
+ * For exposure-bracketed bursts with Bayer sensors, the function:
+ * 1. Creates a weighted average that preserves highlights from the darkest frame
+ * 2. Uses exposure normalization to properly combine frames of different exposures
+ * 3. Applies intelligent weighting for each pixel based on its brightness
+ *
+ * For uniform exposure bursts or non-Bayer sensors, it performs a simple
+ * arithmetic mean of all frames.
+ *
+ * Parameters:
+ *   - progress: Progress tracker for UI updates
+ *   - mosaic_pattern_width: Width of the sensor mosaic pattern
+ *   - exposure_bias: Array of exposure bias values for each frame
+ *   - white_level: Maximum pixel value before clipping
+ *   - black_level: Black level value for each color channel and frame
+ *   - uniform_exposure: Whether all frames have the same exposure
+ *   - color_factors: Color correction factors for each channel
+ *   - textures: Array of input textures to average
+ *   - hotpixel_weight_texture: Texture with hot pixel weights for correction
+ *   - final_texture: Output texture for the result
+ *
+ * Throws: Errors if texture operations fail
+ */
 func calculate_temporal_average(progress: ProcessingProgress, mosaic_pattern_width: Int, exposure_bias: [Int], white_level: Int, black_level: [[Int]], uniform_exposure: Bool, color_factors: [[Double]], textures: [MTLTexture], hotpixel_weight_texture: MTLTexture, final_texture: MTLTexture) throws {
     print("Special mode: temporal averaging only...")
        
