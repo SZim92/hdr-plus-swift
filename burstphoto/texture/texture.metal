@@ -1,8 +1,36 @@
+/**
+ * Texture Processing Kernels for Burst Photography
+ *
+ * This file contains Metal compute shaders that handle various texture operations
+ * used in the burst photography pipeline. These kernels perform operations like:
+ * - Adding and merging multiple frame textures
+ * - Blurring and filtering operations
+ * - Exposure correction and highlight handling
+ * - Format conversion between different representations (Bayer/RGBA)
+ * - Hot pixel detection and correction for different sensor types
+ * - Various utility operations for texture processing
+ *
+ * The operations support both Bayer pattern sensors (common in most cameras)
+ * and X-Trans sensors (used in Fujifilm cameras).
+ */
 #include <metal_stdlib>
 #include "../misc/constants.h"
 using namespace metal;
 
 
+/**
+ * Adds the content of one texture to another with normalization.
+ *
+ * Divides each pixel value from the input texture by n_textures before adding 
+ * to the corresponding pixel in the output texture. This is typically used when
+ * merging multiple aligned frames to create an average.
+ *
+ * Parameters:
+ *   - in_texture: Source texture to add from
+ *   - out_texture: Destination texture to add to
+ *   - n_textures: Number of textures being merged (for normalization)
+ *   - gid: Thread position in grid (corresponding to pixel coordinates)
+ */
 kernel void add_texture(texture2d<float, access::read> in_texture [[texture(0)]],
                         texture2d<float, access::read_write> out_texture [[texture(1)]],
                         constant float& n_textures [[buffer(0)]],
@@ -14,6 +42,29 @@ kernel void add_texture(texture2d<float, access::read> in_texture [[texture(0)]]
 }
 
 
+/**
+ * Adds a texture with adaptive weighting based on exposure and highlight characteristics.
+ *
+ * This kernel implements a sophisticated merging approach that considers:
+ * - Exposure differences between frames
+ * - Luminance-based weighting (stronger in shadows, weaker in highlights)
+ * - Highlight preservation using pre-computed weights
+ * 
+ * The algorithm applies variable weights to optimize noise reduction while preserving detail
+ * in areas with different exposure levels or potential motion.
+ *
+ * Parameters:
+ *   - in_texture: Source texture to be added
+ *   - in_texture_blurred: Blurred version of source for luminance calculations
+ *   - weight_highlights_texture: Contains weights for highlight regions
+ *   - out_texture: Destination texture where values are accumulated
+ *   - norm_texture: Texture to track accumulated weights for later normalization
+ *   - exposure_bias: Exposure difference in 1/100 stops
+ *   - white_level: Maximum possible pixel value
+ *   - black_level_mean: Average black level
+ *   - color_factor_mean: Average color correction factor
+ *   - gid: Thread position in grid (corresponding to pixel coordinates)
+ */
 kernel void add_texture_exposure(texture2d<float, access::read> in_texture [[texture(0)]],
                                  texture2d<float, access::read> in_texture_blurred [[texture(1)]],
                                  texture2d<float, access::read> weight_highlights_texture [[texture(2)]],
@@ -51,6 +102,25 @@ kernel void add_texture_exposure(texture2d<float, access::read> in_texture [[tex
 }
 
 
+/**
+ * Adds a texture with special processing for highlight regions in Bayer pattern sensors.
+ *
+ * This kernel processes 2x2 Bayer quads (RGGB), identifying bright regions where highlights
+ * might be clipped. When potential highlight clipping is detected in green channels, it
+ * extrapolates more accurate values using surrounding red and blue pixels to recover detail.
+ *
+ * The algorithm specifically handles the two green channels in the Bayer pattern separately,
+ * applying intelligent blending based on how close the pixel values are to clipping.
+ *
+ * Parameters:
+ *   - in_texture: Source texture to add with highlight processing
+ *   - out_texture: Destination texture where values are accumulated
+ *   - white_level: Maximum possible pixel value
+ *   - black_level_mean: Average black level
+ *   - factor_red: Color correction factor for red channel
+ *   - factor_blue: Color correction factor for blue channel
+ *   - gid: Thread position in grid (each thread processes a 2x2 Bayer quad)
+ */
 kernel void add_texture_highlights(texture2d<float, access::read> in_texture [[texture(0)]],
                                    texture2d<float, access::read_write> out_texture [[texture(1)]],
                                    constant float& white_level [[buffer(0)]],
@@ -160,6 +230,19 @@ kernel void add_texture_highlights(texture2d<float, access::read> in_texture [[t
 }
 
 
+/**
+ * Adds a uint16 texture to a float texture with normalization.
+ *
+ * Converts unsigned integer pixel values to float, divides by the total number of textures,
+ * and adds the result to the corresponding pixel in the output texture. This is used when
+ * working with raw sensor data that may be stored in uint16 format.
+ *
+ * Parameters:
+ *   - in_texture: Source texture in uint format
+ *   - out_texture: Destination texture in float format
+ *   - n_textures: Number of textures being merged (for normalization)
+ *   - gid: Thread position in grid (corresponding to pixel coordinates)
+ */
 kernel void add_texture_uint16(texture2d<uint, access::read> in_texture [[texture(0)]],
                                texture2d<float, access::read_write> out_texture [[texture(1)]],
                                constant float& n_textures [[buffer(0)]],
@@ -171,6 +254,21 @@ kernel void add_texture_uint16(texture2d<uint, access::read> in_texture [[textur
 }
 
 
+/**
+ * Blends two textures using a weight texture to control the blending.
+ *
+ * For each pixel, performs linear interpolation between texture1 and texture2
+ * using the corresponding weight value from the weight_texture. A weight of 0 means
+ * use only texture1, a weight of 1 means use only texture2, and values between
+ * result in a proportional blend.
+ *
+ * Parameters:
+ *   - texture1: First input texture (base texture)
+ *   - texture2: Second input texture (to be blended with texture1)
+ *   - weight_texture: Contains weight values [0-1] for each pixel
+ *   - out_texture: Output texture for the blended result
+ *   - gid: Thread position in grid (corresponding to pixel coordinates)
+ */
 kernel void add_texture_weighted(texture2d<float, access::read> texture1 [[texture(0)]],
                                  texture2d<float, access::read> texture2 [[texture(1)]],
                                  texture2d<float, access::read> weight_texture [[texture(2)]],
@@ -186,6 +284,26 @@ kernel void add_texture_weighted(texture2d<float, access::read> texture1 [[textu
 }
 
 
+/**
+ * Applies a 1D binomial blur to a texture in either horizontal or vertical direction.
+ *
+ * This kernel implements a high-quality, separable blur filter using binomial coefficients
+ * that approximates a Gaussian blur. It respects the mosaic pattern of the sensor by
+ * stepping over complete pattern blocks instead of individual pixels.
+ *
+ * The kernel size determines the extent of the blur with precomputed weights for various
+ * kernel sizes. For efficiency, the kernel weights are truncated where their contribution
+ * becomes negligible (less than 0.25% of total).
+ *
+ * Parameters:
+ *   - in_texture: Input texture to be blurred
+ *   - out_texture: Output texture for the blurred result
+ *   - kernel_size: Size parameter controlling blur intensity
+ *   - mosaic_pattern_width: Width of the sensor's mosaic pattern (e.g., 2 for Bayer)
+ *   - texture_size: Size of the texture in the current blur direction
+ *   - direction: 0 for horizontal blur, 1 for vertical blur
+ *   - gid: Thread position in grid (one thread per output pixel)
+ */
 kernel void blur_mosaic_texture(texture2d<float, access::read> in_texture [[texture(0)]],
                                 texture2d<float, access::write> out_texture [[texture(1)]],
                                 constant int& kernel_size [[buffer(0)]],
@@ -236,6 +354,23 @@ kernel void blur_mosaic_texture(texture2d<float, access::read> in_texture [[text
 }
 
 
+/**
+ * Calculates weights for highlight handling based on local maximum pixel values.
+ *
+ * This kernel examines a neighborhood around each pixel to find the maximum intensity,
+ * then calculates a weight that will be used during merging to prevent highlight clipping.
+ * As pixel values approach the white level, their weight decreases, allowing better
+ * highlight preservation when merging frames with different exposures.
+ *
+ * Parameters:
+ *   - in_texture: Input texture containing the image data
+ *   - weight_highlights_texture: Output texture to store the calculated weights
+ *   - exposure_bias: Exposure difference between frames in 1/100 stops
+ *   - white_level: Maximum possible pixel value
+ *   - black_level_mean: Average black level
+ *   - kernel_size: Size of neighborhood to examine for maximum finding
+ *   - gid: Thread position in grid (corresponding to pixel coordinates)
+ */
 kernel void calculate_weight_highlights(texture2d<float, access::read> in_texture [[texture(0)]],
                                         texture2d<float, access::write> weight_highlights_texture [[texture(1)]],
                                         constant int& exposure_bias [[buffer(0)]],
@@ -277,6 +412,23 @@ kernel void calculate_weight_highlights(texture2d<float, access::read> in_textur
 }
 
 
+/**
+ * Converts floating-point pixel values to 16-bit unsigned integers.
+ *
+ * This kernel handles the conversion from the internal floating-point representation
+ * to 16-bit integer format, applying black level correction, scaling, and clamping
+ * to ensure values stay within appropriate bounds. It handles the mosaic pattern
+ * of the sensor by using appropriate black levels for each position in the pattern.
+ *
+ * Parameters:
+ *   - in_texture: Input texture with floating-point values
+ *   - out_texture: Output texture for 16-bit unsigned integer values
+ *   - white_level: Maximum pixel value to clamp against
+ *   - factor_16bit: Scaling factor for conversion to 16-bit range
+ *   - mosaic_pattern_width: Width of the sensor's mosaic pattern
+ *   - black_levels: Array of black level values for each position in the mosaic pattern
+ *   - gid: Thread position in grid (corresponding to pixel coordinates)
+ */
 kernel void convert_float_to_uint16(texture2d<float, access::read>  in_texture  [[texture(0)]],
                                     texture2d<uint,  access::write> out_texture [[texture(1)]],
                                     constant int& white_level           [[buffer(0)]],
@@ -296,6 +448,18 @@ kernel void convert_float_to_uint16(texture2d<float, access::read>  in_texture  
 }
 
 
+/**
+ * Converts an RGBA texture back to Bayer pattern format.
+ *
+ * This kernel unpacks a texture where each RGBA pixel contains data for a 2x2 Bayer quad
+ * back into the raw Bayer format with one value per pixel. Each component of the RGBA
+ * value is written to its corresponding position in the 2x2 grid of the output texture.
+ *
+ * Parameters:
+ *   - in_texture: Input RGBA texture where each pixel represents a 2x2 Bayer quad
+ *   - out_texture: Output texture in raw Bayer pattern format
+ *   - gid: Thread position in grid (each thread handles one 2x2 block)
+ */
 kernel void convert_to_bayer(texture2d<float, access::read> in_texture [[texture(0)]],
                              texture2d<float, access::write> out_texture [[texture(1)]],
                              uint2 gid [[thread_position_in_grid]]) {
@@ -312,6 +476,20 @@ kernel void convert_to_bayer(texture2d<float, access::read> in_texture [[texture
 }
 
 
+/**
+ * Converts a Bayer pattern texture to RGBA format.
+ *
+ * This kernel packs a 2x2 Bayer quad into a single RGBA pixel, which is more efficient for
+ * certain processing operations. Each pixel in the output contains the values from a 2x2
+ * block of the input, with optional padding handling to account for borders.
+ *
+ * Parameters:
+ *   - in_texture: Input texture in raw Bayer pattern format
+ *   - out_texture: Output RGBA texture where each pixel represents a 2x2 Bayer quad
+ *   - pad_left: Left padding offset to adjust sampling position
+ *   - pad_top: Top padding offset to adjust sampling position
+ *   - gid: Thread position in grid (each thread produces one RGBA pixel)
+ */
 kernel void convert_to_rgba(texture2d<float, access::read> in_texture [[texture(0)]],
                             texture2d<float, access::write> out_texture [[texture(1)]],
                             constant int& pad_left [[buffer(0)]],
@@ -328,6 +506,17 @@ kernel void convert_to_rgba(texture2d<float, access::read> in_texture [[texture(
 }
 
 
+/**
+ * Simple utility to copy the contents of one texture to another.
+ *
+ * This straightforward kernel reads each pixel from the input texture and writes
+ * the same value to the corresponding pixel in the output texture.
+ *
+ * Parameters:
+ *   - in_texture: Source texture to copy from
+ *   - out_texture: Destination texture to copy to
+ *   - gid: Thread position in grid (corresponding to pixel coordinates)
+ */
 kernel void copy_texture(texture2d<float, access::read> in_texture [[texture(0)]],
                          texture2d<float, access::write> out_texture [[texture(1)]],
                          uint2 gid [[thread_position_in_grid]]) {
@@ -335,6 +524,20 @@ kernel void copy_texture(texture2d<float, access::read> in_texture [[texture(0)]
 }
 
 
+/**
+ * Crops a texture by removing padding from the edges.
+ *
+ * This kernel extracts a region from the input texture by offsetting the read
+ * coordinates by the specified padding values. It's used to remove padding that
+ * may have been added for alignment or processing purposes.
+ *
+ * Parameters:
+ *   - in_texture: Input texture to crop
+ *   - out_texture: Output texture for the cropped result
+ *   - pad_left: Left padding to remove
+ *   - pad_top: Top padding to remove
+ *   - gid: Thread position in grid (corresponding to output pixel coordinates)
+ */
 kernel void crop_texture(texture2d<float, access::read> in_texture [[texture(0)]],
                          texture2d<float, access::write> out_texture [[texture(1)]],
                          constant int& pad_left [[buffer(0)]],
@@ -349,6 +552,16 @@ kernel void crop_texture(texture2d<float, access::read> in_texture [[texture(0)]
 }
 
 
+/**
+ * Initializes a texture by filling it with zeros.
+ *
+ * This simple kernel sets every pixel in the texture to zero. It's typically used
+ * to prepare a texture for accumulation operations or to clear previous content.
+ *
+ * Parameters:
+ *   - texture: The texture to be filled with zeros
+ *   - gid: Thread position in grid (corresponding to pixel coordinates)
+ */
 kernel void fill_with_zeros(texture2d<float, access::write> texture [[texture(0)]],
                             uint2 gid [[thread_position_in_grid]]) {
     texture.write(0, gid);
@@ -665,8 +878,18 @@ kernel void prepare_texture_xtrans(texture2d<uint, access::read> in_texture     
 }
 
 /**
- Divide value from in_buffer by divisor and set to out_buffer. Using an out_buffer instead of doing it in-place in order to keep usage consistent with sum_divide_buffer
- Input and output buffer are the same size.
+ * Divides values in a buffer by a specified divisor.
+ *
+ * This utility kernel performs element-wise division of the input buffer by a constant divisor,
+ * storing the results in an output buffer. A separate output buffer is used instead of in-place
+ * modification to maintain a consistent interface with sum_divide_buffer.
+ *
+ * Parameters:
+ *   - in_buffer: Input buffer containing values to be divided
+ *   - out_buffer: Output buffer to store the divided values
+ *   - divisor: Value to divide each element by
+ *   - buffer_size: Unused parameter (included for signature consistency with sum_divide_buffer)
+ *   - gid: Thread position in grid (corresponding to buffer element index)
  */
 kernel void divide_buffer(device   float  *in_buffer   [[buffer(0)]],
                           device   float  *out_buffer  [[buffer(1)]],
@@ -677,7 +900,18 @@ kernel void divide_buffer(device   float  *in_buffer   [[buffer(0)]],
 }
 
 /**
- Calculate the sum of in_buffer, divide by divisor, and set to out_buffer.
+ * Calculates the sum of all elements in a buffer and divides by a specified divisor.
+ *
+ * This kernel accumulates all values in the input buffer, then divides the total by
+ * a constant divisor. The result is stored in the first element of the output buffer.
+ * This is useful for computing means and other statistical operations across the buffer.
+ *
+ * Parameters:
+ *   - in_buffer: Input buffer containing values to be summed
+ *   - out_buffer: Output buffer to store the sum/divisor (only index 0 is used)
+ *   - divisor: Value to divide the sum by
+ *   - buffer_size: Number of elements in the input buffer to include in the sum
+ *   - gid: Thread position in grid (only one thread actually performs the operation)
  */
 kernel void sum_divide_buffer(device   float  *in_buffer   [[buffer(0)]],
                               device   float  *out_buffer  [[buffer(1)]],
@@ -691,6 +925,19 @@ kernel void sum_divide_buffer(device   float  *in_buffer   [[buffer(0)]],
 }
 
 
+/**
+ * Normalizes a texture by dividing its values by corresponding normalization factors.
+ *
+ * This kernel performs pixel-wise division of the input texture by values from the normalization
+ * texture, with an additional scalar added to prevent division by zero. This is typically used
+ * as a final step in merging operations where weighted contributions need to be normalized.
+ *
+ * Parameters:
+ *   - in_texture: Texture to be normalized (modified in-place)
+ *   - norm_texture: Texture containing normalization factors
+ *   - norm_scalar: Small value added to normalization factors to prevent division by zero
+ *   - gid: Thread position in grid (corresponding to pixel coordinates)
+ */
 kernel void normalize_texture(texture2d<float, access::read_write> in_texture [[texture(0)]],
                               texture2d<float, access::read> norm_texture [[texture(1)]],
                               constant float& norm_scalar [[buffer(0)]],
@@ -700,7 +947,20 @@ kernel void normalize_texture(texture2d<float, access::read_write> in_texture [[
 }
 
 /**
- Used for calculating texture_mean. Can't use the UInt version since the images at this point are stored as floats.
+ * Used for calculating texture_mean. Can't use the UInt version since the images at this point are stored as floats.
+ *
+ * Sums pixel values in columns within a rectangular region of a float texture. The summation
+ * respects the mosaic pattern by stepping by the pattern width when scanning vertically.
+ * This is part of the process for computing averages over regions of an image.
+ *
+ * Parameters:
+ *   - in_texture: Input texture to sum from
+ *   - out_texture: Output texture to store column sums
+ *   - top: Top coordinate of the rectangular region
+ *   - left: Left coordinate of the rectangular region
+ *   - bottom: Bottom coordinate of the rectangular region
+ *   - mosaic_pattern_width: Width of the sensor's mosaic pattern
+ *   - gid: Thread position in grid (each thread handles one column)
  */
 kernel void sum_rect_columns_float(texture2d<float, access::read> in_texture [[texture(0)]],
                                    texture2d<float, access::write> out_texture [[texture(1)]],
@@ -720,8 +980,21 @@ kernel void sum_rect_columns_float(texture2d<float, access::read> in_texture [[t
 }
 
 /**
- Used for calculating a black level from masked areas of the DNG.
- DNG data is storred as UInt, thus need a seperate version from the float one above.
+ * Used for calculating a black level from masked areas of the DNG.
+ * DNG data is storred as UInt, thus need a seperate version from the float one above.
+ *
+ * Similar to sum_rect_columns_float, but works with unsigned integer textures. It sums
+ * pixel values in columns within a rectangular region and stores the result as floats.
+ * This is used for calculating black levels from the optical black regions in DNG files.
+ *
+ * Parameters:
+ *   - in_texture: Input uint texture to sum from
+ *   - out_texture: Output float texture to store column sums
+ *   - top: Top coordinate of the rectangular region
+ *   - left: Left coordinate of the rectangular region
+ *   - bottom: Bottom coordinate of the rectangular region
+ *   - mosaic_pattern_width: Width of the sensor's mosaic pattern
+ *   - gid: Thread position in grid (each thread handles one column)
  */
 kernel void sum_rect_columns_uint(texture2d<uint, access::read> in_texture [[texture(0)]],
                                   texture2d<float, access::write> out_texture [[texture(1)]],
@@ -741,6 +1014,20 @@ kernel void sum_rect_columns_uint(texture2d<uint, access::read> in_texture [[tex
 }
 
 
+/**
+ * Sums pixel values across rows in a texture, considering the mosaic pattern.
+ *
+ * This kernel computes the sum of pixel values in each row, respecting the mosaic pattern
+ * by stepping horizontally by the pattern width. The result is stored in a buffer rather
+ * than a texture, with positions calculated to maintain the pattern structure.
+ *
+ * Parameters:
+ *   - in_texture: Input texture to sum from
+ *   - out_buffer: Output buffer to store row sums
+ *   - width: Width of the region to sum
+ *   - mosaic_pattern_width: Width of the sensor's mosaic pattern
+ *   - gid: Thread position in grid (each thread handles one row)
+ */
 kernel void sum_row(texture2d<float, access::read> in_texture [[texture(0)]],
                     device float *out_buffer [[buffer(0)]],
                     constant int& width [[buffer(1)]],
@@ -757,8 +1044,20 @@ kernel void sum_row(texture2d<float, access::read> in_texture [[texture(0)]],
 
 
 /**
-  Naming based on https://en.wikipedia.org/wiki/Bilinear_interpolation#/media/File:BilinearInterpolation.svg
-  */
+ * Naming based on https://en.wikipedia.org/wiki/Bilinear_interpolation#/media/File:BilinearInterpolation.svg
+ *
+ * Upsamples a float texture using bilinear interpolation for high-quality results.
+ * This kernel implements full bilinear interpolation with special handling for exact pixel
+ * alignments that don't require interpolation. It's used to increase the resolution of
+ * textures like weight maps before applying them to full-resolution images.
+ *
+ * Parameters:
+ *   - in_texture: Input texture to upsample
+ *   - out_texture: Output texture with increased resolution
+ *   - scale_x: Horizontal scaling factor
+ *   - scale_y: Vertical scaling factor
+ *   - gid: Thread position in grid (corresponding to output pixel coordinates)
+ */
 kernel void upsample_bilinear_float(texture2d<float, access::read> in_texture [[texture(0)]],
                                     texture2d<float, access::write> out_texture [[texture(1)]],
                                     constant float& scale_x [[buffer(0)]],
@@ -796,6 +1095,20 @@ kernel void upsample_bilinear_float(texture2d<float, access::read> in_texture [[
 }
 
 
+/**
+ * Upsamples an integer texture using nearest-neighbor interpolation.
+ *
+ * This kernel increases the resolution of an integer texture using the simplest
+ * nearest-neighbor sampling. This approach is appropriate for data where preserving
+ * exact integer values is more important than visual smoothness.
+ *
+ * Parameters:
+ *   - in_texture: Input integer texture to upsample
+ *   - out_texture: Output integer texture with increased resolution
+ *   - scale_x: Horizontal scaling factor
+ *   - scale_y: Vertical scaling factor
+ *   - gid: Thread position in grid (corresponding to output pixel coordinates)
+ */
 kernel void upsample_nearest_int(texture2d<int, access::read> in_texture [[texture(0)]],
                                  texture2d<int, access::write> out_texture [[texture(1)]],
                                  constant float& scale_x [[buffer(0)]],

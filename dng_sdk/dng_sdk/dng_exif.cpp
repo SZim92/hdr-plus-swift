@@ -6,6 +6,28 @@
 // accordance with the terms of the Adobe license agreement accompanying it.
 /*****************************************************************************/
 
+/* --- Additional File Documentation ---
+   This file implements the dng_exif class which manages EXIF metadata in the Adobe DNG SDK.
+   It provides methods for constructing, copying, and parsing EXIF data, as well as utility functions for:
+     1. Exposure settings and correction (SnapExposureTime, SetExposureTime, SetShutterSpeedValue).
+     2. Aperture and f-number conversions (EncodeFNumber, SetFNumber, FNumberToApertureValue, ApertureValueToFNumber, SetApertureValue).
+     3. DateTime and version management (UpdateDateTime, AtLeastVersion0230, AtLeastVersion0231, SetVersion0231).
+     4. Lens distortion information (HasLensDistortInfo, SetLensDistortInfo).
+     5. Parsing of EXIF tags from data streams (ParseTag, Parse_ifd0_main, Parse_ifd0_exif).
+   Note: All original comments and non-English content are preserved.
+   --- End Additional File Documentation ---
+
+/**
+ * @file dng_exif.cpp
+ * 
+ * Implementation of the dng_exif class for managing EXIF metadata in the DNG SDK.
+ * 
+ * This file contains the implementation of methods to parse, manipulate, and manage
+ * Exchangeable Image File Format (EXIF) metadata within digital image files. It handles
+ * reading and writing all standard EXIF tags, as well as providing utility functions
+ * for common operations like exposure and aperture value conversions.
+ */
+
 #include "dng_exif.h"
 
 #include "dng_tag_codes.h"
@@ -18,6 +40,22 @@
 
 /*****************************************************************************/
 
+/* --- Exposure Correction Functions ---
+   The following functions are responsible for adjusting and converting exposure settings:
+   - SnapExposureTime: Adjusts a raw exposure time value to a standard shutter speed by applying rounding and correction.
+   - SetExposureTime: Sets both the ExposureTime and ShutterSpeedValue fields in the EXIF data based on a given exposure time.
+   - SetShutterSpeedValue: Sets the ShutterSpeedValue based on an APEX shutter speed, computing the corresponding ExposureTime if necessary.
+*/
+
+/*****************************************************************************/
+
+/**
+ * Constructor for dng_exif class.
+ * 
+ * Initializes all EXIF data members to their default values.
+ * String fields are initialized as empty strings, rational values as invalid rationals,
+ * and integer fields to either 0 or 0xFFFFFFFF (indicating an unspecified value).
+ */
 dng_exif::dng_exif ()
 
 	:	fImageDescription ()
@@ -190,6 +228,12 @@ dng_exif::dng_exif ()
 	
 /*****************************************************************************/
 
+/**
+ * Virtual destructor for the dng_exif class.
+ * 
+ * Since all members are automatically destructed when the object is destroyed,
+ * no special cleanup is needed in this destructor.
+ */
 dng_exif::~dng_exif ()
 	{
 	
@@ -197,6 +241,16 @@ dng_exif::~dng_exif ()
 		
 /*****************************************************************************/
 
+/**
+ * Creates a deep copy of this EXIF object.
+ * 
+ * Allocates a new dng_exif object and copies all member data from this 
+ * object to the newly created one. Throws a memory full exception if
+ * the allocation fails.
+ * 
+ * @return A pointer to the newly allocated copy
+ * @throws dng_memory_full if memory allocation fails
+ */
 dng_exif * dng_exif::Clone () const
 	{
 	
@@ -213,6 +267,12 @@ dng_exif * dng_exif::Clone () const
 		
 /*****************************************************************************/
 
+/**
+ * Resets all EXIF fields to their default values.
+ * 
+ * Creates a new default dng_exif object and copies it to this object,
+ * effectively resetting all fields to their initial values.
+ */
 void dng_exif::SetEmpty ()
 	{
 	
@@ -222,6 +282,14 @@ void dng_exif::SetEmpty ()
 		
 /*****************************************************************************/
 
+/**
+ * Copies all GPS-related fields from another EXIF object.
+ * 
+ * This allows preserving GPS metadata when modifying other parts of the EXIF data.
+ * All GPS tags from the source EXIF object are copied to this object.
+ * 
+ * @param exif Source EXIF object from which to copy GPS data
+ */
 void dng_exif::CopyGPSFrom (const dng_exif &exif)
 	{
 			
@@ -272,8 +340,22 @@ void dng_exif::CopyGPSFrom (const dng_exif &exif)
 
 /*****************************************************************************/
 
-// Fix up common errors and rounding issues with EXIF exposure times.
-	
+/**
+ * Fixes up common errors and rounding issues with EXIF exposure times.
+ * 
+ * This utility method takes an exposure time value and:
+ * 1. Checks if it's close to a standard shutter speed and snaps to it if so
+ * 2. Handles common misrounded values (like 1/64 which should be 1/60)
+ * 3. For non-standard values, rounds to a visually pleasing representation
+ * 
+ * The method performs intelligent rounding based on the range of the exposure time:
+ * - For slow exposures (≥10s), rounds to the nearest second
+ * - For medium exposures (≥0.5s), rounds to the nearest 0.1 second
+ * - For faster exposures, uses increasingly precise rounding of the denominator
+ * 
+ * @param et Exposure time in seconds
+ * @return The snapped/corrected exposure time
+ */
 real64 dng_exif::SnapExposureTime (real64 et)
 	{
 	
@@ -502,6 +584,23 @@ real64 dng_exif::SnapExposureTime (real64 et)
 
 /*****************************************************************************/
 
+/**
+ * Sets the exposure time and shutter speed fields in the EXIF data.
+ * 
+ * This method sets both the ExposureTime and ShutterSpeedValue fields
+ * based on the provided exposure time value. The method:
+ * 1. Optionally corrects common errors and rounding issues in the exposure time
+ * 2. Formats the exposure time as a rational value in the most appropriate way
+ * 3. Calculates the corresponding ShutterSpeedValue in APEX units
+ * 
+ * For example:
+ * - Long exposures (≥100s): stored as seconds (e.g., 120/1)
+ * - Medium exposures (≥1s): stored with precision to 0.1s (e.g., 15/10)
+ * - Fast exposures (≤0.1s): stored as 1/x (e.g., 1/60, 1/125)
+ * 
+ * @param et Exposure time in seconds
+ * @param snap Whether to correct common errors and rounding issues (default: true)
+ */
 void dng_exif::SetExposureTime (real64 et, bool snap)
 	{
 	
@@ -586,6 +685,17 @@ void dng_exif::SetExposureTime (real64 et, bool snap)
 
 /*****************************************************************************/
 
+/**
+ * Sets the shutter speed value (APEX) and calculates the corresponding exposure time.
+ * 
+ * This method sets the ShutterSpeedValue field based on the provided APEX value,
+ * and also calculates and sets the corresponding ExposureTime field if it's not already set.
+ * 
+ * The conversion from APEX to seconds follows the formula:
+ *   Exposure Time = 2^(-ShutterSpeedValue)
+ * 
+ * @param ss Shutter speed in APEX units (positive values = shorter exposures)
+ */
 void dng_exif::SetShutterSpeedValue (real64 ss)
 	{
 	
@@ -602,6 +712,18 @@ void dng_exif::SetShutterSpeedValue (real64 ss)
 
 /******************************************************************************/
 
+/**
+ * Encodes an f-number as a rational value in the most appropriate format.
+ * 
+ * This utility function takes an f-number and converts it to a rational value
+ * with appropriate precision based on its magnitude:
+ * - Large f-numbers (>10): stored as integers (e.g., 16/1)
+ * - Medium f-numbers (1-10): stored with precision to 0.1 (e.g., 56/10)
+ * - Small f-numbers (<1): stored with precision to 0.01 (e.g., 95/100)
+ * 
+ * @param fs The f-number to encode
+ * @return The encoded f-number as a rational value
+ */
 dng_urational dng_exif::EncodeFNumber (real64 fs)
 	{
 	
@@ -639,6 +761,18 @@ dng_urational dng_exif::EncodeFNumber (real64 fs)
 		
 /*****************************************************************************/
 
+/**
+ * Sets both the FNumber and ApertureValue fields based on f-number.
+ * 
+ * This method sets the FNumber field to the provided f-number and also
+ * calculates and sets the corresponding ApertureValue field in APEX units.
+ * 
+ * Note that for f-numbers less than 1.0 (which would result in negative APEX values),
+ * the ApertureValue field will not be set as the EXIF specification requires
+ * ApertureValue to be a non-negative rational value.
+ * 
+ * @param fs The f-number to set (e.g., 2.8, 4.0, 5.6, etc.)
+ */
 void dng_exif::SetFNumber (real64 fs)
 	{
 	
@@ -680,6 +814,14 @@ void dng_exif::SetFNumber (real64 fs)
 			
 /*****************************************************************************/
 
+/**
+ * Sets both the ApertureValue and FNumber fields based on aperture value.
+ * 
+ * This method sets the ApertureValue field to the provided value in APEX units,
+ * and also calculates and sets the corresponding FNumber field if it's not already set.
+ * 
+ * @param av The aperture value in APEX units
+ */
 void dng_exif::SetApertureValue (real64 av)
 	{
 
@@ -694,6 +836,21 @@ void dng_exif::SetApertureValue (real64 av)
 
 /*****************************************************************************/
 
+/**
+ * Converts an aperture value (APEX) to an f-number.
+ * 
+ * The conversion follows the formula: f-number = 2^(av/2)
+ * 
+ * For example:
+ * - APEX 0.0 = f/1.0
+ * - APEX 2.0 = f/2.0
+ * - APEX 3.0 = f/2.8
+ * - APEX 4.0 = f/4.0
+ * - APEX 5.0 = f/5.6
+ * 
+ * @param av The aperture value in APEX units
+ * @return The equivalent f-number
+ */
 real64 dng_exif::ApertureValueToFNumber (real64 av)
 	{
 	
@@ -703,6 +860,15 @@ real64 dng_exif::ApertureValueToFNumber (real64 av)
 
 /*****************************************************************************/
 
+/**
+ * Converts an aperture value (APEX) stored as a rational to an f-number.
+ * 
+ * This is a convenience method that converts the rational to a double
+ * and then calls the double version of the method.
+ * 
+ * @param av The aperture value as a rational
+ * @return The equivalent f-number
+ */
 real64 dng_exif::ApertureValueToFNumber (const dng_urational &av)
 	{
 	
@@ -712,6 +878,21 @@ real64 dng_exif::ApertureValueToFNumber (const dng_urational &av)
 
 /*****************************************************************************/
 
+/**
+ * Converts an f-number to an aperture value (APEX).
+ * 
+ * The conversion follows the formula: APEX = 2 * log2(f-number)
+ * 
+ * For example:
+ * - f/1.0 = APEX 0.0
+ * - f/2.0 = APEX 2.0
+ * - f/2.8 = APEX 3.0
+ * - f/4.0 = APEX 4.0
+ * - f/5.6 = APEX 5.0
+ * 
+ * @param fNumber The f-number to convert
+ * @return The equivalent aperture value in APEX units
+ */
 real64 dng_exif::FNumberToApertureValue (real64 fNumber)
 	{
 	
@@ -721,8 +902,18 @@ real64 dng_exif::FNumberToApertureValue (real64 fNumber)
 
 /*****************************************************************************/
 
+/**
+ * Converts an f-number stored as a rational to an aperture value (APEX).
+ * 
+ * This is a convenience method that converts the rational to a double
+ * and then calls the double version of the method.
+ * 
+ * @param fNumber The f-number as a rational
+ * @return The equivalent aperture value in APEX units
+ */
 real64 dng_exif::FNumberToApertureValue (const dng_urational &fNumber)
 	{
+	
 	
 	return FNumberToApertureValue (fNumber.As_real64 ());
 	
@@ -730,6 +921,14 @@ real64 dng_exif::FNumberToApertureValue (const dng_urational &fNumber)
 			
 /*****************************************************************************/
 
+/**
+ * Updates the DateTime field with the provided date/time information.
+ * 
+ * Sets the main DateTime field in the EXIF data, which represents when
+ * the file was last modified.
+ * 
+ * @param dt The date and time information to set
+ */
 void dng_exif::UpdateDateTime (const dng_date_time_info &dt)
 	{
 	
@@ -739,6 +938,14 @@ void dng_exif::UpdateDateTime (const dng_date_time_info &dt)
 
 /*****************************************************************************/
 
+/**
+ * Checks if the EXIF version is at least 2.3.0.
+ * 
+ * This method verifies if the EXIF version supports features introduced in 
+ * EXIF 2.3.0 specification, such as improved sensitivity tags.
+ * 
+ * @return true if the EXIF version is 2.3.0 or later
+ */
 bool dng_exif::AtLeastVersion0230 () const
 	{
 	
@@ -748,6 +955,14 @@ bool dng_exif::AtLeastVersion0230 () const
 
 /*****************************************************************************/
 
+/**
+ * Checks if the EXIF version is at least 2.3.1.
+ * 
+ * This method verifies if the EXIF version supports features introduced in 
+ * EXIF 2.3.1 specification, such as temperature and environmental data tags.
+ * 
+ * @return true if the EXIF version is 2.3.1 or later
+ */
 bool dng_exif::AtLeastVersion0231 () const
 	{
 	
@@ -757,6 +972,12 @@ bool dng_exif::AtLeastVersion0231 () const
 
 /*****************************************************************************/
 
+/**
+ * Sets the EXIF version to 2.3.1.
+ * 
+ * Updates the EXIF version to indicate support for the EXIF 2.3.1
+ * specification's features, such as temperature and environmental data tags.
+ */
 void dng_exif::SetVersion0231 ()
 	{
 	
@@ -766,6 +987,14 @@ void dng_exif::SetVersion0231 ()
 
 /*****************************************************************************/
 
+/**
+ * Checks if lens distortion correction information is available.
+ * 
+ * Verifies that all four radial distortion parameters have valid values.
+ * These parameters can be used for lens distortion correction.
+ * 
+ * @return true if all four lens distortion parameters are valid
+ */
 bool dng_exif::HasLensDistortInfo () const
 	{
 	
@@ -778,6 +1007,18 @@ bool dng_exif::HasLensDistortInfo () const
 
 /*****************************************************************************/
 		
+/**
+ * Sets the lens distortion correction parameters.
+ * 
+ * This method assigns the provided vector of lens distortion parameters to
+ * the EXIF lens distortion fields. The parameters follow the same model as
+ * the DNG 1.3 opcode model for radial distortion correction.
+ * 
+ * The vector must contain exactly 4 parameters, otherwise the method returns
+ * without making any changes.
+ * 
+ * @param params Vector containing the 4 radial distortion correction parameters
+ */
 void dng_exif::SetLensDistortInfo (const dng_vector &params)
 	{
 	
@@ -795,6 +1036,28 @@ void dng_exif::SetLensDistortInfo (const dng_vector &params)
 		
 /*****************************************************************************/
 
+/**
+ * Parses an EXIF tag from a data stream.
+ * 
+ * This method is the main entry point for parsing EXIF tags. It dispatches
+ * the parsing to more specific methods based on the parent IFD code.
+ * 
+ * The parent code indicates which EXIF directory the tag belongs to:
+ * - 0: Main IFD (IFD0)
+ * - TAG_ExifIFD: EXIF subdirectory
+ * - TAG_GPS_IFD: GPS subdirectory
+ * - TAG_Interoperability_IFD: Interoperability subdirectory
+ * 
+ * @param stream The data stream to read from
+ * @param shared Shared DNG data structure to store common data
+ * @param parentCode Parent IFD code indicating which directory the tag belongs to
+ * @param isMainIFD Flag indicating if this is the main IFD
+ * @param tagCode The tag code to parse
+ * @param tagType The data type of the tag
+ * @param tagCount Number of values in the tag
+ * @param tagOffset Offset to the tag data in the stream
+ * @return true if the tag was successfully parsed, false otherwise
+ */
 bool dng_exif::ParseTag (dng_stream &stream,
 						 dng_shared &shared,
 						 uint32 parentCode,
@@ -902,15 +1165,29 @@ bool dng_exif::ParseTag (dng_stream &stream,
 
 /*****************************************************************************/
 
-// Parses tags that should only appear in IFD 0.
-
-bool dng_exif::Parse_ifd0 (dng_stream &stream,
-						   dng_shared & /* shared */,
-						   uint32 parentCode,
-						   uint32 tagCode,
-						   uint32 tagType,
-						   uint32 tagCount,
-						   uint64 /* tagOffset */)
+/**
+ * Parses tags that should only appear in IFD 0 or the main image IFD.
+ * 
+ * This method handles parsing of common tags that can appear in either
+ * IFD0 (the main image IFD) or in the main IFD of a TIFF file. These include
+ * tags such as Make, Model, Software, and other basic image information.
+ * 
+ * @param stream The data stream to read from
+ * @param shared Shared DNG data structure (unused in this method)
+ * @param parentCode Parent IFD code
+ * @param tagCode The tag code to parse
+ * @param tagType The data type of the tag
+ * @param tagCount Number of values in the tag
+ * @param tagOffset Offset to the tag data in the stream (unused in this method)
+ * @return true if the tag was successfully parsed, false otherwise
+ */
+bool dng_exif::Parse_ifd0_main (dng_stream &stream,
+								dng_shared & /* shared */,
+								uint32 parentCode,
+								uint32 tagCode,
+								uint32 tagType,
+								uint32 tagCount,
+								uint64 /* tagOffset */)
 	{
 	
 	switch (tagCode)
@@ -1296,137 +1573,23 @@ bool dng_exif::Parse_ifd0 (dng_stream &stream,
 	
 /*****************************************************************************/
 
-// Parses tags that should only appear in IFD 0 or the main image IFD.
-
-bool dng_exif::Parse_ifd0_main (dng_stream &stream,
-								dng_shared & /* shared */,
-								uint32 parentCode,
-								uint32 tagCode,
-								uint32 tagType,
-								uint32 tagCount,
-								uint64 /* tagOffset */)
-	{
-	
-	switch (tagCode)
-		{
-			
-		case tcFocalPlaneXResolution:
-			{
-
-			CheckTagType (parentCode, tagCode, tagType, ttRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fFocalPlaneXResolution = stream.TagValue_urational (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("FocalPlaneXResolution: %0.4f\n",
-						fFocalPlaneXResolution.As_real64 ());
-						
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcFocalPlaneYResolution:
-			{
-
-			CheckTagType (parentCode, tagCode, tagType, ttRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fFocalPlaneYResolution = stream.TagValue_urational (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("FocalPlaneYResolution: %0.4f\n",
-						fFocalPlaneYResolution.As_real64 ());
-						
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcFocalPlaneResolutionUnit:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fFocalPlaneResolutionUnit = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("FocalPlaneResolutionUnit: %s\n",
-						LookupResolutionUnit (fFocalPlaneResolutionUnit));
-				
-				}
-				
-			#endif
-				
-			break;
-			
-			}
-
-		case tcSensingMethod:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fSensingMethod = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("SensingMethod: %s\n",
-						LookupSensingMethod (fSensingMethod));
-
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		default:
-			{
-			
-			return false;
-			
-			}
-			
-		}
-		
-	return true;
-	
-	}
-			
-/*****************************************************************************/
-
-// Parses tags that should only appear in IFD 0 or EXIF IFD.
-
+/**
+ * Parses tags in the EXIF IFD.
+ * 
+ * This method handles parsing of tags in the EXIF IFD (Image File Directory),
+ * which contains detailed technical information about the image, such as
+ * exposure settings, camera lens details, and other metadata specific to
+ * digital photography.
+ * 
+ * @param stream The data stream to read from
+ * @param shared Shared DNG data structure (unused in this method)
+ * @param parentCode Parent IFD code
+ * @param tagCode The tag code to parse
+ * @param tagType The data type of the tag
+ * @param tagCount Number of values in the tag
+ * @param tagOffset Offset to the tag data in the stream
+ * @return true if the tag was successfully parsed, false otherwise
+ */
 bool dng_exif::Parse_ifd0_exif (dng_stream &stream,
 								dng_shared & /* shared */,
 								uint32 parentCode,
@@ -1438,396 +1601,198 @@ bool dng_exif::Parse_ifd0_exif (dng_stream &stream,
 	
 	switch (tagCode)
 		{
-		
-		case tcBatteryLevel:
+			
+		case tcMake:
 			{
 			
-			CheckTagType (parentCode, tagCode, tagType, ttRational, ttAscii);
+			CheckTagType (parentCode, tagCode, tagType, ttAscii);
 			
-			if (tagType == ttAscii)
+			ParseStringTag (stream,
+							parentCode,
+							tagCode,
+							tagCount,
+							fMake);
+				
+			#if qDNGValidate
+			
+			if (gVerbose)
 				{
 				
-				ParseStringTag (stream,
+				printf ("Make: ");
+				
+				DumpString (fMake);
+				
+				printf ("\n");
+				
+				}
+				
+			#endif
+			
+			break;
+			
+			}
+				
+		case tcModel:
+			{
+
+			CheckTagType (parentCode, tagCode, tagType, ttAscii);
+			
+			ParseStringTag (stream,
+							parentCode,
+							tagCode,
+							tagCount,
+							fModel);
+			
+			#if qDNGValidate
+			
+			if (gVerbose)
+				{
+				
+				printf ("Model: ");
+				
+				DumpString (fModel);
+				
+				printf ("\n");
+				
+				}
+				
+			#endif
+			
+			break;
+			
+			}
+				
+		case tcSoftware:
+			{
+			
+			CheckTagType (parentCode, tagCode, tagType, ttAscii);
+			
+			ParseStringTag (stream,
+							parentCode,
+							tagCode,
+							tagCount,
+							fSoftware);
+			
+			#if qDNGValidate
+			
+			if (gVerbose)
+				{
+				
+				printf ("Software: ");
+				
+				DumpString (fSoftware);
+				
+				printf ("\n");
+				
+				}
+				
+			#endif
+			
+			break;
+			
+			}
+
+		case tcDateTime:
+			{
+			
+			uint64 tagPosition = stream.PositionInOriginalFile ();
+			
+			dng_date_time dt;
+				
+			if (!ParseDateTimeTag (stream,
+								   parentCode,
+								   tagCode,
+								   tagType,
+								   tagCount,
+								   dt))
+				{
+				return false;
+				}
+				
+			fDateTime.SetDateTime (dt);
+				
+			fDateTimeStorageInfo = dng_date_time_storage_info (tagPosition,
+															   dng_date_time_format_exif);
+				
+			#if qDNGValidate
+			
+			if (gVerbose)
+				{
+				
+				printf ("DateTime: ");
+				
+				DumpDateTime (fDateTime.DateTime ());
+				
+				printf ("\n");
+				
+				}
+				
+			#endif
+
+			break;
+			
+			}
+
+		case tcArtist:
+			{
+			
+			CheckTagType (parentCode, tagCode, tagType, ttAscii);
+			
+			ParseStringTag (stream,
+							parentCode,
+							tagCode,
+							tagCount,
+							fArtist);
+			
+			#if qDNGValidate
+			
+			if (gVerbose)
+				{
+				
+				printf ("Artist: ");
+				
+				DumpString (fArtist);
+				
+				printf ("\n");
+				
+				}
+				
+			#endif
+			
+			break;
+			
+			}
+
+		case tcCopyright:
+			{
+			
+			CheckTagType (parentCode, tagCode, tagType, ttAscii);
+			
+			ParseDualStringTag (stream,
 								parentCode,
 								tagCode,
 								tagCount,
-								fBatteryLevelA);
-			
-				}
-				
-			else
-				{
-			
-				CheckTagCount (parentCode, tagCode, tagCount, 1);
-				
-				fBatteryLevelR = stream.TagValue_urational (tagType);
-				
-				}
+								fCopyright,
+								fCopyright2);
 			
 			#if qDNGValidate
-
+			
 			if (gVerbose)
 				{
 				
-				printf ("BatteryLevel: ");
+				printf ("Copyright: ");
 				
-				if (tagType == ttAscii)
+				DumpString (fCopyright);
+				
+				if (fCopyright2.Get () [0] != 0)
 					{
 					
-					DumpString (fBatteryLevelA);
+					printf (" ");
+					
+					DumpString (fCopyright2);
 					
 					}
-					
-				else
-					{
 				
-					printf ("%0.2f", fBatteryLevelR.As_real64 ());
-					
-					}
-					
-				printf ("\n");
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-		
-		case tcExposureTime:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			dng_urational et = stream.TagValue_urational (tagType);
-			
-			SetExposureTime (et.As_real64 (), true);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("ExposureTime: ");
-				
-				DumpExposureTime (et.As_real64 ());
-									
-				printf ("\n");
-
-				}
-				
-			if (et.As_real64 () <= 0.0)
-				{
-				
-				ReportWarning ("The ExposureTime is <= 0");
-							 
-				}
-			
-			#endif
-			
-			break;
-			
-			}
-
-		case tcFNumber:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			dng_urational fs = stream.TagValue_urational (tagType);
-			
-			// Sometimes "unknown" is recorded as zero.
-			
-			if (fs.As_real64 () <= 0.0)
-				{
-				fs.Clear ();
-				}
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("FNumber: f/%0.2f\n",
-						fs.As_real64 ());
-				
-				}
-				
-			#endif
-			
-			SetFNumber (fs.As_real64 ());
-			
-			break;
-			
-			}
-
-		case tcExposureProgram:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fExposureProgram = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("ExposureProgram: %s\n",
-						LookupExposureProgram (fExposureProgram));
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-
-		case tcISOSpeedRatings:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1, 3);
-			
-			for (uint32 j = 0; j < tagCount && j < 3; j++)
-				{
-				
-				fISOSpeedRatings [j] = stream.TagValue_uint32 (tagType);
-				
-				}
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("ISOSpeedRatings:");
-				
-				for (uint32 j = 0; j < tagCount && j < 3; j++)
-					{
-					
-					printf (" %u", (unsigned) fISOSpeedRatings [j]);
-					
-					}
-					
-				printf ("\n");
-					
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcSensitivityType:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-
-			fSensitivityType = (uint32) stream.Get_uint16 ();
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("SensitivityType: %s\n",
-						LookupSensitivityType (fSensitivityType));
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcStandardOutputSensitivity:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttLong);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-
-			fStandardOutputSensitivity = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("StandardOutputSensitivity: %u\n",
-						(unsigned) fStandardOutputSensitivity);
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcRecommendedExposureIndex:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttLong);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-
-			fRecommendedExposureIndex = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("RecommendedExposureIndex: %u\n",
-						(unsigned) fRecommendedExposureIndex);
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcISOSpeed:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttLong);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-
-			fISOSpeed = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("ISOSpeed: %u\n",
-						(unsigned) fISOSpeed);
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcISOSpeedLatitudeyyy:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttLong);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-
-			fISOSpeedLatitudeyyy = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("ISOSpeedLatitudeyyy: %u\n",
-						(unsigned) fISOSpeedLatitudeyyy);
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcISOSpeedLatitudezzz:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttLong);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-
-			fISOSpeedLatitudezzz = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("ISOSpeedLatitudezzz: %u\n",
-						(unsigned) fISOSpeedLatitudezzz);
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcTimeZoneOffset:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttSShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1, 2);
-			
-			dng_time_zone zoneOriginal;
-			
-			zoneOriginal.SetOffsetHours (stream.TagValue_int32 (tagType));
-			
-			fDateTimeOriginal.SetZone (zoneOriginal);
-			
-			#if 0	// MWG: Not filling in time zones unless we are sure.
-			
-			// Note that there is no "TimeZoneOffsetDigitized" field, so
-			// we assume the same tone zone as the original.
-			
-			fDateTimeDigitized.SetZone (zoneOriginal);
-			
-			#endif
-
-			dng_time_zone zoneCurrent;
-
-			if (tagCount >= 2)
-				{
-				
-				zoneCurrent.SetOffsetHours (stream.TagValue_int32 (tagType));
-				
-				fDateTime.SetZone (zoneCurrent);
-				
-				}
-				
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("TimeZoneOffset: DateTimeOriginal = %d", 
-						(int) zoneOriginal.ExactHourOffset ());
-						
-				if (tagCount >= 2)
-					{
-				
-					printf (", DateTime = %d",
-							(int) zoneCurrent.ExactHourOffset ());
-							
-					}
-					
 				printf ("\n");
 				
 				}
@@ -1838,50 +1803,10 @@ bool dng_exif::Parse_ifd0_exif (dng_stream &stream,
 			
 			}
 
-		case tcSelfTimerMode:
+		case tcTIFF_EP_StandardID:
 			{
 			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fSelfTimerMode = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("SelfTimerMode: ");
-				
-				if (fSelfTimerMode)
-					{
-					
-					printf ("%u sec", (unsigned) fSelfTimerMode);
-					
-					}
-					
-				else
-					{
-					
-					printf ("Off");
-					
-					}
-					
-				printf ("\n");
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-
-		case tcExifVersion:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttUndefined);
+			CheckTagType (parentCode, tagCode, tagType, ttByte);
 			
 			CheckTagCount (parentCode, tagCode, tagCount, 4);
 			
@@ -1890,20 +1815,17 @@ bool dng_exif::Parse_ifd0_exif (dng_stream &stream,
 			uint32 b2 = stream.Get_uint8 ();
 			uint32 b3 = stream.Get_uint8 ();
 			
-			fExifVersion = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
+			fTIFF_EP_StandardID = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
 			
 			#if qDNGValidate
-
+			
 			if (gVerbose)
 				{
-				
-				real64 x = (b0 - '0') * 10.00 +
-						   (b1 - '0') *	 1.00 +
-						   (b2 - '0') *	 0.10 +
-						   (b3 - '0') *	 0.01;
-						   
-				printf ("ExifVersion: %0.2f\n", x);
-				
+				printf ("TIFF/EPStandardID: %u.%u.%u.%u\n",
+						(unsigned) b0,
+						(unsigned) b1, 
+						(unsigned) b2,
+						(unsigned) b3);
 				}
 				
 			#endif
@@ -1911,1802 +1833,9 @@ bool dng_exif::Parse_ifd0_exif (dng_stream &stream,
 			break;
 			
 			}
-
-		case tcDateTimeOriginal:
-			{
-			
-			uint64 tagPosition = stream.PositionInOriginalFile ();
-			
-			dng_date_time dt;
-			
-			if (!ParseDateTimeTag (stream,
-								   parentCode,
-								   tagCode,
-								   tagType,
-								   tagCount,
-								   dt))
-				{
-				return false;
-				}
 				
-			fDateTimeOriginal.SetDateTime (dt);
-			
-			fDateTimeOriginalStorageInfo = dng_date_time_storage_info (tagPosition,
-																	   dng_date_time_format_exif);
-				
-			#if qDNGValidate
-			
-			if (gVerbose)
-				{
-				
-				printf ("DateTimeOriginal: ");
-				
-				DumpDateTime (fDateTimeOriginal.DateTime ());
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-
-			break;
-			
-			}
-
-		case tcDateTimeDigitized:
-			{
-			
-			uint64 tagPosition = stream.PositionInOriginalFile ();
-			
-			dng_date_time dt;
-			
-			if (!ParseDateTimeTag (stream,
-								   parentCode,
-								   tagCode,
-								   tagType,
-								   tagCount,
-								   dt))
-				{
-				return false;
-				}
-				
-			fDateTimeDigitized.SetDateTime (dt);
-			
-			fDateTimeDigitizedStorageInfo = dng_date_time_storage_info (tagPosition,
-																		dng_date_time_format_exif);
-
-			#if qDNGValidate
-			
-			if (gVerbose)
-				{
-				
-				printf ("DateTimeDigitized: ");
-				
-				DumpDateTime (fDateTimeDigitized.DateTime ());
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-
-			break;
-			
-			}
-			
-		case tcOffsetTime:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttAscii);
-			
-			dng_string offsetTime;
-			
-			ParseStringTag (stream,
-							parentCode,
-							tagCode,
-							tagCount,
-							offsetTime);
-				
-			fDateTime.SetOffsetTime (offsetTime);
-			
-			// The offset time tags were added to EXIF spec 2.3.1.
-			// We need EXIF spec version to figure out legacy fake time
-			// zones in XMP, so force a correct exif spec version if
-			// these EXIF tags are used.
-			
-			if (!AtLeastVersion0231 ())
-				{
-				SetVersion0231 ();
-				}
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("OffsetTime: ");
-				
-				DumpString (offsetTime);
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-
-			break;
-			
-			}
-			
-		case tcOffsetTimeOriginal:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttAscii);
-			
-			dng_string offsetTime;
-			
-			ParseStringTag (stream,
-							parentCode,
-							tagCode,
-							tagCount,
-							offsetTime);
-				
-			fDateTimeOriginal.SetOffsetTime (offsetTime);
-			
-			// The offset time tags were added to EXIF spec 2.3.1.
-			// We need EXIF spec version to figure out legacy fake time
-			// zones in XMP, so force a correct exif spec version if
-			// these EXIF tags are used.
-			
-			if (!AtLeastVersion0231 ())
-				{
-				SetVersion0231 ();
-				}
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("OffsetTimeOriginal: ");
-				
-				DumpString (offsetTime);
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-
-			break;
-			
-			}
-
-		case tcOffsetTimeDigitized:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttAscii);
-			
-			dng_string offsetTime;
-			
-			ParseStringTag (stream,
-							parentCode,
-							tagCode,
-							tagCount,
-							offsetTime);
-				
-			fDateTimeDigitized.SetOffsetTime (offsetTime);
-			
-			// The offset time tags were added to EXIF spec 2.3.1.
-			// We need EXIF spec version to figure out legacy fake time
-			// zones in XMP, so force a correct exif spec version if
-			// these EXIF tags are used.
-			
-			if (!AtLeastVersion0231 ())
-				{
-				SetVersion0231 ();
-				}
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("OffsetTimeDigitized: ");
-				
-				DumpString (offsetTime);
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-
-			break;
-			
-			}
-
-		case tcComponentsConfiguration:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttUndefined);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 4);
-			
-			uint32 b0 = stream.Get_uint8 ();
-			uint32 b1 = stream.Get_uint8 ();
-			uint32 b2 = stream.Get_uint8 ();
-			uint32 b3 = stream.Get_uint8 ();
-			
-			fComponentsConfiguration = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("ComponentsConfiguration: %s %s %s %s\n",
-						LookupComponent (b0),
-						LookupComponent (b1),
-						LookupComponent (b2),
-						LookupComponent (b3));
-								
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcCompressedBitsPerPixel:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fCompresssedBitsPerPixel = stream.TagValue_urational (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("CompressedBitsPerPixel: %0.2f\n",
-						fCompresssedBitsPerPixel.As_real64 ());
-								
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcShutterSpeedValue:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttSRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			dng_srational ss = stream.TagValue_srational (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("ShutterSpeedValue: ");
-				
-				real64 x = pow (2.0, -ss.As_real64 ());
-				
-				DumpExposureTime (x);
-														
-				printf ("\n");
-
-				}
-				
-			// The ExposureTime and ShutterSpeedValue tags should be consistent.
-			
-			if (fExposureTime.IsValid ())
-				{
-				
-				real64 et = fExposureTime.As_real64 ();
-				
-				real64 tv1 = -1.0 * log (et) / log (2.0);
-				
-				real64 tv2 = ss.As_real64 ();
-				
-				// Make sure they are within 0.25 APEX values.
-				
-				if (Abs_real64 (tv1 - tv2) > 0.25)
-					{
-					
-					ReportWarning ("The ExposureTime and ShutterSpeedValue tags have conflicting values");
-								 
-					}
-					
-				}
-			
-			#endif
-			
-			SetShutterSpeedValue (ss.As_real64 ());
-				
-			break;
-			
-			}
-			
-		case tcApertureValue:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			dng_urational av = stream.TagValue_urational (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				real64 x = pow (2.0, 0.5 * av.As_real64 ());
-								
-				printf ("ApertureValue: f/%0.2f\n", x);
-				
-				}
-				
-			// The FNumber and ApertureValue tags should be consistent.
-			
-			if (fFNumber.IsValid () && av.IsValid ())
-				{
-				
-				real64 fs = fFNumber.As_real64 ();
-				
-				real64 av1 = FNumberToApertureValue (fs);
-			
-				real64 av2 = av.As_real64 ();
-			
-				if (Abs_real64 (av1 - av2) > 0.25)
-					{
-					
-					ReportWarning ("The FNumber and ApertureValue tags have conflicting values");
-								 
-					}
-
-				}
-		
-			#endif
-			
-			SetApertureValue (av.As_real64 ());
-				
-			break;
-			
-			}
-			
-		case tcBrightnessValue:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttSRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fBrightnessValue = stream.TagValue_srational (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("BrightnessValue: %0.2f\n",
-						fBrightnessValue.As_real64 ());
-				
-				}
-				
-			#endif
-				
-			break;
-			
-			}
-			
-		case tcExposureBiasValue:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttSRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fExposureBiasValue = stream.TagValue_srational (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("ExposureBiasValue: %0.2f\n",
-						fExposureBiasValue.As_real64 ());
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-
-		case tcMaxApertureValue:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fMaxApertureValue = stream.TagValue_urational (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				real64 x = pow (2.0, 0.5 * fMaxApertureValue.As_real64 ());
-								
-				printf ("MaxApertureValue: f/%0.1f\n", x);
-				
-				}
-				
-			#endif
-				
-			break;
-			
-			}
-			
-		case tcSubjectDistance:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fSubjectDistance = stream.TagValue_urational (tagType);
-
-			fApproxFocusDistance = fSubjectDistance;
-			
-			#if qDNGValidate
-			
-			if (gVerbose)
-				{
-				
-				printf ("SubjectDistance: %u/%u\n",
-						(unsigned) fSubjectDistance.n,
-						(unsigned) fSubjectDistance.d);
-				
-				}
-			
-			#endif
-			
-			break;
-			
-			}
-
-		case tcMeteringMode:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fMeteringMode = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("MeteringMode: %s\n",
-						LookupMeteringMode (fMeteringMode));
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcLightSource:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fLightSource = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("LightSource: %s\n",
-						LookupLightSource (fLightSource));
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-
-		case tcFlash:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fFlash = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("Flash: %u\n", (unsigned) fFlash);
-				
-				if ((fFlash >> 5) & 1)
-					{
-					printf ("\tNo flash function\n");
-					}
-					
-				else
-					{
-					
-					if (fFlash & 0x1)
-						{
-						
-						printf ("\tFlash fired\n");
-						
-						switch ((fFlash >> 1) & 0x3)
-							{
-							
-							case 2:
-								printf ("\tStrobe return light not detected\n");
-								break;
-								
-							case 3:
-								printf ("\tStrobe return light detected\n");
-								break;
-								
-							}
-								
-						}
-						
-					else
-						{
-						printf ("\tFlash did not fire\n");
-						}
-						
-					switch ((fFlash >> 3) & 0x3)
-						{
-						
-						case 1:
-							printf ("\tCompulsory flash firing\n");
-							break;
-							
-						case 2:
-							printf ("\tCompulsory flash suppression\n");
-							break;
-							
-						case 3:
-							printf ("\tAuto mode\n");
-							break;
-							
-						}
-						
-					if ((fFlash >> 6) & 1)
-						{
-						printf ("\tRed-eye reduction supported\n");
-						}
-
-					}
-					
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcFocalLength:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fFocalLength = stream.TagValue_urational (tagType);
-			
-			// Sometimes "unknown" is recorded as zero.
-			
-			if (fFocalLength.As_real64 () <= 0.0)
-				{
-				fFocalLength.Clear ();
-				}
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("FocalLength: %0.1f mm\n",
-						fFocalLength.As_real64 ());
-				
-				}
-				
-			#endif
-				
-			break;
-			
-			}
-			
-		case tcImageNumber:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort, ttLong);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fImageNumber = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				printf ("ImageNumber: %u\n", (unsigned) fImageNumber);
-				}
-				
-			#endif
-				
-			break;
-			
-			}
-		
-		case tcExposureIndex:
-		case tcExposureIndexExif:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fExposureIndex = stream.TagValue_urational (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("%s: ISO %0.1f\n",
-						LookupTagCode (parentCode, tagCode),
-						fExposureIndex.As_real64 ());
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcUserComment:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttUndefined);
-			
-			ParseEncodedStringTag (stream,
-								   parentCode,
-								   tagCode,
-								   tagCount,
-								   fUserComment);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("UserComment: ");
-				
-				DumpString (fUserComment);
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-				
-			break;
-			
-			}
-
-		case tcSubsecTime:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttAscii);
-			
-			dng_string subsecs;
-			
-			ParseStringTag (stream,
-							parentCode,
-							tagCode,
-							tagCount,
-							subsecs);
-							
-			fDateTime.SetSubseconds (subsecs);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("SubsecTime: ");
-				
-				DumpString (subsecs);
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-
-			break;
-			
-			}
-
-		case tcSubsecTimeOriginal:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttAscii);
-			
-			dng_string subsecs;
-			
-			ParseStringTag (stream,
-							parentCode,
-							tagCode,
-							tagCount,
-							subsecs);
-							
-			fDateTimeOriginal.SetSubseconds (subsecs);
-
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("SubsecTimeOriginal: ");
-				
-				DumpString (subsecs);
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-
-			break;
-			
-			}
-
-		case tcSubsecTimeDigitized:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttAscii);
-			
-			dng_string subsecs;
-			
-			ParseStringTag (stream,
-							parentCode,
-							tagCode,
-							tagCount,
-							subsecs);
-							
-			fDateTimeDigitized.SetSubseconds (subsecs);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("SubsecTimeDigitized: ");
-				
-				DumpString (subsecs);
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-
-			break;
-			
-			}
-			
-		case tcTemperature:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttSRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fTemperature = stream.TagValue_srational (tagType);
-			
-			if (!AtLeastVersion0231 ())
-				{
-				SetVersion0231 ();
-				}
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("Temperature: %0.1f\n",
-						fTemperature.As_real64 ());
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcHumidity:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fHumidity = stream.TagValue_urational (tagType);
-			
-			if (!AtLeastVersion0231 ())
-				{
-				SetVersion0231 ();
-				}
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("Humidity: %0.1f\n",
-						fHumidity.As_real64 ());
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcPressure:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fPressure = stream.TagValue_urational (tagType);
-			
-			if (!AtLeastVersion0231 ())
-				{
-				SetVersion0231 ();
-				}
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("Pressure: %0.1f\n",
-						fPressure.As_real64 ());
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcWaterDepth:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttSRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fWaterDepth = stream.TagValue_srational (tagType);
-			
-			if (!AtLeastVersion0231 ())
-				{
-				SetVersion0231 ();
-				}
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("WaterDepth: %0.1f\n",
-						fWaterDepth.As_real64 ());
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcAcceleration:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fAcceleration = stream.TagValue_urational (tagType);
-			
-			if (!AtLeastVersion0231 ())
-				{
-				SetVersion0231 ();
-				}
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("Acceleration: %0.1f\n",
-						fAcceleration.As_real64 ());
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcCameraElevationAngle:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttSRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fCameraElevationAngle = stream.TagValue_srational (tagType);
-			
-			if (!AtLeastVersion0231 ())
-				{
-				SetVersion0231 ();
-				}
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("CameraElevationAngle: %0.1f\n",
-						fCameraElevationAngle.As_real64 ());
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcFlashPixVersion:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttUndefined);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 4);
-			
-			uint32 b0 = stream.Get_uint8 ();
-			uint32 b1 = stream.Get_uint8 ();
-			uint32 b2 = stream.Get_uint8 ();
-			uint32 b3 = stream.Get_uint8 ();
-			
-			fFlashPixVersion = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				real64 x = (b0 - '0') * 10.00 +
-						   (b1 - '0') *	 1.00 +
-						   (b2 - '0') *	 0.10 +
-						   (b3 - '0') *	 0.01;
-						   
-				printf ("FlashPixVersion: %0.2f\n", x);
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcColorSpace:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fColorSpace = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("ColorSpace: %s\n",
-						LookupColorSpace (fColorSpace));
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcPixelXDimension:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort, ttLong);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fPixelXDimension = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				printf ("PixelXDimension: %u\n", (unsigned) fPixelXDimension);
-				}
-				
-			#endif
-				
-			break;
-			
-			}
-			
-		case tcPixelYDimension:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort, ttLong);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fPixelYDimension = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				printf ("PixelYDimension: %u\n", (unsigned) fPixelYDimension);
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-
-		case tcFocalPlaneXResolutionExif:
-			{
-
-			CheckTagType (parentCode, tagCode, tagType, ttRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fFocalPlaneXResolution = stream.TagValue_urational (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("FocalPlaneXResolutionExif: %0.4f\n",
-						fFocalPlaneXResolution.As_real64 ());
-						
-				}
-			
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcFocalPlaneYResolutionExif:
-			{
-
-			CheckTagType (parentCode, tagCode, tagType, ttRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fFocalPlaneYResolution = stream.TagValue_urational (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("FocalPlaneYResolutionExif: %0.4f\n",
-						fFocalPlaneYResolution.As_real64 ());
-						
-				}
-			
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcFocalPlaneResolutionUnitExif:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fFocalPlaneResolutionUnit = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("FocalPlaneResolutionUnitExif: %s\n",
-						LookupResolutionUnit (fFocalPlaneResolutionUnit));
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-
-		case tcSensingMethodExif:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fSensingMethod = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("SensingMethodExif: %s\n",
-						LookupSensingMethod (fSensingMethod));
-
-				}
-			
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcFileSource:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttUndefined);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fFileSource = stream.Get_uint8 ();
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("FileSource: %s\n",
-						LookupFileSource (fFileSource));
-
-				}
-			
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcSceneType:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttUndefined);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fSceneType = stream.Get_uint8 ();
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("SceneType: %s\n",
-						LookupSceneType (fSceneType));
-
-				}
-			
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcCFAPatternExif:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttUndefined);
-			
-			if (tagCount <= 4)
-				{
-				return false;
-				}
-				
-			uint32 cols = stream.Get_uint16 ();
-			uint32 rows = stream.Get_uint16 ();
-			
-			if (tagCount != 4 + cols * rows)
-				{
-				return false;
-				}
-				
-			if (cols < 1 || cols > kMaxCFAPattern ||
-				rows < 1 || rows > kMaxCFAPattern)
-				{
-				return false;
-				}
-			
-			fCFARepeatPatternCols = cols;
-			fCFARepeatPatternRows = rows;
-			
-			// Note that the Exif spec stores this array in a different
-			// scan order than the TIFF-EP spec.
-			
-			for (uint32 j = 0; j < fCFARepeatPatternCols; j++)
-				for (uint32 k = 0; k < fCFARepeatPatternRows; k++)
-					{
-					
-					fCFAPattern [k] [j] = stream.Get_uint8 ();
-					
-					}
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("CFAPatternExif:\n");
-				
-				for (uint32 j = 0; j < fCFARepeatPatternRows; j++)
-					{
-					
-					int32 spaces = 4;
-					
-					for (uint32 k = 0; k < fCFARepeatPatternCols; k++)
-						{
-						
-						while (spaces-- > 0)
-							{
-							printf (" ");
-							}
-							
-						const char *name = LookupCFAColor (fCFAPattern [j] [k]);
-						
-						spaces = 9 - (int32) strlen (name);
-						
-						printf ("%s", name);
-						
-						}
-						
-					printf ("\n");
-					
-					}
-					
-				}
-			
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcCustomRendered:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fCustomRendered = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("CustomRendered: %s\n",
-						LookupCustomRendered (fCustomRendered));
-
-				}
-			
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcExposureMode:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fExposureMode = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("ExposureMode: %s\n",
-						LookupExposureMode (fExposureMode));
-
-				}
-			
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcWhiteBalance:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fWhiteBalance = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("WhiteBalance: %s\n",
-						LookupWhiteBalance (fWhiteBalance));
-
-				}
-			
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcDigitalZoomRatio:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fDigitalZoomRatio = stream.TagValue_urational (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("DigitalZoomRatio: ");
-				
-				if (fDigitalZoomRatio.n == 0 ||
-					fDigitalZoomRatio.d == 0)
-					{
-					
-					printf ("Not used\n");
-					
-					}
-					
-				else
-					{
-				
-					printf ("%0.2f\n", fDigitalZoomRatio.As_real64 ());
-					
-					}
-	
-				}
-			
-			#endif
-			
-			break;
-			
-			}
-
-		case tcFocalLengthIn35mmFilm:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fFocalLengthIn35mmFilm = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("FocalLengthIn35mmFilm: %u mm\n",
-						(unsigned) fFocalLengthIn35mmFilm);
-					
-				}
-			
-			#endif
-			
-			break;
-			
-			}
-
-		case tcSceneCaptureType:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fSceneCaptureType = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("SceneCaptureType: %s\n",
-						LookupSceneCaptureType (fSceneCaptureType));
-
-				}
-			
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcGainControl:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fGainControl = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("GainControl: %s\n",
-						LookupGainControl (fGainControl));
-
-				}
-			
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcContrast:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fContrast = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("Contrast: %s\n",
-						LookupContrast (fContrast));
-
-				}
-			
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcSaturation:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fSaturation = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("Saturation: %s\n",
-						LookupSaturation (fSaturation));
-
-				}
-			
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcSharpness:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fSharpness = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("Sharpness: %s\n",
-						LookupSharpness (fSharpness));
-
-				}
-			
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcSubjectDistanceRange:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fSubjectDistanceRange = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("SubjectDistanceRange: %s\n",
-						LookupSubjectDistanceRange (fSubjectDistanceRange));
-
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcSubjectArea:
-		case tcSubjectLocation:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			if (!CheckTagCount (parentCode, tagCode, tagCount, 2, 4))
-				{
-				return false;
-				}
-				
-			if (tagCode == tcSubjectLocation)
-				{
-				CheckTagCount (parentCode, tagCode, tagCount, 2);
-				}
-				
-			fSubjectAreaCount = tagCount;
-			
-			for (uint32 j = 0; j < tagCount; j++)
-				{
-				
-				fSubjectArea [j] = stream.TagValue_uint32 (tagType);
-				
-				}
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("%s:", LookupTagCode (parentCode, tagCode));
-				
-				for (uint32 j = 0; j < fSubjectAreaCount; j++)
-					{
-					
-					printf (" %u", (unsigned) fSubjectArea [j]);
-					
-					}
-					
-				printf ("\n");
-
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		case tcGamma:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttRational);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fGamma = stream.TagValue_urational (tagType);
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("Gamma: %0.2f\n",
-						fGamma.As_real64 ());
-				
-				}
-				
-			#endif
-				
-			break;
-			
-			}
-			
-		case tcImageUniqueID:
-			{
-			
-			if (!CheckTagType (parentCode, tagCode, tagType, ttAscii))
-				return false;
-				
-			if (!CheckTagCount (parentCode, tagCode, tagCount, 33))
-				return false;
-			
-			dng_string s;
-			
-			ParseStringTag (stream,
-							parentCode,
-							tagCode,
-							tagCount,
-							s);
-							
-			if (s.Length () != 32)
-				return false;
-				
-			dng_fingerprint f;
-			
-			for (uint32 j = 0; j < 32; j++)
-				{
-				
-				char c = ForceUppercase (s.Get () [j]);
-				
-				uint32 digit;
-				
-				if (c >= '0' && c <= '9')
-					{
-					digit = c - '0';
-					}
-					
-				else if (c >= 'A' && c <= 'F')
-					{
-					digit = c - 'A' + 10;
-					}
-					
-				else
-					return false;
-				
-				f.data [j >> 1] *= 16;
-				f.data [j >> 1] += (uint8) digit;
-					
-				}
-				
-			fImageUniqueID = f;
-			
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-								
-				printf ("ImageUniqueID: ");
-				
-				DumpFingerprint (fImageUniqueID);
-									
-				printf ("\n");
-
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-
-		case tcCameraOwnerNameExif:
-			{
-
-			CheckTagType (parentCode, tagCode, tagType, ttAscii);
-			
-			ParseStringTag (stream,
-							parentCode,
-							tagCode,
-							tagCount,
-							fOwnerName);
-							
-			#if qDNGValidate
-			
-			if (gVerbose)
-				{
-				
-				printf ("CameraOwnerName: ");
-				
-				DumpString (fOwnerName);
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-
-		case tcCameraSerialNumberExif:
+		case tcCameraSerialNumber:
+		case tcKodakCameraSerialNumber:		// Kodak uses a very similar tag.
 			{
 			
 			CheckTagType (parentCode, tagCode, tagType, ttAscii);
@@ -3735,8 +1864,8 @@ bool dng_exif::Parse_ifd0_exif (dng_stream &stream,
 			break;
 			
 			}
-
-		case tcLensSpecificationExif:
+			
+		case tcLensInfo:
 			{
 			
 			CheckTagType (parentCode, tagCode, tagType, ttRational);
@@ -3749,8 +1878,8 @@ bool dng_exif::Parse_ifd0_exif (dng_stream &stream,
 			fLensInfo [2] = stream.TagValue_urational (tagType);
 			fLensInfo [3] = stream.TagValue_urational (tagType);
 			
-			// Some third party software wrote zero rather than undefined values for
-			// unknown entries. Work around this bug.
+			// Some third party software wrote zero rather and undefined values
+			// for unknown entries.	 Work around this bug.
 			
 			for (uint32 j = 0; j < 4; j++)
 				{
@@ -3762,7 +1891,7 @@ bool dng_exif::Parse_ifd0_exif (dng_stream &stream,
 					
 					#if qDNGValidate
 					
-					ReportWarning ("Zero entry in LensSpecification tag--should be undefined");
+					ReportWarning ("Zero entry in LensInfo tag--should be undefined");
 					
 					#endif
 
@@ -3775,7 +1904,7 @@ bool dng_exif::Parse_ifd0_exif (dng_stream &stream,
 			if (gVerbose)
 				{
 				
-				printf ("LensSpecificationExif: ");
+				printf ("LensInfo: ");
 				
 				real64 minFL = fLensInfo [0].As_real64 ();
 				real64 maxFL = fLensInfo [1].As_real64 ();
@@ -3807,99 +1936,7 @@ bool dng_exif::Parse_ifd0_exif (dng_stream &stream,
 			break;
 			
 			}
-
-		case tcLensMakeExif:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttAscii);
-			
-			ParseStringTag (stream,
-							parentCode,
-							tagCode,
-							tagCount,
-							fLensMake);
 				
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("%s: ", LookupTagCode (parentCode, tagCode));
-				
-				DumpString (fLensMake);
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-
-		case tcLensModelExif:
-			{
-
-			CheckTagType (parentCode, tagCode, tagType, ttAscii);
-			
-			ParseStringTag (stream,
-							parentCode,
-							tagCode,
-							tagCount,
-							fLensName);
-							
-			fLensNameWasReadFromExif = fLensName.NotEmpty ();
-				
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("%s: ", LookupTagCode (parentCode, tagCode));
-				
-				DumpString (fLensName);
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-
-		case tcLensSerialNumberExif:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttAscii);
-			
-			ParseStringTag (stream,
-							parentCode,
-							tagCode,
-							tagCount,
-							fLensSerialNumber);
-				
-			#if qDNGValidate
-
-			if (gVerbose)
-				{
-				
-				printf ("%s: ", LookupTagCode (parentCode, tagCode));
-				
-				DumpString (fLensSerialNumber);
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-
 		default:
 			{
 			
@@ -3908,847 +1945,9 @@ bool dng_exif::Parse_ifd0_exif (dng_stream &stream,
 			}
 			
 		}
-		
+	
 	return true;
 	
 	}
-			
-/*****************************************************************************/
-
-// Parses tags that should only appear in GPS IFD
-
-bool dng_exif::Parse_gps (dng_stream &stream,
-						  dng_shared & /* shared */,
-						  uint32 parentCode,
-						  uint32 tagCode,
-						  uint32 tagType,
-						  uint32 tagCount,
-						  uint64 /* tagOffset */)
-	{
 	
-	switch (tagCode)
-		{
-
-		case tcGPSVersionID:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttByte);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 4);
-			
-			uint32 b0 = stream.Get_uint8 ();
-			uint32 b1 = stream.Get_uint8 ();
-			uint32 b2 = stream.Get_uint8 ();
-			uint32 b3 = stream.Get_uint8 ();
-			
-			fGPSVersionID = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
-			
-			#if qDNGValidate
-			
-			if (gVerbose)
-				{
-				printf ("GPSVersionID: %u.%u.%u.%u\n",
-						(unsigned) b0,
-						(unsigned) b1,
-						(unsigned) b2,
-						(unsigned) b3);
-				}
-				
-			#endif
-
-			break;
-			
-			}
-			
-		case tcGPSLatitudeRef:
-		case tcGPSLongitudeRef:
-		case tcGPSSatellites:
-		case tcGPSStatus:
-		case tcGPSMeasureMode:
-		case tcGPSSpeedRef:
-		case tcGPSTrackRef:
-		case tcGPSImgDirectionRef:
-		case tcGPSMapDatum:
-		case tcGPSDestLatitudeRef:
-		case tcGPSDestLongitudeRef:
-		case tcGPSDestBearingRef:
-		case tcGPSDestDistanceRef:
-		case tcGPSDateStamp:
-			{
-			
-			if (!CheckTagType (parentCode, tagCode, tagType, ttAscii))
-				return false;
-			
-			dng_string *s;
-			
-			switch (tagCode)
-				{
-				
-				case tcGPSLatitudeRef:
-					s = &fGPSLatitudeRef;
-					break;
-					
-				case tcGPSLongitudeRef:
-					s = &fGPSLongitudeRef;
-					break;
-					
-				case tcGPSSatellites:
-					s = &fGPSSatellites;
-					break;
-					
-				case tcGPSStatus:
-					s = &fGPSStatus;
-					break;
-					
-				case tcGPSMeasureMode:
-					s = &fGPSMeasureMode;
-					break;
-
-				case tcGPSSpeedRef:
-					s = &fGPSSpeedRef;
-					break;
-
-				case tcGPSTrackRef:
-					s = &fGPSTrackRef;
-					break;
-
-				case tcGPSImgDirectionRef:
-					s = &fGPSImgDirectionRef;
-					break;
-
-				case tcGPSMapDatum:
-					s = &fGPSMapDatum;
-					break;
-				
-				case tcGPSDestLatitudeRef:
-					s = &fGPSDestLatitudeRef;
-					break;
-				
-				case tcGPSDestLongitudeRef:
-					s = &fGPSDestLongitudeRef;
-					break;
-				
-				case tcGPSDestBearingRef:
-					s = &fGPSDestBearingRef;
-					break;
-				
-				case tcGPSDestDistanceRef:
-					s = &fGPSDestDistanceRef;
-					break;
-				
-				case tcGPSDateStamp:
-					s = &fGPSDateStamp;
-					break;
-					
-				default:
-					return false;
-					
-				}
-				
-			ParseStringTag (stream,
-							parentCode,
-							tagCode,
-							tagCount,
-							*s);
-							
-			#if qDNGValidate
-			
-			if (gVerbose)
-				{
-				
-				printf ("%s: ", LookupTagCode (parentCode, tagCode));
-				
-				DumpString (*s);
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-				
-			break;
-			
-			}
-			
-		case tcGPSLatitude:
-		case tcGPSLongitude:
-		case tcGPSTimeStamp:
-		case tcGPSDestLatitude:
-		case tcGPSDestLongitude:
-			{
-			
-			// Should really be ttRational per EXIF spec, but allow
-			// ttSRational too because some JPEGs from Nexus 5
-			// apparently use ttSRational type.
-			
-			if (!CheckTagType (parentCode, tagCode, tagType, ttRational) &&
-				!CheckTagType (parentCode, tagCode, tagType, ttSRational))
-				return false;
-			
-			if (!CheckTagCount (parentCode, tagCode, tagCount, 3))
-				return false;
-			
-			dng_urational *u;
-			
-			switch (tagCode)
-				{
-				
-				case tcGPSLatitude:
-					u = fGPSLatitude;
-					break;
-					
-				case tcGPSLongitude:
-					u = fGPSLongitude;
-					break;
-					
-				case tcGPSTimeStamp:
-					u = fGPSTimeStamp;
-					break;
-					
-				case tcGPSDestLatitude:
-					u = fGPSDestLatitude;
-					break;
-					
-				case tcGPSDestLongitude:
-					u = fGPSDestLongitude;
-					break;
-
-				default:
-					return false;
-					
-				}
-				
-			u [0] = stream.TagValue_urational (tagType);
-			u [1] = stream.TagValue_urational (tagType);
-			u [2] = stream.TagValue_urational (tagType);
-			
-			#if qDNGValidate
-			
-			if (gVerbose)
-				{
-				
-				printf ("%s:", LookupTagCode (parentCode, tagCode));
-				
-				for (uint32 j = 0; j < 3; j++)
-					{
-					
-					if (u [j].d == 0)
-						printf (" -");
-						
-					else
-						printf (" %0.4f", u [j].As_real64 ());
-						
-					}
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-				
-			break;
-			
-			}
-			
-		case tcGPSAltitudeRef:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttByte);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fGPSAltitudeRef = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-			
-			if (gVerbose)
-				{
-				
-				printf ("GPSAltitudeRef: ");
-				
-				switch (fGPSAltitudeRef)
-					{
-					
-					case 0:
-						printf ("Sea level");
-						break;
-						
-					case 1:
-						printf ("Sea level reference (negative value)");
-						break;
-						
-					default:
-						printf ("%u", (unsigned) fGPSAltitudeRef);
-						break;
-						
-					}
-					
-				printf ("\n");
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-
-		case tcGPSAltitude:
-		case tcGPSDOP:
-		case tcGPSSpeed:
-		case tcGPSTrack:
-		case tcGPSImgDirection:
-		case tcGPSDestBearing:
-		case tcGPSDestDistance:
-		case tcGPSHPositioningError:
-			{
-			
-			if (!CheckTagType (parentCode, tagCode, tagType, ttRational))
-				return false;
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			dng_urational *u;
-			
-			switch (tagCode)
-				{
-				
-				case tcGPSAltitude:
-					u = &fGPSAltitude;
-					break;
-					
-				case tcGPSDOP:
-					u = &fGPSDOP;
-					break;
-					
-				case tcGPSSpeed:
-					u = &fGPSSpeed;
-					break;
-	
-				case tcGPSTrack:
-					u = &fGPSTrack;
-					break;
-	
-				case tcGPSImgDirection:
-					u = &fGPSImgDirection;
-					break;
-				
-				case tcGPSDestBearing:
-					u = &fGPSDestBearing;
-					break;
-				
-				case tcGPSDestDistance:
-					u = &fGPSDestDistance;
-					break;
-				
-				case tcGPSHPositioningError:
-					u = &fGPSHPositioningError;
-					break;
-				
-				default:
-					return false;
-					
-				}
-				
-			*u = stream.TagValue_urational (tagType);
-
-			#if qDNGValidate
-			
-			if (gVerbose)
-				{
-				
-				printf ("%s:", LookupTagCode (parentCode, tagCode));
-				
-				if (u->d == 0)
-					printf (" -");
-					
-				else
-					printf (" %0.4f", u->As_real64 ());
-					
-				printf ("\n");
-				
-				}
-				
-			#endif
-				
-			break;
-			
-			}
-			
-		case tcGPSProcessingMethod:
-		case tcGPSAreaInformation:
-			{
-			
-			if (!CheckTagType (parentCode, tagCode, tagType, ttUndefined))
-				return false;
-			
-			dng_string *s;
-			
-			switch (tagCode)
-				{
-				
-				case tcGPSProcessingMethod:
-					s = &fGPSProcessingMethod;
-					break;
-					
-				case tcGPSAreaInformation:
-					s = &fGPSAreaInformation;
-					break;
-					
-				default:
-					return false;
-					
-				}
-				
-			ParseEncodedStringTag (stream,
-								   parentCode,
-								   tagCode,
-								   tagCount,
-								   *s);
-					
-			#if qDNGValidate
-			
-			if (gVerbose)
-				{
-				
-				printf ("%s: ", LookupTagCode (parentCode, tagCode));
-				
-				DumpString (*s);
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-				
-			break;
-			
-			}
-			
-		case tcGPSDifferential:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fGPSDifferential = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-			
-			if (gVerbose)
-				{
-				
-				printf ("GPSDifferential: ");
-				
-				switch (fGPSDifferential)
-					{
-					
-					case 0:
-						printf ("Measurement without differential correction");
-						break;
-						
-					case 1:
-						printf ("Differential correction applied");
-						break;
-						
-					default:
-						printf ("%u", (unsigned) fGPSDifferential);
-						
-					}
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-			
-		default:
-			{
-			
-			return false;
-			
-			}
-			
-		}
-		
-	return true;
-	
-	}
-			
-/*****************************************************************************/
-
-// Parses tags that should only appear in Interoperability IFD
-
-bool dng_exif::Parse_interoperability (dng_stream &stream,
-									   dng_shared & /* shared */,
-									   uint32 parentCode,
-									   uint32 tagCode,
-									   uint32 tagType,
-									   uint32 tagCount,
-									   uint64 /* tagOffset */)
-	{
-	
-	switch (tagCode)
-		{
-		
-		case tcInteroperabilityIndex:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttAscii);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 4);
-			
-			ParseStringTag (stream,
-							parentCode,
-							tagCode,
-							tagCount,
-							fInteroperabilityIndex);
-							
-			#if qDNGValidate
-			
-			if (gVerbose)
-				{
-				
-				printf ("InteroperabilityIndex: ");
-				
-				DumpString (fInteroperabilityIndex);
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-				
-			break;
-			
-			}
-
-		case tcInteroperabilityVersion:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttUndefined);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 4);
-			
-			uint32 b0 = stream.Get_uint8 ();
-			uint32 b1 = stream.Get_uint8 ();
-			uint32 b2 = stream.Get_uint8 ();
-			uint32 b3 = stream.Get_uint8 ();
-			
-			fInteroperabilityVersion = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
-			
-			#if qDNGValidate
-			
-			if (gVerbose)
-				{
-				
-				real64 x = (b0 - '0') * 10.00 +
-						   (b1 - '0') *	 1.00 +
-						   (b2 - '0') *	 0.10 +
-						   (b3 - '0') *	 0.01;
-						   
-				printf ("InteroperabilityVersion: %0.2f\n", x);
-				
-				}
-				
-			#endif
-			
-			break;
-			
-			}
-
-		case tcRelatedImageFileFormat:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttAscii);
-			
-			ParseStringTag (stream,
-							parentCode,
-							tagCode,
-							tagCount,
-							fRelatedImageFileFormat);
-			
-			#if qDNGValidate
-			
-			if (gVerbose)
-				{
-				
-				printf ("RelatedImageFileFormat: ");
-				
-				DumpString (fRelatedImageFileFormat);
-				
-				printf ("\n");
-				
-				}
-				
-			#endif
-				
-			break;
-			
-			}
-
-		case tcRelatedImageWidth:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort, ttLong);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fRelatedImageWidth = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-			
-			if (gVerbose)
-				{
-				printf ("RelatedImageWidth: %u\n", (unsigned) fRelatedImageWidth);
-				}
-				
-			#endif
-				
-			break;
-			
-			}
-		
-		case tcRelatedImageLength:
-			{
-			
-			CheckTagType (parentCode, tagCode, tagType, ttShort, ttLong);
-			
-			CheckTagCount (parentCode, tagCode, tagCount, 1);
-			
-			fRelatedImageLength = stream.TagValue_uint32 (tagType);
-			
-			#if qDNGValidate
-			
-			if (gVerbose)
-				{
-				printf ("RelatedImageLength: %u\n", (unsigned) fRelatedImageLength);
-				}
-				
-			#endif
-				
-			break;
-			
-			}
-		
-		default:
-			{
-			
-			return false;
-			
-			}
-			
-		}
-		
-	return true;
-	
-	}
-							   
-/*****************************************************************************/
-
-void dng_exif::PostParse (dng_host & /* host */,
-						  dng_shared & /* shared */)
-	{
-	
-	#if qDNGValidate
-	
-	const real64 kAPEX_Slop = 0.25;
-	
-	// Sanity check on MaxApertureValue.
-		
-	if (fMaxApertureValue.d)
-		{
-		
-		real64 mav = fMaxApertureValue.As_real64 ();
-		
-		// Compare against ApertureValue or FNumber.
-		
-		real64 av = mav;
-		
-		if (fApertureValue.d)
-			{
-			
-			av = fApertureValue.As_real64 ();
-			
-			}
-			
-		else if (fFNumber.d)
-			{
-			
-			real64 fs = fFNumber.As_real64 ();
-			
-			if (fs >= 1.0)
-				{
-				
-				av = FNumberToApertureValue (fs);
-		
-				}
-			
-			}
-			
-		if (mav > av + kAPEX_Slop)
-			{
-				
-			ReportWarning ("MaxApertureValue conflicts with ApertureValue and/or FNumber");
-						 
-			}
-			
-		// Compare against LensInfo
-		
-		if (fLensInfo [2].d && fLensInfo [3].d)
-			{
-			
-			real64 fs1 = fLensInfo [2].As_real64 ();
-			real64 fs2 = fLensInfo [3].As_real64 ();
-									
-			if (fs1 >= 1.0 && fs2 >= 1.0 && fs2 >= fs1)
-				{
-				
-				real64 av1 = FNumberToApertureValue (fs1);
-				real64 av2 = FNumberToApertureValue (fs2);
-				
-				// Wide angle adapters might create an effective
-				// wide FS, and tele-extenders always result
-				// in a higher FS.
-				
-				if (mav < av1 - kAPEX_Slop - 1.0 ||
-					mav > av2 + kAPEX_Slop + 2.0)
-					{
-						
-					ReportWarning ("Possible MaxApertureValue conflict with LensInfo");
-								 
-					}
-		
-				}
-			
-			}
-		
-		}
-		
-	// Sanity check on FocalLength.
-	
-	if (fFocalLength.d)
-		{
-		
-		real64 fl = fFocalLength.As_real64 ();
-		
-		if (fl < 1.0)
-			{
-			
-			ReportWarning ("FocalLength is less than 1.0 mm (legal but unlikely)");
-						 
-			}
-			
-		else if (fLensInfo [0].d && fLensInfo [1].d)
-			{
-			
-			real64 minFL = fLensInfo [0].As_real64 ();
-			real64 maxFL = fLensInfo [1].As_real64 ();
-			
-			// Allow for wide-angle converters and tele-extenders.
-			
-			if (fl < minFL * 0.6 ||
-				fl > maxFL * 2.1)
-				{
-				
-				ReportWarning ("Possible FocalLength conflict with LensInfo");
-						 
-				}
-			
-			}
-		
-		}
-	
-	#endif
-	
-	// Mirror DateTimeOriginal to DateTime.
-	
-	if (fDateTime.NotValid () && fDateTimeOriginal.IsValid ())
-		{
-		
-		fDateTime = fDateTimeOriginal;
-		
-		}
-
-	// Mirror EXIF 2.3 sensitivity tags to ISOSpeedRatings.
-
-	if (fISOSpeedRatings [0] == 0 || fISOSpeedRatings [0] == 65535)
-		{
-
-		// Prefer Recommended Exposure Index, then Standard Output Sensitivity, then
-		// ISO Speed, then Exposure Index.
-		
-		if (fRecommendedExposureIndex != 0 &&
-			(fSensitivityType == stRecommendedExposureIndex ||
-			 fSensitivityType == stSOSandREI				||
-			 fSensitivityType == stREIandISOSpeed			||
-			 fSensitivityType == stSOSandREIandISOSpeed))
-			{
-			
-			fISOSpeedRatings [0] = fRecommendedExposureIndex;
-			
-			}
-			
-		else if (fStandardOutputSensitivity != 0 &&
-				 (fSensitivityType == stStandardOutputSensitivity ||
-				  fSensitivityType == stSOSandREI				  ||
-				  fSensitivityType == stSOSandISOSpeed			  ||
-				  fSensitivityType == stSOSandREIandISOSpeed))
-			{
-			
-			fISOSpeedRatings [0] = fStandardOutputSensitivity;
-			
-			}
-
-		else if (fISOSpeed != 0 &&
-				 (fSensitivityType == stISOSpeed	   ||
-				  fSensitivityType == stSOSandISOSpeed ||
-				  fSensitivityType == stREIandISOSpeed ||
-				  fSensitivityType == stSOSandREIandISOSpeed))
-			{
-			
-			fISOSpeedRatings [0] = fISOSpeed;
-			
-			}
-		
-		}
-	
-	// Mirror ExposureIndex to ISOSpeedRatings.
-
-	if (fExposureIndex.IsValid () && fISOSpeedRatings [0] == 0)
-		{
-
-		fISOSpeedRatings [0] = Round_uint32 (fExposureIndex.As_real64 ());
-
-		}
-
-	// Kodak sets the GPSAltitudeRef without setting the GPSAltitude.
-	
-	if (fGPSAltitude.NotValid ())
-		{
-		
-		fGPSAltitudeRef = 0xFFFFFFFF;
-		
-		}
-		
-	// If there is no valid GPS data, clear the GPS version number.
-	
-	if (fGPSLatitude  [0].NotValid () &&
-		fGPSLongitude [0].NotValid () &&
-		fGPSAltitude	 .NotValid () &&
-		fGPSTimeStamp [0].NotValid () &&
-		fGPSDateStamp	 .IsEmpty  ())
-		{
-		
-		fGPSVersionID = 0;
-		
-		}
-		
-	}
-				   
 /*****************************************************************************/

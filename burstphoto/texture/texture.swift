@@ -1,7 +1,24 @@
+/**
+ * Swift Metal Wrapper for Texture Processing in Burst Photography
+ *
+ * This file provides a Swift interface to the Metal compute shaders defined in texture.metal.
+ * It handles various texture operations needed for burst photography processing, including:
+ * - Texture merging and blending from multiple frames
+ * - Exposure correction and highlight handling
+ * - Format conversions (Bayer/RGBA, float/uint16)
+ * - Blurring, cropping, and scaling operations
+ * - Hot pixel detection and correction
+ * - Statistical operations like summing and normalization
+ *
+ * The implementation supports both Bayer pattern (common in most digital cameras) 
+ * and X-Trans pattern (used in Fujifilm cameras) sensor arrangements.
+ */
 
 import Foundation
 import MetalPerformanceShaders
 
+// Pipeline state objects for each Metal kernel function
+// These are created once and reused for efficiency
 let add_texture_state                   = create_pipeline(with_function_name: "add_texture",                    and_label: "Add Texture")
 let add_texture_exposure_state          = create_pipeline(with_function_name: "add_texture_exposure",           and_label: "Add Texture (Exposure)")
 let add_texture_highlights_state        = create_pipeline(with_function_name: "add_texture_highlights",         and_label: "Add Texture (Highlights)")
@@ -27,11 +44,26 @@ let sum_row_state                       = create_pipeline(with_function_name: "s
 let upsample_bilinear_float_state       = create_pipeline(with_function_name: "upsample_bilinear_float",        and_label: "Upsample (Bilinear) (Float)")
 let upsample_nearest_int_state          = create_pipeline(with_function_name: "upsample_nearest_int",           and_label: "Upsample (Nearest Neighbour) (Int)")
 
+/**
+ * Enumeration of upsampling methods available for texture scaling
+ */
 enum UpsampleType {
-    case Bilinear
-    case NearestNeighbour
+    case Bilinear            // Higher quality interpolation suitable for photographic content
+    case NearestNeighbour    // Faster, simpler scaling suitable for masks or integer data
 }
 
+/**
+ * Adds pixel values from one texture to another with normalization.
+ *
+ * This function divides each pixel value from the input texture by the total number
+ * of textures being merged before adding it to the output texture. This creates an
+ * average or blend of multiple textures.
+ *
+ * Parameters:
+ *   - in_texture: The source texture to read values from
+ *   - out_texture: The destination texture to add values to
+ *   - n_textures: Number of textures being merged, used for normalization
+ */
 func add_texture(_ in_texture: MTLTexture, _ out_texture: MTLTexture, _ n_textures: Int) {
     
     let command_buffer = command_queue.makeCommandBuffer()!
@@ -153,6 +185,19 @@ func add_texture_weighted(_ texture1: MTLTexture, _ texture2: MTLTexture, _ weig
 }
 
 
+/**
+ * Applies a 2D separable blur to a texture.
+ *
+ * This function performs a two-pass blur operation - first horizontally, then vertically.
+ * The blur uses a binomial filter kernel that approximates a Gaussian blur.
+ *
+ * Parameters:
+ *   - in_texture: The texture to blur
+ *   - mosaic_pattern_width: Width of the mosaic pattern (2 for Bayer, 6 for X-Trans)
+ *   - kernel_size: Size of the blur kernel, determining blur strength
+ *
+ * Returns: A new blurred texture
+ */
 func blur(_ in_texture: MTLTexture, with_pattern_width mosaic_pattern_width: Int, using_kernel_size kernel_size: Int) -> MTLTexture {
     let blurred_in_x_texture  = texture_like(in_texture)
     let blurred_in_xy_texture = texture_like(in_texture)
@@ -192,8 +237,21 @@ func blur(_ in_texture: MTLTexture, with_pattern_width mosaic_pattern_width: Int
 }
 
 
-/// Calculate the sum of each subpixel in the mosaic pattern within the specified region.
-/// Returns and array of length mosaic\_pattern\_width^2 which is to be treated as a flattened 2D array: 2D(x, y) == 1D(x + width\*y)
+/**
+ * Calculates black level values for each subpixel position in the mosaic pattern.
+ *
+ * This function analyzes masked areas in the image that should be black (like optical
+ * black regions in camera sensors) to determine the baseline black level for each color
+ * channel in the mosaic pattern. These values are essential for proper white balance
+ * and exposure correction.
+ *
+ * Parameters:
+ *   - texture: The input texture to analyze
+ *   - masked_areas: Pointer to array of rectangles defining black regions (format: [top, left, bottom, right, ...])
+ *   - mosaic_pattern_width: Width of the mosaic pattern (2 for Bayer, 6 for X-Trans)
+ *
+ * Returns: Array of black level values for each subpixel position in the mosaic pattern
+ */
 func calculate_black_levels(for texture: MTLTexture, from_masked_areas masked_areas: UnsafeMutablePointer<Int32>, mosaic_pattern_width: Int) -> [Int] {
     var num_pixels: Float = 0.0
     var command_buffers: [MTLCommandBuffer] = []
@@ -247,7 +305,6 @@ func calculate_black_levels(for texture: MTLTexture, from_masked_areas masked_ar
         let threads_per_grid_x = MTLSize(width: mosaic_pattern_width, height: mosaic_pattern_width, depth: 1)
         command_encoder.dispatchThreads(threads_per_grid_x, threadsPerThreadgroup: threads_per_thread_group)
         command_encoder.endEncoding()
-        command_buffer.commit()
         
         command_buffers.append(command_buffer)
         black_level_buffers.append(sum_buffer)
@@ -270,6 +327,21 @@ func calculate_black_levels(for texture: MTLTexture, from_masked_areas masked_ar
 }
 
 
+/**
+ * Calculates highlight weights for exposure merging.
+ *
+ * This function generates a weight map for handling highlights when merging exposures.
+ * Pixels that are near or at the saturation point (white level) receive lower weights
+ * to prevent clipped highlights in the final merged image.
+ *
+ * Parameters:
+ *   - in_texture: The input texture to analyze
+ *   - exposure_bias: Exposure bias in EV stops (powers of 2)
+ *   - white_level: Maximum pixel value before clipping
+ *   - black_level_mean: Average black level across all channels
+ *
+ * Returns: A texture containing weights for each pixel
+ */
 func calculate_weight_highlights(_ in_texture: MTLTexture, _ exposure_bias: Int, _ white_level: Int, _ black_level_mean: Double) -> MTLTexture {
     
     let weight_highlights_texture_descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r32Float, width: in_texture.width, height: in_texture.height, mipmapped: false)
@@ -304,7 +376,22 @@ func calculate_weight_highlights(_ in_texture: MTLTexture, _ exposure_bias: Int,
 }
 
 
-/// Convert a texture of floats into 16 bit uints for storing in a DNG file.
+/**
+ * Converts floating-point pixel values to 16-bit unsigned integers for DNG storage.
+ *
+ * This function applies black level correction and scaling to convert
+ * normalized floating-point pixel values back to the 16-bit integer range
+ * required for DNG file storage.
+ *
+ * Parameters:
+ *   - in_texture: Input floating-point texture
+ *   - white_level: Maximum value (saturation point) in the output
+ *   - black_level: Array of black level values for each subpixel position
+ *   - factor_16bit: Scaling factor for 16-bit conversion 
+ *   - mosaic_pattern_width: Width of the mosaic pattern (2 for Bayer, 6 for X-Trans)
+ *
+ * Returns: A new texture with 16-bit unsigned integer format
+ */
 func convert_float_to_uint16(_ in_texture: MTLTexture, _ white_level: Int, _ black_level: [Int], _ factor_16bit: Int, _ mosaic_pattern_width: Int) -> MTLTexture {
     
     let out_texture_descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r16Uint, width: in_texture.width, height: in_texture.height, mipmapped: false)
@@ -338,6 +425,20 @@ func convert_float_to_uint16(_ in_texture: MTLTexture, _ white_level: Int, _ bla
 }
 
 
+/**
+ * Converts a Bayer pattern texture to RGBA format.
+ *
+ * This function packs a 2x2 Bayer quad (RGGB) into a single RGBA pixel,
+ * reducing the spatial resolution but preserving all color channel data.
+ * The function also applies cropping around the edges of the image.
+ *
+ * Parameters:
+ *   - in_texture: Input Bayer pattern texture
+ *   - crop_x: Number of pixels to crop from left/right edges
+ *   - crop_y: Number of pixels to crop from top/bottom edges
+ *
+ * Returns: A new RGBA texture with half the width and height
+ */
 func convert_to_rgba(_ in_texture: MTLTexture, _ crop_x: Int, _ crop_y: Int) -> MTLTexture {
     
     let out_texture_descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: (in_texture.pixelFormat == .r16Float ? .rgba16Float : .rgba32Float), width: (in_texture.width-2*crop_x)/2, height: (in_texture.height-2*crop_y)/2, mipmapped: false)
@@ -366,6 +467,18 @@ func convert_to_rgba(_ in_texture: MTLTexture, _ crop_x: Int, _ crop_y: Int) -> 
 }
 
 
+/**
+ * Converts an RGBA texture back to Bayer pattern format.
+ *
+ * This function unpacks each RGBA pixel into a 2x2 Bayer quad (RGGB),
+ * increasing the spatial resolution to match the original Bayer pattern.
+ * This is essentially the inverse operation of convert_to_rgba.
+ *
+ * Parameters:
+ *   - in_texture: Input RGBA texture
+ *
+ * Returns: A new Bayer pattern texture with twice the width and height
+ */
 func convert_to_bayer(_ in_texture: MTLTexture) -> MTLTexture {
     
     let out_texture_descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: (in_texture.pixelFormat == .rgba16Float ? .r16Float : .r32Float), width: in_texture.width*2, height: in_texture.height*2, mipmapped: false)
@@ -392,7 +505,17 @@ func convert_to_bayer(_ in_texture: MTLTexture) -> MTLTexture {
 }
 
 
-/// Create a deep copy of the passed in texture.
+/**
+ * Creates a deep copy of a texture.
+ *
+ * This function makes an exact copy of all pixel data from the input texture
+ * to a newly created texture with identical dimensions and format.
+ *
+ * Parameters:
+ *   - in_texture: The source texture to copy
+ *
+ * Returns: A new texture with identical contents
+ */
 func copy_texture(_ in_texture: MTLTexture) -> MTLTexture {
     
     let out_texture_descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: in_texture.pixelFormat, width: in_texture.width, height: in_texture.height, mipmapped: false)
@@ -419,6 +542,21 @@ func copy_texture(_ in_texture: MTLTexture) -> MTLTexture {
 }
 
 
+/**
+ * Crops a texture by removing padding from the edges.
+ *
+ * This function creates a new texture that is smaller than the input texture
+ * by removing specified amounts of padding from each edge.
+ *
+ * Parameters:
+ *   - in_texture: The texture to crop
+ *   - pad_left: Number of pixels to remove from left edge
+ *   - pad_right: Number of pixels to remove from right edge
+ *   - pad_top: Number of pixels to remove from top edge
+ *   - pad_bottom: Number of pixels to remove from bottom edge
+ *
+ * Returns: A new texture with dimensions reduced by the padding amounts
+ */
 func crop_texture(_ in_texture: MTLTexture, _ pad_left: Int, _ pad_right: Int, _ pad_top: Int, _ pad_bottom: Int) -> MTLTexture {
     
     let out_texture_descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: in_texture.pixelFormat, width: in_texture.width-pad_left-pad_right, height: in_texture.height-pad_top-pad_bottom, mipmapped: false)
@@ -447,7 +585,15 @@ func crop_texture(_ in_texture: MTLTexture, _ pad_left: Int, _ pad_right: Int, _
 }
 
 
-/// Initialize the passed in texture with zeros.
+/**
+ * Initializes a texture by filling it with zeros.
+ *
+ * This function sets all pixel values in the texture to zero,
+ * which is typically used to prepare a texture for accumulation operations.
+ *
+ * Parameters:
+ *   - texture: The texture to fill with zeros
+ */
 func fill_with_zeros(_ texture: MTLTexture) {
     let command_buffer = command_queue.makeCommandBuffer()!
     command_buffer.label = "Fill with Zeros"
@@ -464,7 +610,22 @@ func fill_with_zeros(_ texture: MTLTexture) {
 }
 
 
-/// Find hotpixels based on the idea that they will be the same pixels in all frames of the burst.
+/**
+ * Detects and corrects hot pixels in sensor data.
+ *
+ * Hot pixels are defective sensor pixels that consistently appear brighter than
+ * their surroundings across multiple frames. This function identifies such pixels
+ * by analyzing multiple frames and creates a weight map for correcting them during
+ * image processing.
+ *
+ * Parameters:
+ *   - textures: Array of input textures from a burst sequence
+ *   - hotpixel_weight_texture: Output texture for storing hot pixel correction weights
+ *   - black_level: Array of black level values for each texture and color channel
+ *   - ISO_exposure_time: Array of ISO*exposure_time values for determining correction strength
+ *   - noise_reduction: Noise reduction strength parameter
+ *   - mosaic_pattern_width: Width of the mosaic pattern (2 for Bayer, 6 for X-Trans)
+ */
 func find_hotpixels(_ textures: [MTLTexture], _ hotpixel_weight_texture: MTLTexture, _ black_level: [[Int]], _ ISO_exposure_time: [Double], _ noise_reduction: Double, _ mosaic_pattern_width: Int) {
     
     if mosaic_pattern_width != 2 && mosaic_pattern_width != 6 {
@@ -560,6 +721,19 @@ func find_hotpixels(_ textures: [MTLTexture], _ hotpixel_weight_texture: MTLText
 }
 
 
+/**
+ * Calculates optimal thread group dimensions for maximum performance.
+ *
+ * This function determines the best thread group size by analyzing the computation
+ * requirements and hardware characteristics. It attempts to find a balance that 
+ * maximizes GPU utilization while respecting the grid dimensions.
+ *
+ * Parameters:
+ *   - state: The compute pipeline state that will be executed
+ *   - threads_per_grid: The dimensions of the full computation grid
+ *
+ * Returns: Optimal thread group dimensions for the GPU
+ */
 func get_threads_per_thread_group(_ state: MTLComputePipelineState, _ threads_per_grid: MTLSize) -> MTLSize {
     var thread_execution_width = state.threadExecutionWidth
     if threads_per_grid.depth >= thread_execution_width {
@@ -602,6 +776,17 @@ func get_threads_per_thread_group(_ state: MTLComputePipelineState, _ threads_pe
 }
 
 
+/**
+ * Normalizes a texture by dividing pixel values by corresponding normalization factors.
+ *
+ * This function is typically used after accumulating weighted pixel values,
+ * where each pixel needs to be divided by the sum of weights used in the accumulation.
+ *
+ * Parameters:
+ *   - in_texture: The texture to normalize
+ *   - norm_texture: Texture containing normalization factors for each pixel
+ *   - norm_scalar: Additional scalar normalization factor applied to all pixels
+ */
 func normalize_texture(_ in_texture: MTLTexture, _ norm_texture: MTLTexture, _ norm_scalar: Int) {
     
     let command_buffer = command_queue.makeCommandBuffer()!
@@ -620,12 +805,25 @@ func normalize_texture(_ in_texture: MTLTexture, _ norm_texture: MTLTexture, _ n
     command_buffer.commit()
 }
 
-/// This function is intended to convert the source input texture from integer to 32 bit float while correcting hot pixels, equalizing exposure and extending the texture to the size needed for alignment
-/// Images with different exposures are all still mapped to the same bit range by the camera. This means that the raw pixel value is not directly comparable between images with different exposures and must be transformed before they can be merged.
-///
-/// For example, if the reference image is taken at 0 EV and has a pixel value of 45 and image 2 is taken at 2 EV and has a pixel value of 200, the two values represent vastly different things. The pixel value of image 2 must be decreased by 2^-2 (200 x 2^-2 = 50) in order for the pixel values to be comparable.
-///
-/// Inspired by https://ai.googleblog.com/2021/04/hdr-with-bracketing-on-pixel-phones.html
+/**
+ * Prepares a texture for alignment and merging in the burst pipeline.
+ *
+ * This function performs several preprocessing steps:
+ * 1. Converts the input texture from integer to 32-bit float format
+ * 2. Applies hot pixel correction using the provided weight texture
+ * 3. Adjusts exposure to make frames with different exposures comparable
+ * 4. Extends the texture with padding as needed for alignment
+ *
+ * Parameters:
+ *   - in_texture: The input texture to prepare
+ *   - hotpixel_weight_texture: Weight texture for hot pixel correction
+ *   - pad_left, pad_right, pad_top, pad_bottom: Padding amounts to add to each edge
+ *   - exposure_diff: Exposure difference in EV stops (powers of 2)
+ *   - black_level: Array of black level values for each subpixel position
+ *   - mosaic_pattern_width: Width of the mosaic pattern (2 for Bayer, 6 for X-Trans)
+ *
+ * Returns: A prepared texture ready for alignment and merging
+ */
 func prepare_texture(_ in_texture: MTLTexture, _ hotpixel_weight_texture: MTLTexture, _ pad_left: Int, _ pad_right: Int, _ pad_top: Int, _ pad_bottom: Int, _ exposure_diff: Int, _ black_level: [Int], _ mosaic_pattern_width: Int) -> MTLTexture {
 
     // always use pixel format float32 with increased precision that merging is performed with best possible precision    
@@ -663,7 +861,18 @@ func prepare_texture(_ in_texture: MTLTexture, _ hotpixel_weight_texture: MTLTex
 }
 
 
-/// Create and return a new texture that has the same properties as the one passed in.
+/**
+ * Creates a new texture with the same properties as the input texture.
+ *
+ * This utility function creates an empty texture that matches the dimensions
+ * and format of the provided texture. This is useful when creating intermediate
+ * textures for multi-step operations.
+ *
+ * Parameters:
+ *   - in_texture: The texture to use as a template
+ *
+ * Returns: A new empty texture with the same dimensions and format
+ */
 func texture_like(_ in_texture: MTLTexture) -> MTLTexture {
     let out_texture_descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: in_texture.pixelFormat, width: in_texture.width, height: in_texture.height, mipmapped: false)
     out_texture_descriptor.usage = [.shaderRead, .shaderWrite]
@@ -675,9 +884,20 @@ func texture_like(_ in_texture: MTLTexture) -> MTLTexture {
 }
 
 
-/// Function to calculate the average pixel value over the whole of a texture.
-/// If `per_sub_pixel` is `true`, then each subpixel in the mosaic pattern will have an independent average calculated, producing a `pattern_width * pattern_width` buffer.
-/// If it's `false`, then a single value will be calculated for the whole texture.
+/**
+ * Calculates the average pixel value across a texture.
+ *
+ * This function computes either a global average for the entire texture or
+ * separate averages for each subpixel position in the mosaic pattern.
+ *
+ * Parameters:
+ *   - in_texture: The texture to analyze
+ *   - per_sub_pixel: If true, calculate separate averages for each subpixel in the mosaic pattern
+ *   - mosaic_pattern_width: Width of the mosaic pattern (2 for Bayer, 6 for X-Trans)
+ *
+ * Returns: A Metal buffer containing either a single average value or an array
+ *          of averages for each subpixel position in the mosaic pattern
+ */
 func texture_mean(_ in_texture: MTLTexture, per_sub_pixel: Bool, mosaic_pattern_width: Int) -> MTLBuffer {
     
     // Create output texture from the y-axis blurring
@@ -740,7 +960,20 @@ func texture_mean(_ in_texture: MTLTexture, per_sub_pixel: Bool, mosaic_pattern_
 }
 
 
-/// Upsample the provided texture to the specified widths using either a nearest neighbour approach or using bilinear interpolation.
+/**
+ * Upsamples a texture to larger dimensions using specified interpolation method.
+ *
+ * This function increases the resolution of a texture using either bilinear interpolation
+ * (for smooth photographic content) or nearest-neighbor interpolation (for masks or integer data).
+ *
+ * Parameters:
+ *   - input_texture: The texture to upsample
+ *   - width: Target width for the upsampled texture
+ *   - height: Target height for the upsampled texture
+ *   - mode: Interpolation method to use (Bilinear or NearestNeighbour)
+ *
+ * Returns: A new upsampled texture with the specified dimensions
+ */
 func upsample(_ input_texture: MTLTexture, to_width width: Int, to_height height: Int, using mode: UpsampleType) -> MTLTexture {
     let scale_x = Double(width)  / Double(input_texture.width)
     let scale_y = Double(height) / Double(input_texture.height)

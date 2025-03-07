@@ -1,10 +1,42 @@
+/**
+ * Command-Line Interface for Burst Photo
+ *
+ * This file provides a command-line interface for the Burst Photo application, 
+ * separate from the GUI version. It enables batch processing of burst photo 
+ * sequences through a programmatic interface, which is useful for automation
+ * and development workflows.
+ *
+ * The CLI processes multiple burst directories sequentially, applying the
+ * same processing parameters to each one and saving the results to the
+ * standard output directory.
+ */
 import Foundation
 
 // this is a command-line interface for Burst Photo, and is not part of the GUI application
 // you can use this for development / automating jobs
 
+/**
+ * Main program entry point for the CLI application
+ *
+ * This struct implements the main function that:
+ * - Initializes the required SDK components
+ * - Sets up temporary and output directories
+ * - Processes a list of burst photo directories
+ * - Cleans up resources after processing completes
+ */
 @main
 struct MyProgram {
+    /**
+     * Main execution function that processes burst photos in batch mode
+     * 
+     * This function orchestrates the entire processing pipeline:
+     * 1. Initializes the Adobe XMP SDK for metadata handling
+     * 2. Creates necessary output and temporary directories
+     * 3. Processes each burst directory with specified parameters
+     * 4. Cleans up temporary files after processing
+     *
+     * Throws: File system errors if directory operations fail
+     */
     static func main() throws {
         
         // initialize Adobe XMP SDK

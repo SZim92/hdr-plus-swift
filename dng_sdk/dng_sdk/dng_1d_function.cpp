@@ -6,6 +6,20 @@
 // accordance with the terms of the Adobe license agreement accompanying it.
 /*****************************************************************************/
 
+/**
+ * @file dng_1d_function.cpp
+ * 
+ * Implementation of one-dimensional function classes used for tone mapping and
+ * other transformations in the DNG processing pipeline.
+ * 
+ * This file contains implementations for various 1D function classes:
+ * - Base class for all 1D functions
+ * - Identity function (f(x) = x)
+ * - Concatenated functions (applying one function after another)
+ * - Inverse functions
+ * - Piecewise linear functions (connecting a series of control points)
+ */
+
 #include "dng_1d_function.h"
 
 #include "dng_assertions.h"
@@ -14,6 +28,12 @@
 
 /*****************************************************************************/
 
+/**
+ * Virtual destructor for the base function class.
+ * 
+ * Ensures proper cleanup of derived class resources when deleting 
+ * through a base class pointer.
+ */
 dng_1d_function::~dng_1d_function ()
 	{
 	
@@ -21,6 +41,15 @@ dng_1d_function::~dng_1d_function ()
 
 /*****************************************************************************/
 
+/**
+ * Checks if the function is an identity transformation.
+ * 
+ * The default implementation returns false. Derived classes should
+ * override this method when they can detect identity transformations
+ * to enable optimizations.
+ * 
+ * @return false by default (base class implementation)
+ */
 bool dng_1d_function::IsIdentity () const
 	{
 	
@@ -30,6 +59,16 @@ bool dng_1d_function::IsIdentity () const
 
 /*****************************************************************************/
 
+/**
+ * Evaluates the inverse of the function for a given output value.
+ * 
+ * This implements a numerical approximation of the inverse using
+ * an iterative Newton-Raphson method. Derived classes can override
+ * this with an exact implementation when available.
+ * 
+ * @param y The output value for which to find the input
+ * @return The approximate input value x such that f(x) = y
+ */
 real64 dng_1d_function::EvaluateInverse (real64 y) const
 	{
 	
@@ -70,6 +109,13 @@ real64 dng_1d_function::EvaluateInverse (real64 y) const
 	
 /*****************************************************************************/
 
+/**
+ * Identity function implementation: f(x) = x
+ * 
+ * This function class returns the input value unchanged. 
+ * It's useful for creating a no-op transformation and for 
+ * testing/optimization purposes.
+ */
 bool dng_1d_identity::IsIdentity () const
 	{
 	
@@ -79,6 +125,14 @@ bool dng_1d_identity::IsIdentity () const
 		
 /*****************************************************************************/
 
+/**
+ * Evaluates the identity function.
+ * 
+ * Simply returns the input value unchanged.
+ * 
+ * @param x The input value
+ * @return The same value x
+ */
 real64 dng_1d_identity::Evaluate (real64 x) const
 	{
 	
@@ -88,6 +142,14 @@ real64 dng_1d_identity::Evaluate (real64 x) const
 		
 /*****************************************************************************/
 
+/**
+ * Evaluates the inverse of the identity function.
+ * 
+ * For the identity function, the inverse is also the identity function.
+ * 
+ * @param x The input value
+ * @return The same value x
+ */
 real64 dng_1d_identity::EvaluateInverse (real64 x) const
 	{
 	
@@ -97,6 +159,13 @@ real64 dng_1d_identity::EvaluateInverse (real64 x) const
 		
 /*****************************************************************************/
 
+/**
+ * Provides access to a singleton instance of the identity function.
+ * 
+ * Using a singleton prevents unnecessary instantiations of this simple class.
+ * 
+ * @return Reference to the static identity function instance
+ */
 const dng_1d_function & dng_1d_identity::Get ()
 	{
 	
@@ -108,6 +177,14 @@ const dng_1d_function & dng_1d_identity::Get ()
 
 /*****************************************************************************/
 
+/**
+ * Function composition implementation (g ∘ f)
+ * 
+ * This class represents the composition of two functions, where the output of
+ * the first function becomes the input to the second function.
+ * 
+ * For input x, the result is function2(function1(x)).
+ */
 dng_1d_concatenate::dng_1d_concatenate (const dng_1d_function &function1,
 										const dng_1d_function &function2)
 										
@@ -120,6 +197,14 @@ dng_1d_concatenate::dng_1d_concatenate (const dng_1d_function &function1,
 	
 /*****************************************************************************/
 
+/**
+ * Checks if the concatenated function is an identity transformation.
+ * 
+ * The composed function is an identity only if both component functions
+ * are identities.
+ * 
+ * @return true if both component functions are identity functions
+ */
 bool dng_1d_concatenate::IsIdentity () const
 	{
 	
@@ -130,6 +215,16 @@ bool dng_1d_concatenate::IsIdentity () const
 		
 /*****************************************************************************/
 
+/**
+ * Evaluates the concatenated function at the given input value.
+ * 
+ * First evaluates function1, then passes its result to function2.
+ * The intermediate result is clamped to the [0,1] range to ensure
+ * valid input to the second function.
+ * 
+ * @param x The input value
+ * @return function2(function1(x))
+ */
 real64 dng_1d_concatenate::Evaluate (real64 x) const
 	{
 	
@@ -141,6 +236,15 @@ real64 dng_1d_concatenate::Evaluate (real64 x) const
 
 /*****************************************************************************/
 
+/**
+ * Evaluates the inverse of the concatenated function.
+ * 
+ * For the inverse of a function composition (g ∘ f)^(-1),
+ * we need to apply the inverses in reverse order: f^(-1) ∘ g^(-1).
+ * 
+ * @param x The input value for the inverse function
+ * @return function1.inverse(function2.inverse(x))
+ */
 real64 dng_1d_concatenate::EvaluateInverse (real64 x) const
 	{
 	
@@ -152,6 +256,13 @@ real64 dng_1d_concatenate::EvaluateInverse (real64 x) const
 	
 /*****************************************************************************/
 
+/**
+ * Inverse function implementation
+ * 
+ * This class represents the inverse of another function, swapping the input
+ * and output domains. For a function f(x) = y, the inverse f^(-1) satisfies
+ * f^(-1)(y) = x.
+ */
 dng_1d_inverse::dng_1d_inverse (const dng_1d_function &f)
 	
 	:	fFunction (f)
@@ -162,6 +273,14 @@ dng_1d_inverse::dng_1d_inverse (const dng_1d_function &f)
 	
 /*****************************************************************************/
 
+/**
+ * Checks if the inverse function is an identity transformation.
+ * 
+ * The inverse function is an identity if and only if the original
+ * function is an identity.
+ * 
+ * @return true if the wrapped function is an identity function
+ */
 bool dng_1d_inverse::IsIdentity () const
 	{
 	
@@ -171,6 +290,14 @@ bool dng_1d_inverse::IsIdentity () const
 	
 /*****************************************************************************/
 
+/**
+ * Evaluates the inverse function at the given input value.
+ * 
+ * Simply calls the EvaluateInverse method of the wrapped function.
+ * 
+ * @param x The input value
+ * @return The result of fFunction.EvaluateInverse(x)
+ */
 real64 dng_1d_inverse::Evaluate (real64 x) const
 	{
 	
@@ -180,6 +307,15 @@ real64 dng_1d_inverse::Evaluate (real64 x) const
 
 /*****************************************************************************/
 
+/**
+ * Evaluates the inverse of the inverse function.
+ * 
+ * The inverse of an inverse function is the original function,
+ * so this calls the Evaluate method of the wrapped function.
+ * 
+ * @param y The input value
+ * @return The result of fFunction.Evaluate(y)
+ */
 real64 dng_1d_inverse::EvaluateInverse (real64 y) const
 	{
 	
@@ -189,6 +325,14 @@ real64 dng_1d_inverse::EvaluateInverse (real64 y) const
 	
 /*****************************************************************************/
 
+/**
+ * Piecewise linear function implementation
+ * 
+ * This class implements a function defined by a series of control points,
+ * with linear interpolation between adjacent points. This is commonly used
+ * for tone curves and color transformations where a precise mathematical
+ * formula isn't available or needed.
+ */
 dng_piecewise_linear::dng_piecewise_linear ()
 
 	:	X ()
@@ -200,6 +344,9 @@ dng_piecewise_linear::dng_piecewise_linear ()
 	
 /*****************************************************************************/
 
+/**
+ * Destructor for the piecewise linear function
+ */
 dng_piecewise_linear::~dng_piecewise_linear ()
 	{
 
@@ -207,6 +354,11 @@ dng_piecewise_linear::~dng_piecewise_linear ()
 	
 /*****************************************************************************/
 
+/**
+ * Clears all control points from the function
+ * 
+ * Resets the function to an empty state with no control points defined.
+ */
 void dng_piecewise_linear::Reset ()
 	{
 	
@@ -217,6 +369,15 @@ void dng_piecewise_linear::Reset ()
 
 /*****************************************************************************/
 
+/**
+ * Adds a control point to the piecewise linear function
+ * 
+ * The control points define the function's shape by providing
+ * specific input-output value pairs through which the function passes.
+ * 
+ * @param x The input value (x-coordinate) of the control point
+ * @param y The output value (y-coordinate) of the control point
+ */
 void dng_piecewise_linear::Add (real64 x, real64 y)
 	{
 	
@@ -227,6 +388,15 @@ void dng_piecewise_linear::Add (real64 x, real64 y)
 
 /*****************************************************************************/
 
+/**
+ * Checks if the piecewise linear function is an identity transformation
+ * 
+ * A piecewise linear function is an identity if it has exactly two points:
+ * (0,0) and (1,1), meaning f(0)=0 and f(1)=1 with linear interpolation
+ * between them.
+ * 
+ * @return true if the function is the identity function
+ */
 bool dng_piecewise_linear::IsIdentity () const
 	{
 	
@@ -239,6 +409,16 @@ bool dng_piecewise_linear::IsIdentity () const
 
 /*****************************************************************************/
 
+/**
+ * Evaluates the piecewise linear function at the given input value
+ * 
+ * First performs bounds checking, then uses binary search to find the
+ * appropriate interval and performs linear interpolation between the
+ * control points.
+ * 
+ * @param x The input value
+ * @return The interpolated output value
+ */
 real64 dng_piecewise_linear::Evaluate (real64 x) const
 	{
 
@@ -297,6 +477,15 @@ real64 dng_piecewise_linear::Evaluate (real64 x) const
 		
 /*****************************************************************************/
 
+/**
+ * Evaluates the inverse of the piecewise linear function
+ * 
+ * Similar to the Evaluate method, but searches based on Y values
+ * instead of X values and returns the corresponding X value.
+ * 
+ * @param y The output value for which to find the input
+ * @return The input value x such that f(x) = y
+ */
 real64 dng_piecewise_linear::EvaluateInverse (real64 y) const
 	{
 	
@@ -343,6 +532,14 @@ real64 dng_piecewise_linear::EvaluateInverse (real64 y) const
 
 /*****************************************************************************/
 
+/**
+ * Writes data about this function to a stream for fingerprinting/identification
+ * 
+ * Stores the function's name and control points in the given stream, which
+ * can later be used to identify or validate the function.
+ * 
+ * @param stream The output stream to write the function data to
+ */
 void dng_piecewise_linear::PutFingerprintData (dng_stream &stream) const
 	{
 	
@@ -367,6 +564,15 @@ void dng_piecewise_linear::PutFingerprintData (dng_stream &stream) const
 
 /*****************************************************************************/
 
+/**
+ * Compares two piecewise linear functions for equality
+ * 
+ * Two piecewise linear functions are equal if they have identical
+ * control points in the same order.
+ * 
+ * @param piecewise The function to compare against
+ * @return true if both functions have the same control points
+ */
 bool dng_piecewise_linear::operator== (const dng_piecewise_linear &piecewise) const
 	{
 	
