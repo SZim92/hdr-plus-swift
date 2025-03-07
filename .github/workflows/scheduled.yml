@@ -1,0 +1,162 @@
+name: Scheduled Maintenance
+
+on:
+  schedule:
+    - cron: '0 5 * * 1'  # Run at 5 AM UTC every Monday
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  # Clean up old artifacts and caches
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete old workflow runs
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const days = 30;
+            const ms_per_day = 86400000;
+            const cutoff = new Date(Date.now() - (days * ms_per_day));
+            
+            console.log(`Cleaning up workflow runs older than ${days} days (${cutoff.toISOString()})...`);
+            
+            const { data: workflows } = await github.rest.actions.listRepoWorkflows({
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+            
+            for (const workflow of workflows.workflows) {
+              console.log(`Processing workflow: ${workflow.name} (${workflow.id})`);
+              
+              const { data: runs } = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: workflow.id,
+                per_page: 100
+              });
+              
+              console.log(`Found ${runs.total_count} runs for workflow ${workflow.name}`);
+              
+              for (const run of runs.workflow_runs) {
+                const created_at = new Date(run.created_at);
+                if (created_at < cutoff) {
+                  console.log(`Deleting run ${run.id} from ${created_at.toISOString()}`);
+                  try {
+                    await github.rest.actions.deleteWorkflowRun({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      run_id: run.id
+                    });
+                    console.log(`Deleted run ${run.id}`);
+                  } catch (error) {
+                    console.log(`Error deleting run ${run.id}: ${error}`);
+                  }
+                }
+              }
+            }
+
+  # Check for outdated dependencies
+  outdated-deps:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Check for outdated Swift packages
+        id: outdated_swift
+        if: success()
+        run: |
+          # Check if Package.swift exists
+          if [ -f "Package.swift" ]; then
+            echo "Checking for outdated Swift packages..."
+            
+            # Create outdated report directory
+            mkdir -p reports
+            
+            # Check for outdated packages and generate report
+            swift package update --dry-run > reports/outdated_swift.txt
+            
+            # Check if anything needs updating
+            if grep -q "would be updated" reports/outdated_swift.txt; then
+              echo "found_outdated_swift=true" >> $GITHUB_OUTPUT
+              
+              # Extract outdated packages for summary
+              grep "would be updated" reports/outdated_swift.txt | \
+                awk '{print "- " $1 " would update from " $5 " to " $7}' > reports/outdated_swift_summary.txt
+            else
+              echo "found_outdated_swift=false" >> $GITHUB_OUTPUT
+              echo "All Swift packages are up to date." > reports/outdated_swift_summary.txt
+            fi
+          else
+            echo "No Package.swift found."
+            echo "found_outdated_swift=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Check for outdated Homebrew dependencies
+        id: outdated_brew
+        if: success()
+        run: |
+          # Check if Brewfile exists
+          if [ -f "Brewfile" ]; then
+            echo "Checking for outdated Homebrew dependencies..."
+            
+            # Create outdated report directory if it doesn't exist
+            mkdir -p reports
+            
+            # Check for outdated Homebrew packages
+            brew update
+            brew bundle check --verbose --no-upgrade 2>&1 | tee reports/outdated_brew.txt
+            
+            # Check if anything needs updating
+            if grep -q "not installed" reports/outdated_brew.txt; then
+              echo "found_outdated_brew=true" >> $GITHUB_OUTPUT
+              
+              # Extract outdated packages for summary
+              grep "not installed" reports/outdated_brew.txt | \
+                awk -F "'" '{print "- " $2}' > reports/outdated_brew_summary.txt
+            else
+              echo "found_outdated_brew=false" >> $GITHUB_OUTPUT
+              echo "All Homebrew dependencies are up to date." > reports/outdated_brew_summary.txt
+            fi
+          else
+            echo "No Brewfile found."
+            echo "found_outdated_brew=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create summary
+        if: always()
+        run: |
+          echo "## Dependency Update Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Swift packages summary
+          echo "### Swift Packages" >> $GITHUB_STEP_SUMMARY
+          if [ -f "reports/outdated_swift_summary.txt" ]; then
+            cat reports/outdated_swift_summary.txt >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No Swift packages found." >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Homebrew dependencies summary
+          echo "### Homebrew Dependencies" >> $GITHUB_STEP_SUMMARY
+          if [ -f "reports/outdated_brew_summary.txt" ]; then
+            cat reports/outdated_brew_summary.txt >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No Homebrew dependencies found." >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Notify if outdated dependencies found
+        if: steps.outdated_swift.outputs.found_outdated_swift == 'true' || steps.outdated_brew.outputs.found_outdated_brew == 'true'
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_CHANNEL: ci-alerts
+          SLACK_COLOR: warning
+          SLACK_ICON: https://github.com/rtCamp.png?size=48
+          SLACK_TITLE: "📦 Outdated Dependencies Found"
+          SLACK_MESSAGE: "Some dependencies need to be updated. Check the workflow logs for details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          SLACK_FOOTER: "Automated weekly check"
+          MSG_MINIMAL: false 
