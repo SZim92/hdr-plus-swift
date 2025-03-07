@@ -2,7 +2,19 @@
 #include "../misc/constants.h"
 using namespace metal;
 
-
+/**
+ * @brief Downsamples an input texture using average pooling
+ *
+ * This kernel performs average pooling by taking a square neighborhood of pixels
+ * of size scale x scale from the input texture and averaging them to produce a
+ * single output pixel. The black level is subtracted from each input pixel.
+ *
+ * @param in_texture     Input texture to be downsampled
+ * @param out_texture    Output texture with reduced dimensions
+ * @param scale          The downsampling factor (e.g., 2 = half size in each dimension)
+ * @param black_level    The black level to subtract from each pixel
+ * @param gid            The output pixel coordinate
+ */
 kernel void avg_pool(texture2d<float, access::read> in_texture [[texture(0)]],
                      texture2d<float, access::write> out_texture [[texture(1)]],
                      constant int& scale [[buffer(0)]],
@@ -25,7 +37,23 @@ kernel void avg_pool(texture2d<float, access::read> in_texture [[texture(0)]],
     out_texture.write(out_pixel, gid);
 }
 
-
+/**
+ * @brief Downsamples an input texture using average pooling with per-pixel normalization
+ *
+ * Similar to avg_pool, but applies an additional normalization step for color correction.
+ * This is particularly useful for Bayer pattern images where different color channels
+ * might have different intensities. Each pixel is normalized according to its position
+ * in the Bayer pattern using the appropriate color factor.
+ *
+ * @param in_texture     Input texture to be downsampled
+ * @param out_texture    Output texture with reduced dimensions
+ * @param scale          The downsampling factor (e.g., 2 = half size in each dimension)
+ * @param black_level    The black level to subtract from each pixel
+ * @param factor_red     Normalization factor for red pixels in the Bayer pattern
+ * @param factor_green   Normalization factor for green pixels in the Bayer pattern
+ * @param factor_blue    Normalization factor for blue pixels in the Bayer pattern
+ * @param gid            The output pixel coordinate
+ */
 kernel void avg_pool_normalization(texture2d<float, access::read> in_texture [[texture(0)]],
                                    texture2d<float, access::write> out_texture [[texture(1)]],
                                    constant int& scale [[buffer(0)]],
@@ -56,7 +84,22 @@ kernel void avg_pool_normalization(texture2d<float, access::read> in_texture [[t
 
 
 /**
- Generic function for computation of tile differences that works for any search distance
+ * @brief Generic function for computation of tile differences that works for any search distance
+ *
+ * This kernel computes differences between corresponding tiles in reference and comparison textures.
+ * It is used in the hierarchical alignment process to find the optimal displacement between frames
+ * in a burst sequence. This function supports any search distance but is less optimized than the
+ * specialized versions.
+ *
+ * @param ref_texture      Reference texture (usually the "base frame")
+ * @param comp_texture     Comparison texture (the frame being aligned to the reference)
+ * @param prev_alignment   Previous alignment vectors from coarser scale level
+ * @param tile_diff        Output texture storing tile difference metrics
+ * @param downscale_factor Scale factor between current and previous alignment level
+ * @param tile_size        Size of each tile being compared (in pixels)
+ * @param search_dist      Maximum search distance for alignment vectors
+ * @param weight_ssd       Weight for SSD (Sum of Squared Differences) vs L1 norm
+ * @param gid              3D thread position (x,y,z) where z encodes the displacement candidate
  */
 kernel void compute_tile_differences(texture2d<float, access::read> ref_texture [[texture(0)]],
                                      texture2d<float, access::read> comp_texture [[texture(1)]],
@@ -114,8 +157,22 @@ kernel void compute_tile_differences(texture2d<float, access::read> ref_texture 
 
 
 /**
- Highly-optimized function for computation of tile differences that works only for search_distance == 2 (25 total combinations).
- The aim of this function is to reduce the number of memory accesses required compared to the more simple function compute_tile_differences() while providing equal results. As the alignment always checks shifts on a 5x5 pixel grid, a simple implementation would read 25 pixels in the comparison texture for each pixel in the reference texture. This optimized function however uses a buffer vector covering 5 complete rows of the texture that slides line by line through the comparison texture and reduces the number of memory reads considerably.
+ * @brief Highly-optimized function for computation of tile differences that works only for search_distance == 2 (25 total combinations).
+ *
+ * The aim of this function is to reduce the number of memory accesses required compared to the more simple function compute_tile_differences() 
+ * while providing equal results. As the alignment always checks shifts on a 5x5 pixel grid, a simple implementation would read 25 pixels 
+ * in the comparison texture for each pixel in the reference texture. This optimized function however uses a buffer vector covering 5 complete 
+ * rows of the texture that slides line by line through the comparison texture and reduces the number of memory reads considerably.
+ *
+ * @param ref_texture      Reference texture (usually the "base frame")
+ * @param comp_texture     Comparison texture (the frame being aligned to the reference)
+ * @param prev_alignment   Previous alignment vectors from coarser scale level
+ * @param tile_diff        Output texture storing tile difference metrics
+ * @param downscale_factor Scale factor between current and previous alignment level
+ * @param tile_size        Size of each tile being compared (in pixels)
+ * @param search_dist      Maximum search distance for alignment vectors (should be 2)
+ * @param weight_ssd       Weight for SSD (Sum of Squared Differences) vs L1 norm
+ * @param gid              2D thread position indicating tile coordinates
  */
 kernel void compute_tile_differences25(texture2d<half, access::read> ref_texture [[texture(0)]],
                                        texture2d<half, access::read> comp_texture [[texture(1)]],
@@ -222,8 +279,21 @@ kernel void compute_tile_differences25(texture2d<half, access::read> ref_texture
 }
 
 /**
- Highly-optimized function for computation of tile differences that works only for search_distance == 2 (25 total combinations).
- The aim of this function is to reduce the number of memory accesses required compared to the more simple function compute_tile_differences() while extending it with a scaling of pixel intensities by the ratio of mean values of both tiles.
+ * @brief Highly-optimized function for computation of tile differences that works only for search_distance == 2 (25 total combinations).
+ *
+ * The aim of this function is to reduce the number of memory accesses required compared to the more simple function compute_tile_differences()
+ * while extending it with a scaling of pixel intensities by the ratio of mean values of both tiles. This helps compensate for exposure
+ * differences between frames.
+ *
+ * @param ref_texture      Reference texture (usually the "base frame")
+ * @param comp_texture     Comparison texture (the frame being aligned to the reference)
+ * @param prev_alignment   Previous alignment vectors from coarser scale level
+ * @param tile_diff        Output texture storing tile difference metrics
+ * @param downscale_factor Scale factor between current and previous alignment level
+ * @param tile_size        Size of each tile being compared (in pixels)
+ * @param search_dist      Maximum search distance for alignment vectors (should be 2)
+ * @param weight_ssd       Weight for SSD (Sum of Squared Differences) vs L1 norm
+ * @param gid              2D thread position indicating tile coordinates
  */
 kernel void compute_tile_differences_exposure25(texture2d<half, access::read> ref_texture [[texture(0)]],
                                                 texture2d<half, access::read> comp_texture [[texture(1)]],
@@ -257,6 +327,8 @@ kernel void compute_tile_differences_exposure25(texture2d<half, access::read> re
     float diff_abs0, diff_abs1;
     half tmp_ref0, tmp_ref1, tmp_comp_val0, tmp_comp_val1;
     half tmp_comp[5*68];
+    
+    // First pass: load comparison texture and calculate the sums for exposure normalization
     
     // loop over first 4 rows of comp_texture
     for (int dy = -2; dy < +2; dy++) {
@@ -339,6 +411,8 @@ kernel void compute_tile_differences_exposure25(texture2d<half, access::read> re
         // calculate ratio of mean values of the tiles, which is used for correction of slight differences in exposure
         ratio[i] = clamp(sum_u[i]/(sum_v[i]+1e-9), 0.9f, 1.1f);
     }
+    
+    // Second pass: load comparison texture again and compute the actual differences with exposure correction
         
     // loop over first 4 rows of comp_texture
     for (int dy = -2; dy < +2; dy++) {
@@ -416,8 +490,27 @@ kernel void compute_tile_differences_exposure25(texture2d<half, access::read> re
 
 
 /**
- At transitions between moving objects and non-moving background, the alignment vectors from downsampled images may be inaccurate. Therefore, after upsampling to the next resolution level, three candidate alignment vectors are evaluated for each tile. In addition to the vector obtained from upsampling, two vectors from neighboring tiles are checked. As a consequence, alignment at the transition regions described above is more accurate.
- See section on "Hierarchical alignment" in https://graphics.stanford.edu/papers/hdrp/hasinoff-hdrplus-sigasia16.pdf and section "Multi-scale Pyramid Alignment" in https://www.ipol.im/pub/art/2021/336/
+ * @brief Corrects alignment errors that can occur at boundaries between moving objects and static backgrounds
+ *
+ * At transitions between moving objects and non-moving background, the alignment vectors from downsampled images 
+ * may be inaccurate. Therefore, after upsampling to the next resolution level, three candidate alignment vectors 
+ * are evaluated for each tile. In addition to the vector obtained from upsampling, two vectors from neighboring 
+ * tiles are checked. As a consequence, alignment at the transition regions described above is more accurate.
+ * 
+ * See section on "Hierarchical alignment" in https://graphics.stanford.edu/papers/hdrp/hasinoff-hdrplus-sigasia16.pdf 
+ * and section "Multi-scale Pyramid Alignment" in https://www.ipol.im/pub/art/2021/336/
+ *
+ * @param ref_texture                Reference texture (usually the "base frame")
+ * @param comp_texture               Comparison texture (the frame being aligned to the reference)
+ * @param prev_alignment             Previous alignment vectors from coarser scale level
+ * @param prev_alignment_corrected   Output texture with corrected alignment vectors
+ * @param downscale_factor           Scale factor between current and previous alignment level
+ * @param tile_size                  Size of each tile being compared (in pixels)
+ * @param n_tiles_x                  Number of tiles in x direction
+ * @param n_tiles_y                  Number of tiles in y direction
+ * @param uniform_exposure           Flag indicating whether to apply exposure correction (1=no, 0=yes)
+ * @param weight_ssd                 Weight for SSD (Sum of Squared Differences) vs L1 norm
+ * @param gid                        2D thread position indicating tile coordinates
  */
 kernel void correct_upsampling_error(texture2d<half, access::read> ref_texture [[texture(0)]],
                                      texture2d<half, access::read> comp_texture [[texture(1)]],
@@ -548,6 +641,20 @@ kernel void correct_upsampling_error(texture2d<half, access::read> ref_texture [
     }
 }
 
+/**
+ * @brief Finds the alignment vector with the lowest difference value
+ *
+ * After computing the differences for all possible displacements in the search space,
+ * this kernel identifies the displacement that results in the minimum difference, which
+ * represents the best alignment between frames for the current tile.
+ *
+ * @param tile_diff         Input texture containing difference values for each displacement
+ * @param prev_alignment    Previous alignment vectors from coarser scale level
+ * @param current_alignment Output texture storing the best alignment vectors
+ * @param downscale_factor  Scale factor between current and previous alignment level
+ * @param search_dist       Maximum search distance for alignment vectors
+ * @param gid              2D thread position indicating tile coordinates
+ */
 kernel void find_best_tile_alignment(texture3d<float, access::read> tile_diff [[texture(0)]],
                                      texture2d<int, access::read> prev_alignment [[texture(1)]],
                                      texture2d<int, access::write> current_alignment [[texture(2)]],
@@ -583,7 +690,23 @@ kernel void find_best_tile_alignment(texture3d<float, access::read> tile_diff [[
     current_alignment.write(out, gid);
 }
 
-
+/**
+ * @brief Warps a Bayer pattern texture based on the computed alignment vectors
+ *
+ * This kernel applies the computed alignment vectors to transform the input texture,
+ * effectively aligning it with the reference frame. It uses bilinear interpolation
+ * between tile centers to ensure smooth transitions in the alignment field.
+ * This version is optimized for Bayer pattern images.
+ *
+ * @param in_texture       Input texture to be warped
+ * @param out_texture      Output texture after warping
+ * @param prev_alignment   Alignment vectors to apply
+ * @param downscale_factor Scale factor for the alignment vectors
+ * @param half_tile_size   Half the size of the alignment tiles
+ * @param n_tiles_x        Number of tiles in x direction
+ * @param n_tiles_y        Number of tiles in y direction
+ * @param gid              2D thread position (output pixel coordinate)
+ */
 kernel void warp_texture_bayer(texture2d<float, access::read> in_texture [[texture(0)]],
                                texture2d<float, access::write> out_texture [[texture(1)]],
                                texture2d<int, access::read> prev_alignment [[texture(2)]],
