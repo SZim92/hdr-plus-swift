@@ -1,6 +1,8 @@
 # HDR+ Swift
 ![Build Status](https://github.com/SZim92/hdr-plus-swift/actions/workflows/ci.yml/badge.svg)
 
+![Build Status](https://github.com/SZim92/hdr-plus-swift/actions/workflows/ci.yml/badge.svg)
+
 
 Burst Photo is a macOS app written in Swift / SwiftUI / Metal that implements a simplified version of HDR+, the computational photography pipeline in Google Pixel phones. With Burst Photo, this processing can be applied to a burst of images from any camera, increasing dynamic range and reducing noise of the resulting image. You can read more about HDR+ in Google's paper [Burst photography for high dynamic range and low-light imaging on mobile cameras](http://static.googleusercontent.com/media/www.hdrplusdata.org/en//hdrplus.pdf).
 
