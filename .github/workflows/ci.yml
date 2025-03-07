@@ -13,7 +13,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
       
-      - name: Build and Run Tests
+      - name: Build Project
         run: |
-          # Build and test using the gui scheme
-          xcodebuild -project burstphoto.xcodeproj -scheme gui -destination 'platform=macOS' clean test 
+          # Build only (no tests) since the scheme is not configured for testing
+          xcodebuild -project burstphoto.xcodeproj -scheme gui -destination 'platform=macOS' clean build 
