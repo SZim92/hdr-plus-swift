@@ -47,6 +47,23 @@
    - SetShutterSpeedValue: Sets the ShutterSpeedValue based on an APEX shutter speed, computing the corresponding ExposureTime if necessary.
 */
 
+/* --- Aperture and F-Number Conversion Functions ---
+   These functions handle the conversion between f-number (aperture) values and APEX aperture values:
+   - EncodeFNumber: Converts an f-number into a rational representation with precision based on its magnitude.
+   - SetFNumber: Sets the FNumber field and computes the corresponding ApertureValue in APEX units.
+   - SetApertureValue: Sets the ApertureValue field and, if necessary, derives the FNumber from it.
+   - ApertureValueToFNumber: Converts an APEX aperture value to the corresponding f-number.
+   - FNumberToApertureValue: Converts an f-number into an APEX aperture value.
+*/
+
+/* --- DateTime and Version Management Functions ---
+   These functions manage date/time metadata and version information in EXIF data:
+   - AtLeastVersion0230: Checks if the EXIF version is at least 2.3.0.
+   - AtLeastVersion0231: Checks if the EXIF version is at least 2.3.1.
+   - SetVersion0231: Sets the EXIF version to 2.3.1 to indicate support for newer features.
+   - UpdateDateTime: Updates the DateTime field with the provided date/time information.
+*/
+
 /*****************************************************************************/
 
 /**
