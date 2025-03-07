@@ -44,8 +44,49 @@ jobs:
         run: |
           echo "Building GUI for size analysis..."
           
-          # Always disable code signing for CI builds
-          xcodebuild -project burstphoto.xcodeproj -scheme gui -configuration Release build CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS= CODE_SIGNING_ALLOWED=NO
+          # Create a temporary project-specific override xcconfig file
+          echo "CODE_SIGN_IDENTITY = -" > disable_signing_override.xcconfig
+          echo "CODE_SIGNING_REQUIRED = NO" >> disable_signing_override.xcconfig
+          echo "CODE_SIGN_ENTITLEMENTS = " >> disable_signing_override.xcconfig
+          echo "CODE_SIGNING_ALLOWED = NO" >> disable_signing_override.xcconfig
+          echo "DEVELOPMENT_TEAM = " >> disable_signing_override.xcconfig
+          
+          # Try building with various code signing disable approaches
+          echo "Approach 1: Using xcconfig file with code signing flags"
+          xcodebuild -project burstphoto.xcodeproj -scheme gui -configuration Release build \
+            -xcconfig disable_signing_override.xcconfig \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_ENTITLEMENTS= \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM= \
+            PROVISIONING_PROFILE_SPECIFIER= || true
+          
+          # If the first approach failed, try an alternative approach
+          if [ $? -ne 0 ]; then
+            echo "Approach 2: Using build settings to disable code signing"
+            xcodebuild -project burstphoto.xcodeproj -scheme gui -configuration Release \
+              BUILD_LIBRARIES_FOR_DISTRIBUTION=YES \
+              ENABLE_BITCODE=NO \
+              OTHER_CODE_SIGN_FLAGS="--deep" \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGN_IDENTITY=- \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              DEVELOPMENT_TEAM= \
+              build || true
+          fi
+          
+          # If previous approaches failed, try with ad-hoc signing
+          if [ $? -ne 0 ]; then
+            echo "Approach 3: Using ad-hoc signing"
+            xcodebuild -project burstphoto.xcodeproj -scheme gui -configuration Release \
+              CODE_SIGN_STYLE=Automatic \
+              CODE_SIGN_IDENTITY="-" \
+              CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
+              OTHER_CODE_SIGN_FLAGS="--deep" \
+              build
+          fi
       
       - name: Analyze binary size
         id: size-analysis

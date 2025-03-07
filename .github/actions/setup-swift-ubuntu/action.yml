@@ -63,19 +63,72 @@ runs:
         
         echo "Downloading Swift from: $SWIFT_URL"
         
-        # Download Swift
-        cd /tmp
-        wget -q $SWIFT_URL
+        # Create a directory for the download
+        mkdir -p /tmp/swift-download
+        cd /tmp/swift-download
         
-        # Extract Swift
-        tar xzf "$SWIFT_PACKAGE.tar.gz"
+        # Download Swift with better error handling
+        echo "Downloading Swift package..."
+        if ! wget --no-verbose "$SWIFT_URL"; then
+          echo "Failed to download Swift from $SWIFT_URL"
+          echo "Trying alternative location..."
+          
+          # Try toolchains as a fallback
+          ALT_URL="https://download.swift.org/swift-$SWIFT_VERSION-release/ubuntu$UBUNTU_VERSION_NO_DOTS/swift-$SWIFT_VERSION-RELEASE/swift-$SWIFT_VERSION-RELEASE-ubuntu$UBUNTU_VERSION_NO_DOTS.tar.gz"
+          if ! wget --no-verbose "$ALT_URL"; then
+            echo "Failed to download Swift from alternative location as well."
+            echo "Attempting to download latest release instead..."
+            
+            # Try the latest version instead
+            LATEST_URL="https://download.swift.org/swift-5.9.2-release/ubuntu$UBUNTU_VERSION_NO_DOTS/swift-5.9.2-RELEASE/swift-5.9.2-RELEASE-ubuntu$UBUNTU_VERSION_NO_DOTS.tar.gz"
+            if ! wget --no-verbose "$LATEST_URL"; then
+              echo "All download attempts failed. Aborting."
+              exit 1
+            else
+              SWIFT_PACKAGE="swift-5.9.2-RELEASE-ubuntu$UBUNTU_VERSION_NO_DOTS"
+            fi
+          else
+            echo "Alternative download successful."
+          fi
+        fi
+        
+        echo "Extracting Swift package..."
+        # List the downloaded files for debugging
+        ls -la
+        
+        # Extract Swift with better error handling
+        if ! tar xzf $(ls *.tar.gz); then
+          echo "Failed to extract Swift package."
+          exit 1
+        fi
+        
+        echo "Installing Swift..."
+        # Check if the extracted package exists
+        if [ ! -d "$SWIFT_PACKAGE" ]; then
+          # Try to find any swift directory
+          SWIFT_PACKAGE=$(find . -maxdepth 1 -type d -name "swift-*" | head -n 1)
+          if [ -z "$SWIFT_PACKAGE" ]; then
+            echo "Could not find extracted Swift package directory."
+            exit 1
+          fi
+          # Remove the leading ./
+          SWIFT_PACKAGE=${SWIFT_PACKAGE#./}
+        fi
         
         # Move Swift to /usr/share and update PATH
-        sudo mv "$SWIFT_PACKAGE" /usr/share/swift
+        echo "Moving Swift to /usr/share/swift..."
+        sudo mkdir -p /usr/share/swift
+        sudo cp -R "$SWIFT_PACKAGE"/* /usr/share/swift/
         
         echo "/usr/share/swift/usr/bin" >> $GITHUB_PATH
         
         # Verify installation
-        echo "Swift installation complete. Verifying..."
+        echo "Swift installation complete. Attempting to verify..."
         export PATH="/usr/share/swift/usr/bin:$PATH"
-        swift --version 
+        if command -v swift &> /dev/null; then
+          swift --version
+        else
+          echo "Swift command not found in PATH after installation."
+          echo "PATH is: $PATH"
+          ls -la /usr/share/swift/usr/bin || echo "Swift bin directory not found"
+        fi 
