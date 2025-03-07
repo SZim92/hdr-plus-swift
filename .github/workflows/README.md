@@ -21,6 +21,9 @@ The CI/CD system is organized into multiple specialized workflows:
 | [dependency-scan.yml](dependency-scan.yml) | Dependency vulnerability scanning | Push to main, weekly schedule, manual |
 | [dashboard.yml](dashboard.yml) | CI/CD dashboard generation | Daily schedule, manual |
 | [orchestrator.yml](orchestrator.yml) | Centralized workflow orchestrator | Manual only |
+| [dependency-updates.yml](dependency-updates.yml) | Automated dependency updates | Weekly schedule, manual |
+| [stale-management.yml](stale-management.yml) | Manage stale issues and PRs | Daily schedule, manual |
+| [release-candidate.yml](release-candidate.yml) | Release candidate testing | Manual only |
 
 ## Reusable Components
 
@@ -36,10 +39,12 @@ The CI system uses several reusable components:
 - [notify-slack](../.github/actions/notify-slack) - Sends notifications to Slack
 - [generate-changelog](../.github/actions/generate-changelog) - Generates formatted changelog from commits
 - [load-config](../.github/actions/load-config) - Loads shared configuration values from YAML
+- [build-cache](../.github/actions/build-cache) - Advanced caching strategy for Swift/Xcode builds
 
 ### Local Development Tools
 - [local-validate.sh](../.github/scripts/local-validate.sh) - Script for validating changes locally
 - [setup-hooks.sh](../.github/scripts/setup-hooks.sh) - Script for setting up git hooks
+- [branch-protection.sh](../.github/branch-protection.sh) - Script for configuring branch protection rules
 
 ## Advanced Features
 
@@ -66,6 +71,46 @@ Generates a visual dashboard of all CI/CD activity, deployed to GitHub Pages:
 ```
 gh workflow run dashboard.yml
 ```
+
+### Automated Dependency Updates
+Checks for dependency updates and creates PRs for Swift packages and CocoaPods:
+```
+gh workflow run dependency-updates.yml -f create_pull_request=true
+```
+
+### Release Candidate Testing
+Creates and tests a release candidate with expiration date:
+```
+gh workflow run release-candidate.yml -f version=1.2.0-rc.1 -f expire_days=7
+```
+
+### Repository Management
+Manages stale issues and PRs, automatically closing inactive ones:
+```
+gh workflow run stale-management.yml
+```
+
+### Branch Protection
+Set up comprehensive branch protection rules:
+```
+.github/branch-protection.sh YOUR_GITHUB_TOKEN owner repo
+```
+
+## Build Optimization
+
+The CI system includes several optimizations to improve build performance:
+
+### Advanced Caching
+The `build-cache` action provides smart caching for:
+- Swift Package Manager dependencies
+- Xcode derived data
+- CocoaPods dependencies
+
+### Parallel Execution
+Jobs run in parallel where possible, with dependencies declared where needed.
+
+### Conditional Execution
+Many jobs only run when certain conditions are met, avoiding unnecessary work.
 
 ## How to Use
 
@@ -117,12 +162,18 @@ graph TD
     N[Tag Release] --> O[Release Process]
     P[Weekly Schedule] --> Q[Scheduled Tasks]
     P --> R[Dependency Scan]
-    S[Daily Schedule] --> T[CI Dashboard]
-    U[Manual Trigger] --> V[Orchestrator]
-    V --> W{Select Workflows}
-    W --> D
-    W --> J
-    W --> I
-    W --> H
-    W --> O
+    P --> S[Dependency Updates]
+    T[Daily Schedule] --> U[CI Dashboard]
+    T --> V[Stale Management]
+    W[Manual Trigger] --> X[Orchestrator]
+    X --> Y{Select Workflows}
+    Y --> D
+    Y --> J
+    Y --> I
+    Y --> H
+    Y --> O
+    Z[Manual Release] --> AA[Release Candidate]
+    AA --> AB{Testing Period}
+    AB -->|Success| O
+    AB -->|Issues| G
 ``` 

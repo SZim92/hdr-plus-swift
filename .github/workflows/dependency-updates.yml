@@ -1,0 +1,216 @@
+name: Dependency Updates
+
+on:
+  workflow_dispatch:
+    inputs:
+      create_pull_request:
+        description: 'Create pull requests for updates'
+        type: boolean
+        default: true
+  schedule:
+    - cron: '0 6 * * 1' # Run at 6 AM UTC every Monday
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  swift-package-updates:
+    name: Check Swift Package Updates
+    runs-on: macos-latest
+    if: github.repository_owner != 'dependabot'
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Swift
+        uses: ./.github/actions/setup-swift
+        with:
+          xcode-version: latest
+      
+      - name: Check for Package.swift
+        id: check-package
+        run: |
+          if [ -f "Package.swift" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Check for updates
+        if: steps.check-package.outputs.exists == 'true'
+        id: check-updates
+        run: |
+          # Verify if there's a Package.resolved file
+          if [ ! -f "Package.resolved" ]; then
+            echo "No Package.resolved found. Running swift package resolve first."
+            swift package resolve
+          fi
+          
+          # Save current Package.resolved
+          cp Package.resolved Package.resolved.backup
+          
+          # Update dependencies
+          echo "Checking for Swift Package updates..."
+          swift package update
+          
+          # Compare files to see if there are updates
+          if ! cmp -s Package.resolved Package.resolved.backup; then
+            echo "Updates found in Swift packages!"
+            echo "updated=true" >> $GITHUB_OUTPUT
+            
+            # Generate diff
+            echo "## Swift Package Updates Found" > updates.md
+            echo "\`\`\`diff" >> updates.md
+            diff -u Package.resolved.backup Package.resolved >> updates.md || true
+            echo "\`\`\`" >> updates.md
+          else
+            echo "No updates found for Swift packages."
+            echo "updated=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create Pull Request for Swift packages
+        if: steps.check-updates.outputs.updated == 'true' && inputs.create_pull_request
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(deps): update Swift package dependencies"
+          title: "chore(deps): update Swift package dependencies"
+          body-path: updates.md
+          branch: deps/swift-package-updates
+          base: main
+          labels: dependencies,automated-pr
+          delete-branch: true
+
+  cocoapods-updates:
+    name: Check CocoaPods Updates
+    runs-on: macos-latest
+    if: github.repository_owner != 'dependabot'
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      
+      - name: Check for Podfile
+        id: check-podfile
+        run: |
+          if [ -f "Podfile" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Set up Ruby
+        if: steps.check-podfile.outputs.exists == 'true'
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.0'
+          bundler-cache: true
+      
+      - name: Update CocoaPods
+        if: steps.check-podfile.outputs.exists == 'true'
+        id: pod-update
+        run: |
+          # Install CocoaPods
+          gem install cocoapods
+          
+          # Save current Podfile.lock
+          if [ -f "Podfile.lock" ]; then
+            cp Podfile.lock Podfile.lock.backup
+          fi
+          
+          # Update pods
+          echo "Checking for CocoaPods updates..."
+          pod update
+          
+          # Check if there are updates
+          if [ -f "Podfile.lock.backup" ] && ! cmp -s Podfile.lock Podfile.lock.backup; then
+            echo "Updates found in CocoaPods!"
+            echo "updated=true" >> $GITHUB_OUTPUT
+            
+            # Generate diff
+            echo "## CocoaPods Updates Found" > pod_updates.md
+            echo "\`\`\`diff" >> pod_updates.md
+            diff -u Podfile.lock.backup Podfile.lock >> pod_updates.md || true
+            echo "\`\`\`" >> pod_updates.md
+          else
+            echo "No updates found for CocoaPods."
+            echo "updated=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create Pull Request for CocoaPods
+        if: steps.pod-update.outputs.updated == 'true' && inputs.create_pull_request
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(deps): update CocoaPods dependencies"
+          title: "chore(deps): update CocoaPods dependencies"
+          body-path: pod_updates.md
+          branch: deps/cocoapods-updates
+          base: main
+          labels: dependencies,automated-pr
+          delete-branch: true
+
+  homebrew-updates:
+    name: Check Homebrew Tools Updates
+    runs-on: macos-latest
+    if: github.repository_owner != 'dependabot'
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      
+      - name: Update Homebrew and check for updates
+        id: brew-update
+        run: |
+          # Export a list of currently installed tools relevant to the project
+          brew list --formula | grep -E 'swiftlint|swiftformat|sourcery|xcbeautify' > brew_tools.txt
+          
+          # Update Homebrew
+          brew update
+          
+          # Create a file to store recommended tool updates
+          touch brew_updates.md
+          echo "## Recommended Tool Updates" > brew_updates.md
+          echo "The following development tools have new versions available:" >> brew_updates.md
+          echo "" >> brew_updates.md
+          
+          UPDATES_FOUND=false
+          
+          # For each tool, check if there's an update
+          while read -r tool; do
+            if [ -n "$tool" ]; then
+              CURRENT_VERSION=$(brew list --versions "$tool" | awk '{print $2}')
+              LATEST_VERSION=$(brew info --json=v2 "$tool" | jq -r '.formulae[0].versions.stable')
+              
+              if [ "$CURRENT_VERSION" != "$LATEST_VERSION" ]; then
+                echo "- \`$tool\`: $CURRENT_VERSION → $LATEST_VERSION" >> brew_updates.md
+                UPDATES_FOUND=true
+              fi
+            fi
+          done < brew_tools.txt
+          
+          if [ "$UPDATES_FOUND" = true ]; then
+            echo "Updates found for development tools!"
+            echo "updated=true" >> $GITHUB_OUTPUT
+            
+            # Add instructions
+            echo "" >> brew_updates.md
+            echo "To update these tools, run:" >> brew_updates.md
+            echo "```bash" >> brew_updates.md
+            echo "brew upgrade" >> brew_updates.md
+            echo "```" >> brew_updates.md
+          else
+            echo "No updates found for development tools."
+            echo "updated=false" >> $GITHUB_OUTPUT
+            echo "All development tools are up to date." >> brew_updates.md
+          fi
+      
+      - name: Create Issue for Homebrew tool updates
+        if: steps.brew-update.outputs.updated == 'true' && inputs.create_pull_request
+        uses: peter-evans/create-issue-from-file@v4
+        with:
+          title: "chore(tools): update development tools"
+          content-filepath: brew_updates.md
+          labels: tools,updates,maintenance 

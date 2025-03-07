@@ -1,0 +1,136 @@
+name: 'Advanced Build Cache'
+description: 'Sets up advanced caching for Swift/Xcode builds'
+
+inputs:
+  cache-key-prefix:
+    description: 'Prefix for the cache key'
+    required: false
+    default: 'build-cache'
+  xcode-project:
+    description: 'Xcode project name'
+    required: false
+    default: ''
+  use-swift-package-cache:
+    description: 'Use Swift Package Manager cache'
+    required: false
+    default: 'true'
+  use-derived-data-cache:
+    description: 'Use Xcode derived data cache'
+    required: false
+    default: 'true'
+  use-pods-cache:
+    description: 'Use CocoaPods cache'
+    required: false
+    default: 'true'
+  derived-data-path:
+    description: 'Path to derived data'
+    required: false
+    default: '~/Library/Developer/Xcode/DerivedData'
+
+outputs:
+  spm-cache-hit:
+    description: 'Whether the Swift Package Manager cache was hit'
+    value: ${{ steps.spm-cache.outputs.cache-hit }}
+  derived-data-cache-hit:
+    description: 'Whether the derived data cache was hit'
+    value: ${{ steps.derived-data-cache.outputs.cache-hit }}
+  pods-cache-hit:
+    description: 'Whether the CocoaPods cache was hit'
+    value: ${{ steps.pods-cache.outputs.cache-hit }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Generate cache keys
+      id: cache-keys
+      shell: bash
+      run: |
+        # Base key prefix
+        PREFIX="${{ inputs.cache-key-prefix }}"
+        
+        # Generate Swift Package Manager cache key
+        if [ -f "Package.resolved" ]; then
+          SPM_HASH=$(shasum -a 256 Package.resolved | cut -d ' ' -f 1)
+        elif [ -f "Package.swift" ]; then
+          SPM_HASH=$(shasum -a 256 Package.swift | cut -d ' ' -f 1)
+        else
+          SPM_HASH="no-swift-package"
+        fi
+        echo "spm-key=$PREFIX-spm-$SPM_HASH" >> $GITHUB_OUTPUT
+        
+        # Generate Xcode project cache key
+        if [ -n "${{ inputs.xcode-project }}" ]; then
+          PROJ_PATH="${{ inputs.xcode-project }}"
+          if [ -f "$PROJ_PATH/project.pbxproj" ]; then
+            PROJ_HASH=$(shasum -a 256 $PROJ_PATH/project.pbxproj | cut -d ' ' -f 1)
+          else
+            PROJ_HASH="no-pbxproj"
+          fi
+        else
+          # Find first xcodeproj
+          PROJ_PATH=$(find . -name "*.xcodeproj" -maxdepth 2 | head -n 1)
+          if [ -n "$PROJ_PATH" ] && [ -f "$PROJ_PATH/project.pbxproj" ]; then
+            PROJ_HASH=$(shasum -a 256 $PROJ_PATH/project.pbxproj | cut -d ' ' -f 1)
+          else
+            PROJ_HASH="no-xcode-project"
+          fi
+        fi
+        echo "xcode-key=$PREFIX-xcode-$PROJ_HASH" >> $GITHUB_OUTPUT
+        
+        # Generate CocoaPods cache key
+        if [ -f "Podfile.lock" ]; then
+          PODS_HASH=$(shasum -a 256 Podfile.lock | cut -d ' ' -f 1)
+        else
+          PODS_HASH="no-podfile-lock"
+        fi
+        echo "pods-key=$PREFIX-pods-$PODS_HASH" >> $GITHUB_OUTPUT
+        
+        # Calculate main source code hash
+        SRC_HASH=$(find . -path '*/Sources/*.swift' -o -path '*/Classes/*.swift' -o -name "*.swift" -not -path "*/Pods/*" -not -path "*/Build/*" -not -path "*/.build/*" | sort | xargs shasum -a 256 | shasum -a 256 | cut -d ' ' -f 1)
+        echo "src-hash=$SRC_HASH" >> $GITHUB_OUTPUT
+    
+    # Cache Swift Package Manager dependencies
+    - name: Cache Swift Package Manager
+      if: inputs.use-swift-package-cache == 'true'
+      id: spm-cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          .build
+          ~/.swiftpm
+        key: ${{ steps.cache-keys.outputs.spm-key }}-${{ steps.cache-keys.outputs.src-hash }}
+        restore-keys: |
+          ${{ steps.cache-keys.outputs.spm-key }}-
+    
+    # Cache Xcode derived data
+    - name: Cache Xcode Derived Data
+      if: inputs.use-derived-data-cache == 'true'
+      id: derived-data-cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ inputs.derived-data-path }}
+        key: ${{ steps.cache-keys.outputs.xcode-key }}-${{ steps.cache-keys.outputs.src-hash }}
+        restore-keys: |
+          ${{ steps.cache-keys.outputs.xcode-key }}-
+    
+    # Cache CocoaPods
+    - name: Cache CocoaPods
+      if: inputs.use-pods-cache == 'true'
+      id: pods-cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          Pods
+          ~/Library/Caches/CocoaPods
+        key: ${{ steps.cache-keys.outputs.pods-key }}-${{ steps.cache-keys.outputs.src-hash }}
+        restore-keys: |
+          ${{ steps.cache-keys.outputs.pods-key }}-
+    
+    # Report cache status
+    - name: Report cache status
+      shell: bash
+      run: |
+        echo "Cache Status:"
+        echo "- Swift Package Manager: ${{ steps.spm-cache.outputs.cache-hit == 'true' && 'HIT ✅' || 'MISS ❌' }}"
+        echo "- Xcode Derived Data: ${{ steps.derived-data-cache.outputs.cache-hit == 'true' && 'HIT ✅' || 'MISS ❌' }}"
+        echo "- CocoaPods: ${{ steps.pods-cache.outputs.cache-hit == 'true' && 'HIT ✅' || 'MISS ❌' }}" 
