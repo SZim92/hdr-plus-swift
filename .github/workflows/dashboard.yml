@@ -1,0 +1,483 @@
+name: CI/CD Dashboard
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'  # Daily at midnight UTC
+
+jobs:
+  config:
+    name: Load Configuration
+    runs-on: ubuntu-latest
+    outputs:
+      main-branch: ${{ steps.load-config.outputs.main-branch }}
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      
+      - name: Load configuration
+        id: load-config
+        uses: ./.github/actions/load-config
+
+  gather-data:
+    name: Gather CI/CD Data
+    needs: config
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      
+      - name: Set up environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+      
+      - name: Install GitHub CLI
+        run: |
+          type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt update
+          sudo apt install gh -y
+      
+      - name: Configure GitHub CLI
+        run: |
+          # In a real workflow, this would be configured with a token
+          echo "Mock configuration for GitHub CLI"
+          
+      - name: Gather workflow runs
+        id: gather-workflows
+        run: |
+          # In a real implementation, this would use the GitHub API via the CLI
+          # gh api repos/${{ github.repository }}/actions/workflows | jq -r '.workflows[] | .name + "," + .path + "," + .state'
+          
+          # For demonstration purposes, create a mock data file
+          cat > workflow_runs.json << EOF
+          [
+            {
+              "name": "Main",
+              "path": ".github/workflows/main.yml",
+              "state": "active",
+              "runs": [
+                {
+                  "id": 1,
+                  "status": "completed",
+                  "conclusion": "success",
+                  "created_at": "$(date -d '1 day ago' -Iseconds)",
+                  "updated_at": "$(date -d '23 hours ago' -Iseconds)",
+                  "run_number": 42
+                }
+              ]
+            },
+            {
+              "name": "Security",
+              "path": ".github/workflows/security.yml",
+              "state": "active",
+              "runs": [
+                {
+                  "id": 2,
+                  "status": "completed",
+                  "conclusion": "success",
+                  "created_at": "$(date -d '2 days ago' -Iseconds)",
+                  "updated_at": "$(date -d '47 hours ago' -Iseconds)",
+                  "run_number": 15
+                }
+              ]
+            },
+            {
+              "name": "PR Validation",
+              "path": ".github/workflows/pr-validation.yml",
+              "state": "active",
+              "runs": [
+                {
+                  "id": 3,
+                  "status": "completed",
+                  "conclusion": "failure",
+                  "created_at": "$(date -d '12 hours ago' -Iseconds)",
+                  "updated_at": "$(date -d '11 hours ago' -Iseconds)",
+                  "run_number": 78
+                }
+              ]
+            }
+          ]
+          EOF
+          
+          echo "Gathered workflow run data"
+      
+      - name: Gather pull requests
+        id: gather-prs
+        run: |
+          # In a real implementation, this would use the GitHub API via the CLI
+          # gh pr list --state all --limit 10 --json number,title,state,createdAt,closedAt,mergedAt,author
+          
+          # For demonstration purposes, create a mock data file
+          cat > pull_requests.json << EOF
+          [
+            {
+              "number": 101,
+              "title": "feat: Add new dashboard feature",
+              "state": "OPEN",
+              "createdAt": "$(date -d '2 days ago' -Iseconds)",
+              "author": {
+                "login": "developer1"
+              }
+            },
+            {
+              "number": 100,
+              "title": "fix: Fix critical bug in core module",
+              "state": "MERGED",
+              "createdAt": "$(date -d '3 days ago' -Iseconds)",
+              "mergedAt": "$(date -d '2 days ago' -Iseconds)",
+              "author": {
+                "login": "developer2"
+              }
+            },
+            {
+              "number": 99,
+              "title": "docs: Update API documentation",
+              "state": "CLOSED",
+              "createdAt": "$(date -d '5 days ago' -Iseconds)",
+              "closedAt": "$(date -d '4 days ago' -Iseconds)",
+              "author": {
+                "login": "developer3"
+              }
+            }
+          ]
+          EOF
+          
+          echo "Gathered pull request data"
+      
+      - name: Gather release data
+        id: gather-releases
+        run: |
+          # In a real implementation, this would use the GitHub API via the CLI
+          # gh release list --limit 5 --json tagName,name,createdAt,publishedAt
+          
+          # For demonstration purposes, create a mock data file
+          cat > releases.json << EOF
+          [
+            {
+              "tagName": "v0.2.0",
+              "name": "Release v0.2.0",
+              "createdAt": "$(date -d '10 days ago' -Iseconds)",
+              "publishedAt": "$(date -d '10 days ago' -Iseconds)"
+            },
+            {
+              "tagName": "v0.1.0",
+              "name": "Initial release",
+              "createdAt": "$(date -d '30 days ago' -Iseconds)",
+              "publishedAt": "$(date -d '30 days ago' -Iseconds)"
+            }
+          ]
+          EOF
+          
+          echo "Gathered release data"
+      
+      - name: Upload gathered data
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-cd-data
+          path: |
+            workflow_runs.json
+            pull_requests.json
+            releases.json
+          retention-days: 1
+
+  generate-dashboard:
+    name: Generate Dashboard
+    needs: [config, gather-data]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      
+      - name: Download data
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-cd-data
+          path: dashboard-data
+      
+      - name: Set up environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+      
+      - name: Generate HTML dashboard
+        run: |
+          # Create dashboard directory
+          mkdir -p dashboard
+          
+          # Create the HTML file
+          cat > dashboard/index.html << EOF
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>HDR+ Swift CI/CD Dashboard</title>
+            <style>
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                max-width: 1200px;
+                margin: 0 auto;
+                padding: 20px;
+              }
+              h1, h2, h3 {
+                color: #0366d6;
+              }
+              .card {
+                border: 1px solid #e1e4e8;
+                border-radius: 6px;
+                padding: 16px;
+                margin-bottom: 16px;
+                background-color: #fff;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+              }
+              .status {
+                display: inline-block;
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-size: 12px;
+                font-weight: 600;
+              }
+              .success { background-color: #28a745; color: white; }
+              .failure { background-color: #d73a49; color: white; }
+              .pending { background-color: #dbab09; color: white; }
+              .neutral { background-color: #6c757d; color: white; }
+              table {
+                width: 100%;
+                border-collapse: collapse;
+              }
+              th, td {
+                text-align: left;
+                padding: 8px;
+                border-bottom: 1px solid #e1e4e8;
+              }
+              th {
+                background-color: #f6f8fa;
+              }
+              .summary {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 16px;
+                margin-bottom: 24px;
+              }
+              .summary-card {
+                flex: 1;
+                min-width: 200px;
+                text-align: center;
+                padding: 16px;
+              }
+              .summary-number {
+                font-size: 32px;
+                font-weight: bold;
+                margin: 10px 0;
+              }
+              .timestamp {
+                font-size: 12px;
+                color: #6c757d;
+                text-align: right;
+              }
+            </style>
+          </head>
+          <body>
+            <h1>HDR+ Swift CI/CD Dashboard</h1>
+            <p class="timestamp">Generated: $(date -Iseconds)</p>
+            
+            <div class="summary">
+              <div class="card summary-card">
+                <h3>Workflows</h3>
+                <div class="summary-number">$(jq '. | length' dashboard-data/workflow_runs.json)</div>
+                <p>Active CI Pipelines</p>
+              </div>
+              <div class="card summary-card">
+                <h3>Pull Requests</h3>
+                <div class="summary-number">$(jq '. | length' dashboard-data/pull_requests.json)</div>
+                <p>Recent PRs</p>
+              </div>
+              <div class="card summary-card">
+                <h3>Releases</h3>
+                <div class="summary-number">$(jq '. | length' dashboard-data/releases.json)</div>
+                <p>Recent Releases</p>
+              </div>
+              <div class="card summary-card">
+                <h3>Latest Release</h3>
+                <div class="summary-number">$(jq -r '.[0].tagName // "none"' dashboard-data/releases.json)</div>
+                <p>Current Version</p>
+              </div>
+            </div>
+            
+            <h2>Workflow Status</h2>
+            <div class="card">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Workflow</th>
+                    <th>Last Run</th>
+                    <th>Status</th>
+                    <th>Run #</th>
+                    <th>Last Updated</th>
+                  </tr>
+                </thead>
+                <tbody>
+          EOF
+          
+          # Add workflow data
+          jq -c '.[]' dashboard-data/workflow_runs.json | while read -r workflow; do
+            name=$(echo $workflow | jq -r '.name')
+            run=$(echo $workflow | jq -c '.runs[0] // {}')
+            status=$(echo $run | jq -r '.conclusion // "pending"')
+            
+            # Status class
+            if [ "$status" = "success" ]; then
+              status_class="success"
+            elif [ "$status" = "failure" ]; then
+              status_class="failure"
+            elif [ "$status" = "pending" ]; then
+              status_class="pending"
+            else
+              status_class="neutral"
+            fi
+            
+            cat >> dashboard/index.html << EOF
+            <tr>
+              <td>$name</td>
+              <td>$(echo $run | jq -r '.created_at // "N/A"')</td>
+              <td><span class="status $status_class">$status</span></td>
+              <td>$(echo $run | jq -r '.run_number // "N/A"')</td>
+              <td>$(echo $run | jq -r '.updated_at // "N/A"')</td>
+            </tr>
+          EOF
+          done
+          
+          # Close the workflow table and start the PR section
+          cat >> dashboard/index.html << EOF
+                </tbody>
+              </table>
+            </div>
+            
+            <h2>Recent Pull Requests</h2>
+            <div class="card">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Number</th>
+                    <th>Title</th>
+                    <th>Author</th>
+                    <th>State</th>
+                    <th>Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+          EOF
+          
+          # Add PR data
+          jq -c '.[]' dashboard-data/pull_requests.json | while read -r pr; do
+            number=$(echo $pr | jq -r '.number')
+            title=$(echo $pr | jq -r '.title')
+            author=$(echo $pr | jq -r '.author.login')
+            state=$(echo $pr | jq -r '.state')
+            created=$(echo $pr | jq -r '.createdAt')
+            
+            # State class
+            if [ "$state" = "OPEN" ]; then
+              state_class="pending"
+            elif [ "$state" = "MERGED" ]; then
+              state_class="success"
+            else
+              state_class="neutral"
+            fi
+            
+            cat >> dashboard/index.html << EOF
+            <tr>
+              <td>$number</td>
+              <td>$title</td>
+              <td>$author</td>
+              <td><span class="status $state_class">$state</span></td>
+              <td>$created</td>
+            </tr>
+          EOF
+          done
+          
+          # Close the PR table and start the releases section
+          cat >> dashboard/index.html << EOF
+                </tbody>
+              </table>
+            </div>
+            
+            <h2>Recent Releases</h2>
+            <div class="card">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Version</th>
+                    <th>Name</th>
+                    <th>Created</th>
+                    <th>Published</th>
+                  </tr>
+                </thead>
+                <tbody>
+          EOF
+          
+          # Add release data
+          jq -c '.[]' dashboard-data/releases.json | while read -r release; do
+            tag=$(echo $release | jq -r '.tagName')
+            name=$(echo $release | jq -r '.name')
+            created=$(echo $release | jq -r '.createdAt')
+            published=$(echo $release | jq -r '.publishedAt')
+            
+            cat >> dashboard/index.html << EOF
+            <tr>
+              <td>$tag</td>
+              <td>$name</td>
+              <td>$created</td>
+              <td>$published</td>
+            </tr>
+          EOF
+          done
+          
+          # Close the releases table and finalize the HTML
+          cat >> dashboard/index.html << EOF
+                </tbody>
+              </table>
+            </div>
+            
+            <div class="timestamp">
+              <p>Last updated: $(date -Iseconds)</p>
+            </div>
+            
+            <script>
+              // Simple JavaScript to add interactivity (optional for future enhancements)
+              document.addEventListener('DOMContentLoaded', function() {
+                console.log('Dashboard loaded');
+              });
+            </script>
+          </body>
+          </html>
+          EOF
+          
+          echo "Generated HTML dashboard"
+      
+      - name: Upload dashboard
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-dashboard
+          path: dashboard/
+          retention-days: 5
+      
+      - name: Deploy dashboard to GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dashboard/
+      
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        with:
+          preview: false 

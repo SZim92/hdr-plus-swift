@@ -1,3 +1,35 @@
+# [DEPRECATED] HDR+ Swift - CI Configuration
+# This file format is deprecated and will be removed in a future update.
+# Please use .github/workflow-config.yml for shared configuration instead.
+#
+# The new format is properly structured for loading with the load-config action
+# and avoids GitHub Actions workflow validation errors.
+
+name: CI Config Loader
+on:
+  workflow_dispatch:
+    inputs:
+      notice:
+        description: 'This workflow is deprecated and exists only for reference'
+        required: true
+        default: 'Please use workflow-config.yml instead'
+
+jobs:
+  notice:
+    name: Deprecation Notice
+    runs-on: ubuntu-latest
+    steps:
+      - name: Display notice
+        run: |
+          echo "⚠️ DEPRECATED: This configuration file is deprecated."
+          echo "✅ Please use .github/workflow-config.yml instead."
+          echo "🔄 The new configuration format is loaded using the load-config action."
+          echo ""
+          echo "See the following files for updated configuration:"
+          echo "- .github/workflow-config.yml - YAML configuration for workflows"
+          echo "- .github/versions.env - Environment variables for version information"
+          echo "- .github/actions/load-config - Action to load configuration values"
+
 # HDR+ Swift - Shared CI Configuration
 # This file contains shared configuration values used across all workflows
 
