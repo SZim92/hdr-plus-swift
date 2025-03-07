@@ -15,5 +15,5 @@ jobs:
       
       - name: Build and Run Tests
         run: |
-          # Updated project file and scheme; using scheme "Burst Photo"
-          xcodebuild -project burstphoto.xcodeproj -scheme "Burst Photo" -destination 'platform=macOS' clean test 
+          # Build and test using the gui scheme
+          xcodebuild -project burstphoto.xcodeproj -scheme gui -destination 'platform=macOS' clean test 
