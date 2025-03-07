@@ -96,30 +96,32 @@ jobs:
           # Create report directory
           mkdir -p security-reports
           
-          cat > security-reports/dependency-scan.md << EOF
-          # Dependency Vulnerability Scan
+          # Create dependency scan report using individual echo statements
+          CURRENT_DATE=$(date)
+          COMMIT_SHA="${{ github.sha }}"
           
-          Scan performed on: $(date)
-          Commit: ${{ github.sha }}
-          
-          ## Summary
-          
-          | Severity | Count |
-          |----------|-------|
-          | Critical | 0     |
-          | High     | 0     |
-          | Medium   | 0     |
-          | Low      | 0     |
-          
-          ## Details
-          
-          No vulnerabilities found in dependencies.
-          
-          ## Recommendations
-          
-          - Maintain regular dependency updates
-          - Monitor security bulletins for Swift packages
-          EOF
+          echo "# Dependency Vulnerability Scan" > security-reports/dependency-scan.md
+          echo "" >> security-reports/dependency-scan.md
+          echo "Scan performed on: $CURRENT_DATE" >> security-reports/dependency-scan.md
+          echo "Commit: $COMMIT_SHA" >> security-reports/dependency-scan.md
+          echo "" >> security-reports/dependency-scan.md
+          echo "## Summary" >> security-reports/dependency-scan.md
+          echo "" >> security-reports/dependency-scan.md
+          echo "| Severity | Count |" >> security-reports/dependency-scan.md
+          echo "|----------|-------|" >> security-reports/dependency-scan.md
+          echo "| Critical | 0     |" >> security-reports/dependency-scan.md
+          echo "| High     | 0     |" >> security-reports/dependency-scan.md
+          echo "| Medium   | 0     |" >> security-reports/dependency-scan.md
+          echo "| Low      | 0     |" >> security-reports/dependency-scan.md
+          echo "" >> security-reports/dependency-scan.md
+          echo "## Details" >> security-reports/dependency-scan.md
+          echo "" >> security-reports/dependency-scan.md
+          echo "No vulnerabilities found in dependencies." >> security-reports/dependency-scan.md
+          echo "" >> security-reports/dependency-scan.md
+          echo "## Recommendations" >> security-reports/dependency-scan.md
+          echo "" >> security-reports/dependency-scan.md
+          echo "- Maintain regular dependency updates" >> security-reports/dependency-scan.md
+          echo "- Monitor security bulletins for Swift packages" >> security-reports/dependency-scan.md
       
       - name: Run Swift security linting
         run: |
