@@ -52,6 +52,20 @@ runs:
           fi
         fi
         yq --version
+        
+        # Ensure jq is installed
+        if ! command -v jq &> /dev/null; then
+          echo "Installing jq..."
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update && sudo apt-get install -y jq
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install jq
+          else
+            echo "Unsupported OS for jq installation"
+            exit 1
+          fi
+        fi
+        jq --version
 
     - name: Load configuration
       id: load-config
@@ -72,11 +86,15 @@ runs:
         
         # Load macOS runners
         MACOS_RUNNERS=$(yq -o=json '.environments.macos' "$CONFIG_PATH")
-        echo "macos-runners=$MACOS_RUNNERS" >> $GITHUB_OUTPUT
+        # Escape JSON for GitHub output
+        MACOS_RUNNERS_ESCAPED=$(echo "$MACOS_RUNNERS" | jq -c -r '. | @json')
+        echo "macos-runners=$MACOS_RUNNERS_ESCAPED" >> $GITHUB_OUTPUT
         
         # Load Linux runners
         LINUX_RUNNERS=$(yq -o=json '.environments.linux' "$CONFIG_PATH")
-        echo "linux-runners=$LINUX_RUNNERS" >> $GITHUB_OUTPUT
+        # Escape JSON for GitHub output
+        LINUX_RUNNERS_ESCAPED=$(echo "$LINUX_RUNNERS" | jq -c -r '. | @json')
+        echo "linux-runners=$LINUX_RUNNERS_ESCAPED" >> $GITHUB_OUTPUT
         
         # Load project name
         PROJECT=$(yq '.build.project' "$CONFIG_PATH")
