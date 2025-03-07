@@ -1,0 +1,117 @@
+name: Stale Issue and PR Management
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 1 * * *'  # Run daily at 1 AM UTC
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    name: Manage Stale Items
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      
+      - name: Load configuration
+        id: load-config
+        uses: ./.github/actions/load-config
+      
+      - name: Stale Bot Classic
+        uses: actions/stale@v9
+        with:
+          # General Settings
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          days-before-stale: 30
+          days-before-close: 14
+          remove-stale-when-updated: true
+          operations-per-run: 75
+          
+          # Issue Settings
+          stale-issue-message: |
+            This issue has been automatically marked as stale due to inactivity for 30 days.
+            It will be closed in 14 days if no further activity occurs.
+            
+            If this issue is still relevant, please:
+            - Comment on the issue with updates or your continued interest
+            - Remove the 'stale' label
+            
+            Thank you for your contributions to HDR+ Swift!
+          close-issue-message: |
+            This issue has been automatically closed due to inactivity for 44 days.
+            If you believe this is still relevant, please feel free to:
+            
+            - Reopen the issue with additional information
+            - Create a new issue referencing this one
+          stale-issue-label: "stale"
+          exempt-issue-labels: "pinned,security,bug,enhancement,documentation,in-progress,help-wanted"
+          
+          # PR Settings
+          stale-pr-message: |
+            This pull request has been automatically marked as stale due to inactivity for 30 days.
+            It will be closed in 14 days if no further activity occurs.
+            
+            If this PR is still relevant, please:
+            - Update the PR to address any requested changes
+            - Rebase the PR if it has merge conflicts
+            - Comment on the PR with status updates
+            - Remove the 'stale' label
+            
+            Thank you for your contributions to HDR+ Swift!
+          close-pr-message: |
+            This pull request has been automatically closed due to inactivity for 44 days.
+            If you believe this is still relevant, please:
+            
+            - Reopen the PR with updated changes
+            - Create a new PR referencing this one
+          stale-pr-label: "stale"
+          exempt-pr-labels: "pinned,security,dependencies,automated-pr,in-progress"
+          exempt-draft-pr: true
+      
+      - name: Close Flagged Issues
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Find issues that are specifically labeled for automated closing
+            const results = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: ['wontfix,duplicate,invalid'],
+              per_page: 100
+            });
+            
+            // Process each issue
+            for (const issue of results.data) {
+              // Skip pull requests
+              if (issue.pull_request) continue;
+              
+              // Check for the last activity date
+              const lastUpdated = new Date(issue.updated_at);
+              const now = new Date();
+              const daysSinceUpdate = Math.floor((now - lastUpdated) / (1000 * 60 * 60 * 24));
+              
+              // Close issues that have been flagged and inactive for more than 7 days
+              if (daysSinceUpdate > 7) {
+                console.log(`Closing issue #${issue.number}: ${issue.title} (inactive for ${daysSinceUpdate} days)`);
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `This issue has been automatically closed because it was marked as wontfix, duplicate, or invalid and has been inactive for ${daysSinceUpdate} days.`
+                });
+                
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  state: 'closed'
+                });
+              }
+            } 
