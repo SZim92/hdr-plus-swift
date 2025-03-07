@@ -1,0 +1,43 @@
+name: 'Disable Code Signing'
+description: 'Disables code signing for CI builds in consistent manner across workflows'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Create xcconfig file to disable code signing
+      shell: bash
+      run: |
+        echo "Creating configuration to disable code signing..."
+        
+        # Create a temporary xcconfig file to disable code signing
+        cat > ci_signing_disabled.xcconfig << EOF
+CODE_SIGN_IDENTITY = -
+CODE_SIGNING_REQUIRED = NO
+CODE_SIGN_ENTITLEMENTS = 
+CODE_SIGNING_ALLOWED = NO
+EXPANDED_CODE_SIGN_IDENTITY = -
+EXPANDED_CODE_SIGN_IDENTITY_NAME = -
+DEVELOPMENT_TEAM = 
+PROVISIONING_PROFILE_SPECIFIER = 
+EOF
+        
+        echo "Created xcconfig to disable code signing at: $(pwd)/ci_signing_disabled.xcconfig"
+    
+    - name: Export build environment variables
+      shell: bash
+      run: |
+        # Export the path to the xcconfig file and other signing-related variables
+        echo "DISABLE_SIGNING=true" >> $GITHUB_ENV
+        echo "XCCONFIG_PATH=$(pwd)/ci_signing_disabled.xcconfig" >> $GITHUB_ENV
+        echo "CODE_SIGN_IDENTITY=-" >> $GITHUB_ENV
+        echo "CODE_SIGNING_REQUIRED=NO" >> $GITHUB_ENV
+        echo "CODE_SIGN_ENTITLEMENTS=" >> $GITHUB_ENV
+        echo "CODE_SIGNING_ALLOWED=NO" >> $GITHUB_ENV
+        
+        # Output help info for use in build commands
+        echo ""
+        echo "To disable code signing in xcodebuild commands, add these flags:"
+        echo "xcodebuild [...] CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS= CODE_SIGNING_ALLOWED=NO"
+        echo ""
+        echo "To use the xcconfig file, add this flag:"
+        echo "xcodebuild [...] -xcconfig \$XCCONFIG_PATH" 

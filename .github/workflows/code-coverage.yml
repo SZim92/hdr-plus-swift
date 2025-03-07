@@ -26,7 +26,7 @@ on:
 jobs:
   config:
     name: Load Configuration
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     outputs:
       min-coverage: ${{ steps.load-config.outputs.min-coverage }}
       target-coverage: ${{ steps.load-config.outputs.target-coverage }}

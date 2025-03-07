@@ -32,13 +32,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
       
-      - name: Setup macOS Build Environment
-        uses: ./.github/actions/setup-macos-build
-        with:
-          disable-signing: true
+      - name: Disable Code Signing
+        uses: ./.github/actions/disable-code-signing
       
       - name: Set up Swift
-        uses: ./.github/actions/setup-swift
+        uses: ./.github/actions/setup-cross-platform-swift
         with:
           xcode-version: latest
       
