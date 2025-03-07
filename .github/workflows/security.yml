@@ -131,10 +131,13 @@ jobs:
             arch -arm64 brew install swiftlint || brew install swiftlint || echo "Could not install SwiftLint, skipping lint step"
           fi
           
+          # Create security report directory
+          mkdir -p security-reports
+          
           # Check if SwiftLint was installed successfully
           if command -v swiftlint &> /dev/null; then
             # Create security config file if it doesn't exist
-            cat > .swiftlint-security.yml << EOF
+            cat > .swiftlint-security.yml << 'SWIFTLINT_EOF'
             disabled_rules:
               - line_length
               - trailing_whitespace
@@ -150,7 +153,7 @@ jobs:
               - fatal_error_message
               - xctfail_message
               - explicit_init
-            EOF
+            SWIFTLINT_EOF
             
             # Run SwiftLint with security config
             swiftlint --no-cache --config .swiftlint-security.yml --quiet || echo "SwiftLint found issues but continuing"
@@ -159,9 +162,7 @@ jobs:
           fi
           
           # Create security report
-          mkdir -p security-reports
-          
-          cat > security-reports/swift-lint.md << EOF
+          cat > security-reports/swift-lint.md << 'REPORT_EOF'
           # Swift Security Linting
           
           Scan performed on: $(date)
@@ -184,7 +185,11 @@ jobs:
           
           - Continue following Swift best practices
           - Consider adding thread sanitizer runs to test builds
-          EOF
+          REPORT_EOF
+          
+          # Fix date in report since we used single quotes to avoid variable expansion in the heredoc
+          sed -i "" "s/\$(date)/$(date)/" security-reports/swift-lint.md
+          sed -i "" "s/\${{ github.sha }}/${{ github.sha }}/" security-reports/swift-lint.md
       
       - name: Check for secrets in code
         uses: gitleaks/gitleaks-action@v2
