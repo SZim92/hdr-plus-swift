@@ -46,13 +46,8 @@ jobs:
         run: |
           echo "Building GUI for size analysis..."
           
-          # Use the xcconfig file to disable code signing
-          if [ "$DISABLE_SIGNING" == "true" ] && [ -n "$XCCONFIG_PATH" ]; then
-            echo "Building with code signing disabled via xcconfig: $XCCONFIG_PATH"
-            xcodebuild -project burstphoto.xcodeproj -scheme gui -configuration Release build CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS= CODE_SIGNING_ALLOWED=NO
-          else
-            xcodebuild -project burstphoto.xcodeproj -scheme gui -configuration Release build
-          fi
+          # Always disable code signing for CI builds
+          xcodebuild -project burstphoto.xcodeproj -scheme gui -configuration Release build CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS= CODE_SIGNING_ALLOWED=NO
       
       - name: Analyze binary size
         id: size-analysis

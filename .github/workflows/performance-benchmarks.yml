@@ -31,7 +31,7 @@ permissions:
 jobs:
   config:
     name: Load Configuration
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     outputs:
       regression-threshold: ${{ steps.load-config.outputs.max-perf-regression || '5' }}
     

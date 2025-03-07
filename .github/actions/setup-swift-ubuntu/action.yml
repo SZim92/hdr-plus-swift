@@ -1,0 +1,81 @@
+name: 'Setup Swift on Ubuntu'
+description: 'Sets up Swift environment on Ubuntu with support for different Ubuntu versions'
+
+inputs:
+  swift-version:
+    description: 'Swift version to install'
+    required: false
+    default: '5.9'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Detect Ubuntu version
+      id: ubuntu-version
+      shell: bash
+      run: |
+        UBUNTU_VERSION=$(lsb_release -rs)
+        echo "ubuntu_version=$UBUNTU_VERSION" >> $GITHUB_OUTPUT
+        echo "Detected Ubuntu version: $UBUNTU_VERSION"
+        
+        # Map newer Ubuntu versions to the closest supported version
+        if [[ "$UBUNTU_VERSION" == "24.04" ]]; then
+          echo "ubuntu_map_version=22.04" >> $GITHUB_OUTPUT
+          echo "Using compatibility mapping: 24.04 -> 22.04"
+        else
+          echo "ubuntu_map_version=$UBUNTU_VERSION" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Install Swift dependencies
+      shell: bash
+      run: |
+        echo "Installing Swift dependencies..."
+        sudo apt-get update
+        sudo apt-get install -y \
+          binutils \
+          git \
+          gnupg2 \
+          libc6-dev \
+          libcurl4-openssl-dev \
+          libedit2 \
+          libgcc-9-dev \
+          libpython3.8 \
+          libsqlite3-0 \
+          libstdc++-9-dev \
+          libxml2-dev \
+          libz3-dev \
+          pkg-config \
+          tzdata \
+          unzip \
+          zlib1g-dev
+
+    - name: Download and install Swift
+      shell: bash
+      run: |
+        SWIFT_VERSION=${{ inputs.swift-version }}
+        UBUNTU_VERSION=${{ steps.ubuntu-version.outputs.ubuntu_map_version }}
+        
+        # Convert version format (e.g., 22.04 -> 2204)
+        UBUNTU_VERSION_NO_DOTS=$(echo "$UBUNTU_VERSION" | tr -d '.')
+        
+        SWIFT_PACKAGE="swift-$SWIFT_VERSION-RELEASE-ubuntu$UBUNTU_VERSION_NO_DOTS"
+        SWIFT_URL="https://download.swift.org/swift-$SWIFT_VERSION-release/ubuntu$UBUNTU_VERSION_NO_DOTS/swift-$SWIFT_VERSION-RELEASE/$SWIFT_PACKAGE.tar.gz"
+        
+        echo "Downloading Swift from: $SWIFT_URL"
+        
+        # Download Swift
+        cd /tmp
+        wget -q $SWIFT_URL
+        
+        # Extract Swift
+        tar xzf "$SWIFT_PACKAGE.tar.gz"
+        
+        # Move Swift to /usr/share and update PATH
+        sudo mv "$SWIFT_PACKAGE" /usr/share/swift
+        
+        echo "/usr/share/swift/usr/bin" >> $GITHUB_PATH
+        
+        # Verify installation
+        echo "Swift installation complete. Verifying..."
+        export PATH="/usr/share/swift/usr/bin:$PATH"
+        swift --version 
