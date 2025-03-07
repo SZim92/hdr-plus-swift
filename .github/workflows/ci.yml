@@ -14,7 +14,7 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Set up Swift environment
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/Library/Developer/Xcode/DerivedData
@@ -43,6 +43,7 @@ jobs:
           xcodebuild -project burstphoto.xcodeproj -list || echo "Could not list schemes"
       
       - name: Build GUI Target (basic)
+        id: build_gui
         run: |
           # Build only with simplified arguments, continuing on errors
           set +e  # Continue on error
@@ -51,13 +52,16 @@ jobs:
           echo "GUI build result: $build_result"
           if [ $build_result -eq 0 ]; then
             echo "GUI build succeeded!"
+            echo "gui_success=true" >> $GITHUB_OUTPUT
           else
             echo "GUI build completed with issues"
+            echo "gui_success=false" >> $GITHUB_OUTPUT
           fi
           # Consider this step successful regardless of build result
           exit 0
       
       - name: Build CLI Target (basic)
+        id: build_cli
         run: |
           # Build only with simplified arguments, continuing on errors
           set +e  # Continue on error
@@ -66,11 +70,21 @@ jobs:
           echo "CLI build result: $build_result"
           if [ $build_result -eq 0 ]; then
             echo "CLI build succeeded!"
+            echo "cli_success=true" >> $GITHUB_OUTPUT
           else
             echo "CLI build completed with issues"
+            echo "cli_success=false" >> $GITHUB_OUTPUT
           fi
           # Consider this step successful regardless of build result
           exit 0
+      
+      - name: Find Build Artifacts
+        id: find_artifacts
+        run: |
+          echo "Looking for build artifacts..."
+          find ~/Library/Developer/Xcode/DerivedData -name "*.app" -o -name "*.framework" | grep -v "SourcePackages"
+          echo "Checking specific build directories..."
+          ls -la ~/Library/Developer/Xcode/DerivedData/*/Build/Products/Debug/ || echo "No build products directory found"
       
       - name: Upload Build Artifacts
         if: always()
@@ -78,6 +92,16 @@ jobs:
         with:
           name: build-artifacts
           path: |
-            **/Build/Products/Debug/*.app
-            **/Build/Products/Debug/*.framework
-          retention-days: 7 
+            ~/Library/Developer/Xcode/DerivedData/*/Build/Products/Debug/*.app
+            ~/Library/Developer/Xcode/DerivedData/*/Build/Products/Debug/*.framework
+          retention-days: 7
+      
+      - name: Build Summary
+        if: always()
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- GUI Build: ${{ steps.build_gui.outputs.gui_success == 'true' && '✅ Success' || '❌ Issues' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- CLI Build: ${{ steps.build_cli.outputs.cli_success == 'true' && '✅ Success' || '❌ Issues' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "Download the artifacts to examine the build output in detail." >> $GITHUB_STEP_SUMMARY 
