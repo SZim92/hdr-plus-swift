@@ -1,7 +1,6 @@
-# DEPRECATED - This file has been split into multiple workflow files
-# This file will be removed in a future update
-# 
-# Please use the following workflow files instead:
+# This file is intentionally empty and should be deleted.
+# The functionality has been migrated to specialized workflow files:
+#
 # - main.yml: Main build workflow
 # - pr-validation.yml: PR validation
 # - release.yml: Release process
@@ -9,19 +8,4 @@
 # - performance.yml: Performance benchmarking
 # - documentation.yml: Documentation generation
 # - maintenance.yml: Maintenance tasks
-# - scheduled.yml: Scheduled tasks
-
-name: DEPRECATED - Legacy CI
-
-on:
-  workflow_dispatch:  # Only manual triggering now
-
-jobs:
-  notice:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Notice
-        run: |
-          echo "This workflow has been deprecated and split into multiple specialized workflows."
-          echo "Please use the new workflows instead."
-          exit 0 
+# - scheduled.yml: Scheduled tasks 
