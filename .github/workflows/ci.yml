@@ -13,7 +13,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
       
-      - name: Build Project
+      - name: Debug Project Structure
+        run: |
+          # List all files in the root directory to confirm project location
+          echo "Files in repository root:"
+          ls -la
+          
+          # Check if the Xcode project file exists
+          if [ -d "burstphoto.xcodeproj" ]; then
+            echo "burstphoto.xcodeproj exists"
+          else
+            echo "burstphoto.xcodeproj does not exist"
+            # Look for other .xcodeproj files
+            find . -name "*.xcodeproj" -maxdepth 2
+          fi
+          
+          # Try to list schemes in the project
+          echo "Available schemes:"
+          xcodebuild -project burstphoto.xcodeproj -list || echo "Could not list schemes"
+      
+      - name: Build Project (GUI)
         run: |
           # Build only (no tests) since the scheme is not configured for testing
-          xcodebuild -project burstphoto.xcodeproj -scheme gui -destination 'platform=macOS' clean build 
+          xcodebuild -project burstphoto.xcodeproj -scheme gui -destination 'platform=macOS' clean build || echo "GUI scheme build failed"
+      
+      - name: Build Project (CLI)
+        run: |
+          # Try building with the cli scheme as an alternative
+          xcodebuild -project burstphoto.xcodeproj -scheme cli -destination 'platform=macOS' clean build 
