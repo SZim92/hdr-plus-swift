@@ -23,6 +23,21 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-spm-deriveddata-
       
+      - name: Install SwiftLint
+        run: |
+          brew install swiftlint || echo "SwiftLint already installed"
+      
+      - name: Run SwiftLint
+        run: |
+          echo "Running SwiftLint..."
+          if command -v swiftlint &> /dev/null; then
+            # Only lint Swift files under burstphoto directory and ignore tests
+            find burstphoto -name "*.swift" -not -path "*/Tests/*" | xargs -I {} swiftlint lint --path {} || true
+            echo "SwiftLint completed with warnings/errors (exit code ignored)"
+          else
+            echo "SwiftLint not found, skipping lint step"
+          fi
+      
       - name: Debug Project Structure
         run: |
           # List all files in the root directory to confirm project location
@@ -104,4 +119,50 @@ jobs:
           echo "- CLI Build: ${{ steps.build_cli.outputs.cli_success == 'true' && '✅ Success' || '❌ Issues' }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
-          echo "Download the artifacts to examine the build output in detail." >> $GITHUB_STEP_SUMMARY 
+          echo "Download the artifacts to examine the build output in detail." >> $GITHUB_STEP_SUMMARY
+
+  # This job runs only on tags to create GitHub releases
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: release-artifacts
+      
+      - name: List artifacts
+        run: find release-artifacts -type f | sort
+      
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+      
+      - name: Zip artifacts
+        run: |
+          cd release-artifacts
+          # Create separate zip archives for GUI and CLI builds
+          find . -name "*.app" -path "*gui*" -o -name "*.app" | xargs -I {} zip -r ../burstphoto-gui-${{ github.ref_name }}.zip {}
+          find . -name "*.app" -path "*cli*" -o -name "*.app" | xargs -I {} zip -r ../burstphoto-cli-${{ github.ref_name }}.zip {}
+      
+      - name: Upload Release Assets
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./burstphoto-gui-${{ github.ref_name }}.zip
+          asset_name: burstphoto-gui-${{ github.ref_name }}.zip
+          asset_content_type: application/zip 
