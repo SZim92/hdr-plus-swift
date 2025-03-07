@@ -1,5 +1,25 @@
 #include <metal_stdlib>
 #include "../misc/constants.h"
+
+/**
+ * @file align.metal
+ * @brief Metal shaders for multi-frame alignment in computational photography
+ *
+ * This file contains Metal shader implementations for the hierarchical alignment stage
+ * of a burst photography pipeline. Alignment is a critical step in multi-frame photography
+ * algorithms like HDR+ where multiple frames need to be precisely aligned to be merged.
+ *
+ * The implementation follows a coarse-to-fine hierarchical approach:
+ * 1. Images are downsampled to create a pyramid of lower resolution images
+ * 2. Alignment begins at the coarsest level and proceeds to finer levels
+ * 3. At each level, alignment vectors from the previous level are upsampled and refined
+ * 4. Tile-based alignment is performed by comparing small patches between frames
+ * 5. Motion between frames is represented as a field of displacement vectors
+ *
+ * References:
+ * - HDR+: https://graphics.stanford.edu/papers/hdrp/hasinoff-hdrplus-sigasia16.pdf
+ * - Alignment: https://www.ipol.im/pub/art/2021/336/
+ */
 using namespace metal;
 
 /**
@@ -285,6 +305,12 @@ kernel void compute_tile_differences25(texture2d<half, access::read> ref_texture
  * while extending it with a scaling of pixel intensities by the ratio of mean values of both tiles. This helps compensate for exposure
  * differences between frames.
  *
+ * The algorithm has two main passes:
+ * 1. First pass: Calculate the average intensities of corresponding tiles to determine exposure ratios
+ * 2. Second pass: Compute the actual tile differences, normalizing for exposure differences
+ *
+ * This approach is more robust to variable exposure between frames compared to simple pixel differences.
+ *
  * @param ref_texture      Reference texture (usually the "base frame")
  * @param comp_texture     Comparison texture (the frame being aligned to the reference)
  * @param prev_alignment   Previous alignment vectors from coarser scale level
@@ -320,13 +346,14 @@ kernel void compute_tile_differences_exposure25(texture2d<half, access::read> re
     int const dx0 = downscale_factor * prev_align.x;
     int const dy0 = downscale_factor * prev_align.y;
     
-    float sum_u[25] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-    float sum_v[25] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-    float diff[25]  = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-    float ratio[25];
+    // Arrays to store sums for each of the 25 possible displacements
+    float sum_u[25] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}; // ref texture values
+    float sum_v[25] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}; // comp texture values
+    float diff[25]  = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}; // final difference values
+    float ratio[25]; // exposure ratios
     float diff_abs0, diff_abs1;
     half tmp_ref0, tmp_ref1, tmp_comp_val0, tmp_comp_val1;
-    half tmp_comp[5*68];
+    half tmp_comp[5*68]; // Buffer to store comparison pixels (5 rows of the texture at a time)
     
     // First pass: load comparison texture and calculate the sums for exposure normalization
     
@@ -354,13 +381,16 @@ kernel void compute_tile_differences_exposure25(texture2d<half, access::read> re
     // loop over rows of ref_texture
     for (int dy = 0; dy < tile_size; dy++) {
         
+        // For each row of reference texture, we need to consider 5 rows of comparison texture
+        // (current row + 2 rows above and 2 rows below for the 5x5 search area)
+        
         // loop over columns of comp_texture to copy 1 additional row of comp_texture into tmp_comp
         for (int dx = -2; dx < tile_size+2; dx++) {
             
             comp_tile_x = x0 + dx0 + dx;
             comp_tile_y = y0 + dy0 + dy+2;
             
-            // index of corresponding pixel value in tmp_comp
+            // index of corresponding pixel value in tmp_comp (using a circular buffer technique)
             tmp_index = ((dy+4)%5)*(tile_size+4) + dx+2;
             
             // if the comparison pixels are outside of the frame, attach a high loss to them
@@ -371,7 +401,7 @@ kernel void compute_tile_differences_exposure25(texture2d<half, access::read> re
             }
         }
         
-        // loop over columns of ref_texture
+        // loop over columns of ref_texture (process 2 pixels at once for better efficiency)
         for (int dx = 0; dx < tile_size; dx+=2) {
             
             ref_tile_x = x0 + dx;
@@ -380,11 +410,11 @@ kernel void compute_tile_differences_exposure25(texture2d<half, access::read> re
             tmp_ref0 = max(FLOAT16_ZERO_VAL, ref_texture.read(uint2(ref_tile_x+0, ref_tile_y)).r);
             tmp_ref1 = max(FLOAT16_ZERO_VAL, ref_texture.read(uint2(ref_tile_x+1, ref_tile_y)).r);
               
-            // loop over 25 test displacements
+            // loop over 25 test displacements (5x5 grid)
             for (int i = 0; i < 25; i++) {
                 
-                dx_i = i % 5;
-                dy_i = i / 5;
+                dx_i = i % 5; // horizontal displacement (-2 to +2)
+                dy_i = i / 5; // vertical displacement (-2 to +2)
                 
                 // index of corresponding pixel value in tmp_comp
                 tmp_index = ((dy+dy_i)%5)*(tile_size+4) + dx + dx_i;
@@ -392,6 +422,7 @@ kernel void compute_tile_differences_exposure25(texture2d<half, access::read> re
                 tmp_comp_val0 = tmp_comp[tmp_index+0];
                 tmp_comp_val1 = tmp_comp[tmp_index+1];
          
+                // Accumulate valid pixel values for mean calculation
                 if (tmp_comp_val0 > -1)
                 {
                     sum_u[i] += tmp_ref0;
@@ -407,13 +438,18 @@ kernel void compute_tile_differences_exposure25(texture2d<half, access::read> re
         }
     }
        
+    // Calculate exposure ratios for each displacement
     for (int i = 0; i < 25; i++) {
         // calculate ratio of mean values of the tiles, which is used for correction of slight differences in exposure
+        // ratio is clamped to reasonable bounds to avoid extreme corrections
         ratio[i] = clamp(sum_u[i]/(sum_v[i]+1e-9), 0.9f, 1.1f);
     }
     
     // Second pass: load comparison texture again and compute the actual differences with exposure correction
         
+    // The second pass has the same structure as the first, but now applies the exposure correction
+    // and calculates the actual pixel differences
+    
     // loop over first 4 rows of comp_texture
     for (int dy = -2; dy < +2; dy++) {
         
@@ -473,10 +509,12 @@ kernel void compute_tile_differences_exposure25(texture2d<half, access::read> re
                 // index of corresponding pixel value in tmp_comp
                 tmp_index = ((dy+dy_i)%5)*(tile_size+4) + dx + dx_i;
                 
+                // Calculate absolute differences with exposure correction applied
                 diff_abs0 = abs(tmp_ref0 - 2.0f*ratio[i]*tmp_comp[tmp_index+0]);
                 diff_abs1 = abs(tmp_ref1 - 2.0f*ratio[i]*tmp_comp[tmp_index+1]);
                 
                 // add difference to corresponding combination
+                // the formula uses a weighted combination of L1 norm (abs diff) and L2 norm (squared diff)
                 diff[i] += ((1-weight_ssd)*(diff_abs0 + diff_abs1) + weight_ssd*(diff_abs0*diff_abs0 + diff_abs1*diff_abs1));
             }
         }
@@ -487,7 +525,6 @@ kernel void compute_tile_differences_exposure25(texture2d<half, access::read> re
         tile_diff.write(diff[i], uint3(i, gid.x, gid.y));
     }
 }
-
 
 /**
  * @brief Corrects alignment errors that can occur at boundaries between moving objects and static backgrounds
@@ -761,6 +798,24 @@ kernel void warp_texture_bayer(texture2d<float, access::read> in_texture [[textu
 }
 
 
+/**
+ * @brief Warps an X-Trans pattern texture based on the computed alignment vectors
+ *
+ * This kernel applies the computed alignment vectors to transform the input texture,
+ * effectively aligning it with the reference frame. It uses a weighted interpolation
+ * scheme that's specialized for X-Trans sensor pattern images (used in Fujifilm cameras).
+ * The algorithm considers multiple neighboring tiles and applies weights based on the
+ * distance from tile centers.
+ *
+ * @param in_texture       Input texture to be warped
+ * @param out_texture      Output texture after warping
+ * @param prev_alignment   Alignment vectors to apply
+ * @param downscale_factor Scale factor for the alignment vectors
+ * @param tile_size        Size of each tile being compared (in pixels)
+ * @param n_tiles_x        Number of tiles in x direction
+ * @param n_tiles_y        Number of tiles in y direction
+ * @param gid              2D thread position (output pixel coordinate)
+ */
 kernel void warp_texture_xtrans(texture2d<float, access::read> in_texture [[texture(0)]],
                                 texture2d<float, access::read_write> out_texture [[texture(1)]],
                                 texture2d<int, access::read> prev_alignment [[texture(2)]],
@@ -783,11 +838,12 @@ kernel void warp_texture_xtrans(texture2d<float, access::read> in_texture [[text
     float x1_grid = float(x1_pix - tile_half_size) / float(texture_width  - tile_size - 1) * (n_tiles_x - 1);
     float y1_grid = float(y1_pix - tile_half_size) / float(texture_height - tile_size - 1) * (n_tiles_y - 1);
     
-    // compute the two possible tile-grid indices that the given output pixel belongs to
+    // compute the four possible tile-grid indices that the given output pixel might belong to
+    // (this handles the case of pixels near tile boundaries)
     int x_grid_list[] = {int(floor(x1_grid)), int(floor(x1_grid)), int(ceil (x1_grid)), int(ceil(x1_grid))};
     int y_grid_list[] = {int(floor(y1_grid)), int(ceil (y1_grid)), int(floor(y1_grid)), int(ceil(y1_grid))};
     
-    // loop over the two possible tile-grid indices that the given output pixel belongs to
+    // loop over the four possible tile-grid indices to apply weighted alignment
     float total_intensity = 0;
     float total_weight = 0;
     for (int i = 0; i < 4; i++){
@@ -813,6 +869,7 @@ kernel void warp_texture_xtrans(texture2d<float, access::read> in_texture [[text
             int y2_pix = y1_pix + dy;
             
             // compute the weight of the aligned pixel (based on distance from tile center)
+            // pixels closer to the center have higher weight
             int dist_x = abs(x1_pix - x0_pix);
             int dist_y = abs(y1_pix - y0_pix);
             float weight_x = tile_size - dist_x - dist_y;
