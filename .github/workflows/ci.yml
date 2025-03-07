@@ -11,7 +11,17 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
+      
+      - name: Set up Swift environment
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/Library/Developer/Xcode/DerivedData
+            ~/.swiftpm
+          key: ${{ runner.os }}-spm-deriveddata-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-deriveddata-
       
       - name: Debug Project Structure
         run: |
@@ -60,4 +70,14 @@ jobs:
             echo "CLI build completed with issues"
           fi
           # Consider this step successful regardless of build result
-          exit 0 
+          exit 0
+      
+      - name: Upload Build Artifacts
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-artifacts
+          path: |
+            **/Build/Products/Debug/*.app
+            **/Build/Products/Debug/*.framework
+          retention-days: 7 
