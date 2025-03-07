@@ -5,6 +5,14 @@
 import Foundation
 import MetalPerformanceShaders
 
+/**
+ * Frequency-Domain Merging Utilities
+ *
+ * This file provides convenience functions that interface with Metal compute pipelines
+ * to perform frequency-domain merging operations for burst photography. It includes functions
+ * for computing absolute differences, noise estimation, Fourier transformations, and merging operations.
+ */
+
 let merge_frequency_domain_state = create_pipeline(with_function_name: "merge_frequency_domain", and_label: "Frequency Domain Merge")
 
 let calculate_abs_diff_rgba_state           = create_pipeline(with_function_name: "calculate_abs_diff_rgba",         and_label: "Calculate Abs Diff RGBA")
@@ -210,7 +218,11 @@ func align_merge_frequency_domain(progress: ProcessingProgress, ref_idx: Int, mo
     }
 }
 
-
+/// Computes the absolute difference between two textures.
+/// - Parameters:
+///   - texture1: The first input texture.
+///   - texture2: The second input texture.
+/// - Returns: A texture containing the absolute pixel-wise differences.
 func calculate_abs_diff_rgba(_ texture1: MTLTexture, _ texture2: MTLTexture) -> MTLTexture {
     
     let out_texture_descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: texture1.pixelFormat, width: texture1.width, height: texture1.height, mipmapped: false)
@@ -236,7 +248,14 @@ func calculate_abs_diff_rgba(_ texture1: MTLTexture, _ texture2: MTLTexture) -> 
     return out_texture
 }
 
-
+/// Computes a normalization texture to correct for clipped highlights.
+/// - Parameters:
+///   - aligned_texture: The input aligned texture.
+///   - exposure_factor: The exposure factor of the image.
+///   - tile_info: Tile configuration information.
+///   - white_level: The white level threshold.
+///   - black_level_mean: The mean black level of the image.
+/// - Returns: A texture containing the highlight normalization factors.
 func calculate_highlights_norm_rgba(_ aligned_texture: MTLTexture, _ exposure_factor: Double, _ tile_info: TileInfo, _ white_level: Int, _ black_level_mean: Double) -> MTLTexture {
   
     // create mismatch texture
@@ -267,7 +286,14 @@ func calculate_highlights_norm_rgba(_ aligned_texture: MTLTexture, _ exposure_fa
     return highlights_norm_texture
 }
 
-
+/// Calculates the local mismatch metric using the absolute difference and noise estimation.
+/// - Parameters:
+///   - aligned_texture: The aligned image texture.
+///   - ref_texture: The reference image texture.
+///   - rms_texture: The noise estimation texture.
+///   - exposure_factor: The exposure factor between the images.
+///   - tile_info: Tile configuration information.
+/// - Returns: A texture containing the computed mismatch values.
 func calculate_mismatch_rgba(_ aligned_texture: MTLTexture, _ ref_texture: MTLTexture, _ rms_texture: MTLTexture, _ exposure_factor: Double, _ tile_info: TileInfo) -> MTLTexture {
   
     // create mismatch texture
@@ -299,7 +325,11 @@ func calculate_mismatch_rgba(_ aligned_texture: MTLTexture, _ ref_texture: MTLTe
     return mismatch_texture
 }
 
-
+/// Computes the RMS noise estimation over tiles from the input texture.
+/// - Parameters:
+///   - in_texture: The input image texture.
+///   - tile_info: The tile configuration used for merging.
+/// - Returns: A texture containing RMS noise estimates.
 func calculate_rms_rgba(_ in_texture: MTLTexture, _ tile_info: TileInfo) -> MTLTexture {
     
     let rms_texture_descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba32Float, width: tile_info.n_tiles_x, height: tile_info.n_tiles_y, mipmapped: false)
@@ -326,7 +356,11 @@ func calculate_rms_rgba(_ in_texture: MTLTexture, _ tile_info: TileInfo) -> MTLT
     return rms_texture
 }
 
-
+/// Applies deconvolution in the frequency domain to reduce blurring due to misalignment.
+/// - Parameters:
+///   - final_texture_ft: The frequency domain texture from the merging process (modified in-place).
+///   - total_mismatch_texture: The accumulated mismatch texture.
+///   - tile_info: Tile configuration information.
 func deconvolute_frequency_domain(_ final_texture_ft: MTLTexture, _ total_mismatch_texture: MTLTexture, _ tile_info: TileInfo) {
         
     let command_buffer = command_queue.makeCommandBuffer()!
@@ -345,7 +379,12 @@ func deconvolute_frequency_domain(_ final_texture_ft: MTLTexture, _ total_mismat
     command_buffer.commit()
 }
 
-
+/// Performs an inverse Fourier transform to convert a frequency domain texture back to image domain.
+/// - Parameters:
+///   - in_texture_ft: The input frequency domain texture.
+///   - tile_info: The tile configuration information.
+///   - n_textures: The number of textures used in the merging process.
+/// - Returns: A texture in the image domain.
 func backward_ft(_ in_texture_ft: MTLTexture, _ tile_info: TileInfo, _ n_textures: Int) -> MTLTexture {
     
     let out_texture_descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba32Float, width: in_texture_ft.width/2, height: in_texture_ft.height, mipmapped: false)
@@ -374,7 +413,11 @@ func backward_ft(_ in_texture_ft: MTLTexture, _ tile_info: TileInfo, _ n_texture
     return out_texture
 }
 
-
+/// Performs a forward Fourier transform on the input texture.
+/// - Parameters:
+///   - in_texture: The input image texture.
+///   - tile_info: The tile configuration information.
+/// - Returns: A frequency domain texture.
 func forward_ft(_ in_texture: MTLTexture, _ tile_info: TileInfo) -> MTLTexture {
     
     let out_texture_ft_descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba32Float, width: in_texture.width*2, height: in_texture.height, mipmapped: false)
@@ -402,7 +445,19 @@ func forward_ft(_ in_texture: MTLTexture, _ tile_info: TileInfo) -> MTLTexture {
     return out_texture_ft
 }
 
-
+/// Executes the frequency-domain merging operation using noise, motion, and highlight information.
+/// - Parameters:
+///   - ref_texture_ft: Frequency domain representation of the reference image.
+///   - aligned_texture_ft: Frequency domain representation of the aligned image.
+///   - out_texture_ft: Output texture where merged results are accumulated.
+///   - rms_texture: Noise estimation texture.
+///   - mismatch_texture: Mismatch metric texture.
+///   - highlights_norm_texture: Highlight normalization texture.
+///   - robustness_norm: Normalized robustness parameter.
+///   - read_noise: Estimated sensor read noise.
+///   - max_motion_norm: Maximum motion norm threshold.
+///   - uniform_exposure: Boolean flag indicating if the exposures are uniform.
+///   - tile_info: Tile configuration information.
 func merge_frequency_domain(_ ref_texture_ft: MTLTexture, _ aligned_texture_ft: MTLTexture, _ out_texture_ft: MTLTexture, _ rms_texture: MTLTexture, _ mismatch_texture: MTLTexture, _ highlights_norm_texture: MTLTexture, _ robustness_norm: Double, _ read_noise: Double, _ max_motion_norm: Double, _ uniform_exposure: Bool, _ tile_info: TileInfo) {
         
     let command_buffer = command_queue.makeCommandBuffer()!
@@ -429,6 +484,10 @@ func merge_frequency_domain(_ ref_texture_ft: MTLTexture, _ aligned_texture_ft: 
     command_buffer.commit()
 }
 
+/// Normalizes the mismatch texture using the provided mean mismatch value.
+/// - Parameters:
+///   - mismatch_texture: The texture containing mismatch values (modified in-place).
+///   - mean_mismatch_buffer: A buffer containing the mean mismatch value.
 func normalize_mismatch(_ mismatch_texture: MTLTexture, _ mean_mismatch_buffer: MTLBuffer) {
    
     let command_buffer = command_queue.makeCommandBuffer()!
@@ -446,7 +505,12 @@ func normalize_mismatch(_ mismatch_texture: MTLTexture, _ mean_mismatch_buffer: 
     command_buffer.commit()
 }
 
-
+/// Reduces artifacts at the borders of tiles by blending the output texture with the reference texture.
+/// - Parameters:
+///   - out_texture: The output texture to be corrected (modified in-place).
+///   - ref_texture: The reference image texture for blending.
+///   - tile_info: Tile configuration information.
+///   - black_level: An array of black level values for the image.
 func reduce_artifacts_tile_border(_ out_texture: MTLTexture, _ ref_texture: MTLTexture, _ tile_info: TileInfo, _ black_level: [Int]) {
         
     if (black_level[0] != -1) {
