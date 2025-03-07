@@ -163,6 +163,7 @@ kernel void compute_tile_differences(texture2d<float, access::read> ref_texture 
             int comp_tile_y = ref_tile_y + dy0;
             
             // if the comparison pixels are outside of the frame, attach a high loss to them
+            // QUESTION: Is the chosen penalty value (2*FLOAT16_MIN_VAL) appropriate for out-of-bound pixels?
             if ((comp_tile_x < 0) || (comp_tile_y < 0) || (comp_tile_x >= texture_width) || (comp_tile_y >= texture_height)) {
                 diff_abs = abs(ref_texture.read(uint2(ref_tile_x, ref_tile_y)).r - 2*FLOAT16_MIN_VAL);
             } else {
