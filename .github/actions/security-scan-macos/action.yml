@@ -1,0 +1,225 @@
+name: 'Security Scan for macOS'
+description: 'Runs security checks specifically for macOS Swift code'
+
+inputs:
+  project-path:
+    description: 'Path to the Xcode project file'
+    required: false
+    default: ''
+  scheme:
+    description: 'Xcode scheme to build'
+    required: false
+    default: ''
+  report-path:
+    description: 'Path to store security reports'
+    required: false
+    default: 'security-reports'
+
+outputs:
+  issues-found:
+    description: 'Whether any security issues were found'
+    value: ${{ steps.check-results.outputs.issues_found }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check for Swift security tools
+      shell: bash
+      run: |
+        echo "Setting up Swift security tools..."
+        
+        # Install SwiftLint if not present
+        if ! command -v swiftlint &> /dev/null; then
+          brew install swiftlint
+        fi
+        
+        # Create report directory
+        mkdir -p ${{ inputs.report-path }}
+    
+    - name: Run SwiftLint security checks
+      shell: bash
+      run: |
+        echo "Running SwiftLint security checks..."
+        
+        # Create a custom SwiftLint configuration for security-focused rules
+        cat > .swiftlint-security.yml << EOF
+        disabled_rules:
+          # Disable style rules for security scanning
+          - trailing_whitespace
+          - line_length
+          - identifier_name
+        
+        opt_in_rules:
+          # Security-focused rules
+          - force_unwrapping
+          - force_cast
+          - force_try
+          - implicitly_unwrapped_optional
+          - empty_string
+          - empty_count
+          - fatal_error_message
+          - unused_declaration
+          - unused_import
+          - weak_delegate
+        
+        analyzer_rules:
+          - unused_declaration
+          - unused_import
+        EOF
+        
+        # Run SwiftLint with security configuration
+        swiftlint lint --quiet --config .swiftlint-security.yml > ${{ inputs.report-path }}/swiftlint-security.txt || true
+        
+        # Count issues
+        ISSUE_COUNT=$(cat ${{ inputs.report-path }}/swiftlint-security.txt | wc -l)
+        echo "SwiftLint found $ISSUE_COUNT potential security issues"
+        
+        # Create a markdown report
+        echo "# Swift Security Lint Results" > ${{ inputs.report-path }}/swift-security.md
+        echo "" >> ${{ inputs.report-path }}/swift-security.md
+        echo "## Summary" >> ${{ inputs.report-path }}/swift-security.md
+        echo "" >> ${{ inputs.report-path }}/swift-security.md
+        echo "Found $ISSUE_COUNT potential security issues." >> ${{ inputs.report-path }}/swift-security.md
+        echo "" >> ${{ inputs.report-path }}/swift-security.md
+        echo "## Details" >> ${{ inputs.report-path }}/swift-security.md
+        echo "" >> ${{ inputs.report-path }}/swift-security.md
+        echo '```' >> ${{ inputs.report-path }}/swift-security.md
+        cat ${{ inputs.report-path }}/swiftlint-security.txt >> ${{ inputs.report-path }}/swift-security.md
+        echo '```' >> ${{ inputs.report-path }}/swift-security.md
+    
+    - name: Check for insecure API usage
+      shell: bash
+      run: |
+        echo "Checking for insecure API usage..."
+        
+        # List of potentially insecure APIs to search for
+        cat > insecure-apis.txt << EOF
+        strcpy
+        strcat
+        sprintf
+        gets
+        UnsafeMutablePointer
+        UnsafeMutableRawPointer
+        UnsafePointer
+        UnsafeRawPointer
+        withUnsafeMutablePointer
+        withUnsafePointer
+        malloc
+        free
+        NSTemporaryDirectory
+        arc4random
+        NSFileManager.createFile
+        FileManager.createFile
+        @available
+        objc_msgSend
+        EOF
+        
+        # Find Swift files
+        SWIFT_FILES=$(find . -name "*.swift" | grep -v ".build" | grep -v "Pods" | grep -v "Carthage")
+        
+        echo "# Insecure API Detection" > ${{ inputs.report-path }}/insecure-apis.md
+        echo "" >> ${{ inputs.report-path }}/insecure-apis.md
+        echo "## Potentially Insecure APIs" >> ${{ inputs.report-path }}/insecure-apis.md
+        echo "" >> ${{ inputs.report-path }}/insecure-apis.md
+        
+        API_COUNT=0
+        
+        while read -r api; do
+          if [ -n "$api" ]; then
+            RESULTS=$(grep -r "$api" $SWIFT_FILES 2>/dev/null || true)
+            if [ -n "$RESULTS" ]; then
+              echo "### $api" >> ${{ inputs.report-path }}/insecure-apis.md
+              echo "" >> ${{ inputs.report-path }}/insecure-apis.md
+              echo '```' >> ${{ inputs.report-path }}/insecure-apis.md
+              echo "$RESULTS" >> ${{ inputs.report-path }}/insecure-apis.md
+              echo '```' >> ${{ inputs.report-path }}/insecure-apis.md
+              echo "" >> ${{ inputs.report-path }}/insecure-apis.md
+              
+              API_COUNT=$((API_COUNT + 1))
+            fi
+          fi
+        done < insecure-apis.txt
+        
+        if [ $API_COUNT -eq 0 ]; then
+          echo "No potentially insecure APIs found." >> ${{ inputs.report-path }}/insecure-apis.md
+        else
+          echo "Found $API_COUNT potentially insecure APIs." >> ${{ inputs.report-path }}/insecure-apis.md
+        fi
+    
+    - name: Check for hardcoded credentials
+      shell: bash
+      run: |
+        echo "Checking for hardcoded credentials..."
+        
+        # Find Swift and configuration files
+        FILES_TO_CHECK=$(find . -name "*.swift" -o -name "*.plist" -o -name "*.json" -o -name "*.yml" -o -name "*.txt" | grep -v ".build" | grep -v "Pods" | grep -v "Carthage")
+        
+        echo "# Hardcoded Credentials Check" > ${{ inputs.report-path }}/credentials.md
+        echo "" >> ${{ inputs.report-path }}/credentials.md
+        
+        # Patterns to search for
+        PATTERNS=(
+          "password="
+          "api_key"
+          "apikey"
+          "secret"
+          "token"
+          "credential"
+          "Authorization: Bearer"
+        )
+        
+        FOUND_COUNT=0
+        
+        for pattern in "${PATTERNS[@]}"; do
+          RESULTS=$(grep -r "$pattern" $FILES_TO_CHECK 2>/dev/null || true)
+          if [ -n "$RESULTS" ]; then
+            echo "## Pattern: $pattern" >> ${{ inputs.report-path }}/credentials.md
+            echo "" >> ${{ inputs.report-path }}/credentials.md
+            echo '```' >> ${{ inputs.report-path }}/credentials.md
+            echo "$RESULTS" >> ${{ inputs.report-path }}/credentials.md
+            echo '```' >> ${{ inputs.report-path }}/credentials.md
+            echo "" >> ${{ inputs.report-path }}/credentials.md
+            
+            FOUND_COUNT=$((FOUND_COUNT + 1))
+          fi
+        done
+        
+        if [ $FOUND_COUNT -eq 0 ]; then
+          echo "No hardcoded credentials found." >> ${{ inputs.report-path }}/credentials.md
+        else  
+          echo "Found $FOUND_COUNT patterns that may indicate hardcoded credentials." >> ${{ inputs.report-path }}/credentials.md
+        fi
+    
+    - name: Generate summary report
+      id: check-results
+      shell: bash
+      run: |
+        echo "Generating summary report..."
+        
+        # Count total issues
+        SWIFTLINT_ISSUES=$(cat ${{ inputs.report-path }}/swiftlint-security.txt | wc -l)
+        API_ISSUES=$(grep -c "Found .* potentially insecure APIs" ${{ inputs.report-path }}/insecure-apis.md || echo "0")
+        CRED_ISSUES=$(grep -c "Found .* patterns that may indicate hardcoded credentials" ${{ inputs.report-path }}/credentials.md || echo "0")
+        
+        TOTAL_ISSUES=$((SWIFTLINT_ISSUES + API_ISSUES + CRED_ISSUES))
+        
+        # Create summary report
+        echo "# Security Scan Summary" > ${{ inputs.report-path }}/summary.md
+        echo "" >> ${{ inputs.report-path }}/summary.md
+        echo "## Overview" >> ${{ inputs.report-path }}/summary.md
+        echo "" >> ${{ inputs.report-path }}/summary.md
+        echo "| Check | Issues |" >> ${{ inputs.report-path }}/summary.md
+        echo "|-------|--------|" >> ${{ inputs.report-path }}/summary.md
+        echo "| Swift Security Lint | $SWIFTLINT_ISSUES |" >> ${{ inputs.report-path }}/summary.md
+        echo "| Insecure API Usage | $API_ISSUES |" >> ${{ inputs.report-path }}/summary.md
+        echo "| Hardcoded Credentials | $CRED_ISSUES |" >> ${{ inputs.report-path }}/summary.md
+        echo "| **Total** | **$TOTAL_ISSUES** |" >> ${{ inputs.report-path }}/summary.md
+        
+        # Set output
+        if [ $TOTAL_ISSUES -gt 0 ]; then
+          echo "issues_found=true" >> $GITHUB_OUTPUT
+        else
+          echo "issues_found=false" >> $GITHUB_OUTPUT
+        fi
+        
+        echo "Security scan complete with $TOTAL_ISSUES potential issues found" 

@@ -1,0 +1,50 @@
+name: 'Setup macOS Build Environment'
+description: 'Configures macOS environment for CI builds with code signing settings'
+
+inputs:
+  disable-signing:
+    description: 'Whether to disable code signing for CI builds'
+    required: false
+    default: 'true'
+  team-id:
+    description: 'Team ID for code signing if enabled'
+    required: false
+    default: ''
+
+runs:
+  using: "composite"
+  steps:
+    - name: Configure Xcode for CI
+      shell: bash
+      run: |
+        echo "Setting up macOS build environment..."
+        echo "Xcode path: $(xcode-select -p)"
+        
+        # Setup default keychain if needed
+        if [ "${{ inputs.disable-signing }}" != "true" ] && [ -n "${{ inputs.team-id }}" ]; then
+          echo "Configuring code signing with Team ID: ${{ inputs.team-id }}"
+          # Additional steps for setting up actual signing would go here
+        else
+          echo "Disabling code signing for CI build"
+          
+          # Create a temporary xcconfig file to disable code signing
+          cat > ci_signing_disabled.xcconfig << EOF
+        CODE_SIGN_IDENTITY = -
+        CODE_SIGNING_REQUIRED = NO
+        CODE_SIGN_ENTITLEMENTS = 
+        CODE_SIGNING_ALLOWED = NO
+        EXPANDED_CODE_SIGN_IDENTITY = -
+        EXPANDED_CODE_SIGN_IDENTITY_NAME = -
+        EOF
+          
+          echo "Created xcconfig to disable code signing"
+        fi
+    
+    - name: Export build environment variables
+      shell: bash
+      run: |
+        # Export the path to the xcconfig file if signing is disabled
+        if [ "${{ inputs.disable-signing }}" == "true" ]; then
+          echo "DISABLE_SIGNING=true" >> $GITHUB_ENV
+          echo "XCCONFIG_PATH=$(pwd)/ci_signing_disabled.xcconfig" >> $GITHUB_ENV
+        fi 
