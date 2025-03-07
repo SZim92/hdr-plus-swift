@@ -1,5 +1,18 @@
 /**
- Functions related to spatial-domain merging of images.
+ * Spatial Domain Merging Implementation
+ *
+ * This file provides Swift interfaces to Metal compute pipelines for spatial-domain merging
+ * of burst images. It implements the robust merging approach that analyzes differences between
+ * aligned images and assigns weights based on noise estimates and difference magnitude.
+ *
+ * The implementation supports both Bayer and non-Bayer sensor patterns through the mosaic_pattern_width
+ * parameter, which enables processing of various camera formats.
+ *
+ * Key features:
+ * - Alignment and merging of multiple frames in the spatial domain
+ * - Noise-aware weighting to preserve detail while reducing noise
+ * - Adaptive robustness based on noise reduction parameters
+ * - Support for exposure bracketing through exposure_bias handling
  */
 import Foundation
 import MetalPerformanceShaders
@@ -129,6 +142,17 @@ func color_difference(between texture1: MTLTexture, and texture2: MTLTexture, mo
 }
 
 
+/// Estimates the noise level in an image by comparing the original texture with its blurred version.
+/// 
+/// This function computes the average absolute difference between the original texture and a blurred version
+/// of the same texture, which serves as an estimate of the noise standard deviation. The difference is
+/// calculated at the mosaic pattern level (typically 2x2 pixels for Bayer sensors).
+///
+/// - Parameters:
+///   - texture: The original input texture.
+///   - texture_blurred: The blurred version of the input texture.
+///   - mosaic_pattern_width: The width of the sensor's mosaic pattern (typically 2 for Bayer).
+/// - Returns: A Metal buffer containing the estimated noise standard deviation.
 func estimate_color_noise(_ texture: MTLTexture, _ texture_blurred: MTLTexture, _ mosaic_pattern_width: Int) -> MTLBuffer {
     
     // compute the color difference of each mosaic superpixel between the original and the blurred texture
@@ -141,6 +165,22 @@ func estimate_color_noise(_ texture: MTLTexture, _ texture_blurred: MTLTexture, 
 }
 
 
+/// Performs robust merging of a comparison texture with a reference texture based on their differences.
+///
+/// This function implements a weighted average merging approach where the weight assigned to each 
+/// pixel of the comparison texture depends on the difference between the blurred versions of both textures.
+/// Regions with small differences (likely just noise differences) receive higher weights, while regions
+/// with large differences (potential misalignments or moving objects) receive lower weights.
+///
+/// - Parameters:
+///   - ref_texture: The reference texture.
+///   - ref_texture_blurred: A blurred version of the reference texture.
+///   - comp_texture: The comparison texture to be merged with the reference.
+///   - kernel_size: The size of the blur kernel used for noise estimation.
+///   - robustness: A parameter controlling how sensitive the merging is to differences (lower values = more sensitive).
+///   - noise_sd: A buffer containing the estimated noise standard deviation.
+///   - mosaic_pattern_width: The width of the sensor's mosaic pattern.
+/// - Returns: A texture containing the robustly merged result.
 func robust_merge(_ ref_texture: MTLTexture, _ ref_texture_blurred: MTLTexture, _ comp_texture: MTLTexture, _ kernel_size: Int, _ robustness: Double, _ noise_sd: MTLBuffer, _ mosaic_pattern_width: Int) -> MTLTexture {
     
     // blur comparison texture
