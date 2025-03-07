@@ -1,7 +1,28 @@
+/**
+ * Spatial Domain Merging Kernels
+ *
+ * This file defines Metal compute kernels for spatial domain calculations used in the burst photography pipeline.
+ * It includes:
+ *   - color_difference: Computes the absolute difference between two textures over a mosaic block.
+ *   - compute_merge_weight: Computes a merging weight based on the texture difference and noise estimation.
+ *
+ * All code and existing comments are preserved.
+ */
 #include <metal_stdlib>
 using namespace metal;
 
-
+/**
+ * Kernel: color_difference
+ *
+ * Computes the sum of absolute differences between corresponding pixels of two input textures over a mosaic block.
+ *
+ * Parameters:
+ *   - texture1: The first input texture (read access).
+ *   - texture2: The second input texture (read access).
+ *   - out_texture: The output texture where the computed sum of absolute differences is stored (write access).
+ *   - mosaic_pattern_width: The width of the mosaic block provided as a constant.
+ *   - gid: The thread position in the grid representing the mosaic block's index.
+ */
 kernel void color_difference(texture2d<float, access::read> texture1 [[texture(0)]],
                              texture2d<float, access::read> texture2 [[texture(1)]],
                              texture2d<float, access::write> out_texture [[texture(2)]],
@@ -25,6 +46,20 @@ kernel void color_difference(texture2d<float, access::read> texture1 [[texture(0
     out_texture.write(total_diff, gid);
 }
 
+/**
+ * Kernel: compute_merge_weight
+ *
+ * Computes the merge weight for the comparison frame based on the texture difference and noise statistics.
+ *
+ * Parameters:
+ *   - texture_diff: The input texture containing the absolute difference computed by the color_difference kernel.
+ *   - weight_texture: The output texture where the computed weight is written.
+ *   - noise_sd_buffer: A constant buffer containing the estimated noise standard deviation.
+ *   - robustness: A constant representing the robustness parameter for merging.
+ *   - gid: The thread position in the grid.
+ *
+ * The kernel computes a weight value that decreases linearly from 1 to 0 as the difference increases relative to the noise level.
+ */
 kernel void compute_merge_weight(texture2d<float, access::read> texture_diff [[texture(0)]],
                                  texture2d<float, access::write> weight_texture [[texture(1)]],
                                  constant float* noise_sd_buffer [[buffer(0)]],
