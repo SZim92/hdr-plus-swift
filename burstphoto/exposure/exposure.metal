@@ -1,12 +1,28 @@
 #include <metal_stdlib>
 #include "../misc/constants.h"
 
+/**
+ * @file exposure.metal
+ * @brief Metal shaders for exposure correction in burst photography
+ *
+ * This file contains Metal shader implementations for various exposure correction algorithms
+ * used in computational photography. It includes both tone-mapped and linear correction methods,
+ * as well as utility functions for finding maximum pixel values in textures.
+ * 
+ * The exposure correction is a critical step in the burst photography pipeline,
+ * particularly for improving underexposed images while maintaining highlight details.
+ */
 using namespace metal;
 
 /**
- Correction of underexposure with reinhard tone mapping operator.
- 
- Inspired by https://www-old.cs.utah.edu/docs/techreports/2002/pdf/UUCS-02-001.pdf
+ * Correction of underexposure with reinhard tone mapping operator.
+ *
+ * This kernel applies a sophisticated exposure correction using the Reinhard tone mapping
+ * operator, which preserves highlight details while boosting shadow and midtone regions.
+ * The implementation blends two different tone mapping curves based on the amount of
+ * correction needed.
+ * 
+ * Inspired by https://www-old.cs.utah.edu/docs/techreports/2002/pdf/UUCS-02-001.pdf
  */
 kernel void correct_exposure(texture2d<float, access::read> final_texture_blurred [[texture(0)]],
                              texture2d<float, access::read_write> final_texture [[texture(1)]],
@@ -71,7 +87,14 @@ kernel void correct_exposure(texture2d<float, access::read> final_texture_blurre
 
 
 /**
- Correction of underexposure with simple linear scaling
+ * Correction of underexposure with simple linear scaling
+ *
+ * This kernel applies a straightforward linear exposure correction by scaling pixel values 
+ * based on the specified gain. Unlike the tone-mapped version, this approach is simpler
+ * but may result in highlight clipping for significantly underexposed images.
+ *
+ * The function calculates a correction factor to bring pixel values close to the full
+ * dynamic range, while accounting for black level variations across the sensor pattern.
  */
 kernel void correct_exposure_linear(texture2d<float, access::read_write> final_texture [[texture(0)]],
                                     constant float& white_level [[buffer(0)]],
@@ -103,6 +126,18 @@ kernel void correct_exposure_linear(texture2d<float, access::read_write> final_t
 }
 
 
+/**
+ * Finds the maximum value across the x-dimension of a 1D texture
+ *
+ * This utility kernel is used as part of determining the maximum pixel value
+ * in an image texture. It scans across the x-dimension of the input texture
+ * and outputs the maximum value found to the output buffer.
+ *
+ * @param in_texture  Input 1D texture to be scanned
+ * @param out_buffer  Output buffer to store the maximum value
+ * @param width       Width of the input texture to scan
+ * @param gid         Thread position in grid
+ */
 kernel void max_x(texture1d<float, access::read> in_texture [[texture(0)]],
                   device float *out_buffer [[buffer(0)]],
                   constant int& width [[buffer(1)]],
@@ -117,6 +152,17 @@ kernel void max_x(texture1d<float, access::read> in_texture [[texture(0)]],
 }
 
 
+/**
+ * Finds the maximum value across the y-dimension of a 2D texture for each x coordinate
+ *
+ * This utility kernel scans vertically through a 2D texture to find the maximum value
+ * for each column (x-coordinate). The results are stored in a 1D output texture where
+ * each element represents the maximum value for the corresponding column.
+ *
+ * @param in_texture   Input 2D texture to be scanned
+ * @param out_texture  Output 1D texture to store maximum values
+ * @param gid          Thread position in grid (one thread per x-coordinate)
+ */
 kernel void max_y(texture2d<float, access::read> in_texture [[texture(0)]],
                   texture1d<float, access::write> out_texture [[texture(1)]],
                   uint gid [[thread_position_in_grid]]) {
