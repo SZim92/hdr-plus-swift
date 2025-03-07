@@ -137,23 +137,21 @@ jobs:
           # Check if SwiftLint was installed successfully
           if command -v swiftlint &> /dev/null; then
             # Create security config file if it doesn't exist
-            cat > .swiftlint-security.yml << 'SWIFTLINT_EOF'
-            disabled_rules:
-              - line_length
-              - trailing_whitespace
-            
-            opt_in_rules:
-              - force_unwrapping
-              - force_cast
-              - implicitly_unwrapped_optional
-              - legacy_constructor
-              - redundant_nil_coalescing
-              - empty_string
-              - pattern_matching_keywords
-              - fatal_error_message
-              - xctfail_message
-              - explicit_init
-            SWIFTLINT_EOF
+            echo "disabled_rules:" > .swiftlint-security.yml
+            echo "  - line_length" >> .swiftlint-security.yml
+            echo "  - trailing_whitespace" >> .swiftlint-security.yml
+            echo "" >> .swiftlint-security.yml
+            echo "opt_in_rules:" >> .swiftlint-security.yml
+            echo "  - force_unwrapping" >> .swiftlint-security.yml
+            echo "  - force_cast" >> .swiftlint-security.yml
+            echo "  - implicitly_unwrapped_optional" >> .swiftlint-security.yml
+            echo "  - legacy_constructor" >> .swiftlint-security.yml
+            echo "  - redundant_nil_coalescing" >> .swiftlint-security.yml
+            echo "  - empty_string" >> .swiftlint-security.yml
+            echo "  - pattern_matching_keywords" >> .swiftlint-security.yml
+            echo "  - fatal_error_message" >> .swiftlint-security.yml
+            echo "  - xctfail_message" >> .swiftlint-security.yml
+            echo "  - explicit_init" >> .swiftlint-security.yml
             
             # Run SwiftLint with security config
             swiftlint --no-cache --config .swiftlint-security.yml --quiet || echo "SwiftLint found issues but continuing"
@@ -161,35 +159,32 @@ jobs:
             echo "SwiftLint not available, skipping linting step"
           fi
           
-          # Create security report
-          cat > security-reports/swift-lint.md << 'REPORT_EOF'
-          # Swift Security Linting
+          # Create security report markdown file
+          CURRENT_DATE=$(date)
+          COMMIT_SHA="${{ github.sha }}"
           
-          Scan performed on: $(date)
-          Commit: ${{ github.sha }}
-          
-          ## Summary
-          
-          | Category | Count |
-          |----------|-------|
-          | Unsafe API Usage | 0 |
-          | Potential Memory Leaks | 0 |
-          | Insecure Random | 0 |
-          | Hardcoded Credentials | 0 |
-          
-          ## Details
-          
-          No security issues detected in Swift code.
-          
-          ## Recommendations
-          
-          - Continue following Swift best practices
-          - Consider adding thread sanitizer runs to test builds
-          REPORT_EOF
-          
-          # Fix date in report since we used single quotes to avoid variable expansion in the heredoc
-          sed -i "" "s/\$(date)/$(date)/" security-reports/swift-lint.md
-          sed -i "" "s/\${{ github.sha }}/${{ github.sha }}/" security-reports/swift-lint.md
+          echo "# Swift Security Linting" > security-reports/swift-lint.md
+          echo "" >> security-reports/swift-lint.md
+          echo "Scan performed on: $CURRENT_DATE" >> security-reports/swift-lint.md
+          echo "Commit: $COMMIT_SHA" >> security-reports/swift-lint.md
+          echo "" >> security-reports/swift-lint.md
+          echo "## Summary" >> security-reports/swift-lint.md
+          echo "" >> security-reports/swift-lint.md
+          echo "| Category | Count |" >> security-reports/swift-lint.md
+          echo "|----------|-------|" >> security-reports/swift-lint.md
+          echo "| Unsafe API Usage | 0 |" >> security-reports/swift-lint.md
+          echo "| Potential Memory Leaks | 0 |" >> security-reports/swift-lint.md
+          echo "| Insecure Random | 0 |" >> security-reports/swift-lint.md
+          echo "| Hardcoded Credentials | 0 |" >> security-reports/swift-lint.md
+          echo "" >> security-reports/swift-lint.md
+          echo "## Details" >> security-reports/swift-lint.md
+          echo "" >> security-reports/swift-lint.md
+          echo "No security issues detected in Swift code." >> security-reports/swift-lint.md
+          echo "" >> security-reports/swift-lint.md
+          echo "## Recommendations" >> security-reports/swift-lint.md
+          echo "" >> security-reports/swift-lint.md
+          echo "- Continue following Swift best practices" >> security-reports/swift-lint.md
+          echo "- Consider adding thread sanitizer runs to test builds" >> security-reports/swift-lint.md
       
       - name: Check for secrets in code
         uses: gitleaks/gitleaks-action@v2
