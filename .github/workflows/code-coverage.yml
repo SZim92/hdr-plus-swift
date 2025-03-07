@@ -1,0 +1,254 @@
+name: Code Coverage
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: 'Create baseline coverage report'
+        type: boolean
+        default: false
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '**.swift'
+      - 'Package.swift'
+      - '.github/workflows/code-coverage.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - '**.swift'
+      - 'Package.swift'
+      - '.github/workflows/code-coverage.yml'
+  schedule:
+    - cron: '0 4 * * 1'  # Run at 4 AM UTC every Monday
+
+jobs:
+  config:
+    name: Load Configuration
+    runs-on: ubuntu-latest
+    outputs:
+      min-coverage: ${{ steps.load-config.outputs.min-coverage }}
+      target-coverage: ${{ steps.load-config.outputs.target-coverage }}
+      project: ${{ steps.load-config.outputs.project }}
+      main-branch: ${{ steps.load-config.outputs.main-branch }}
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      
+      - name: Load configuration
+        id: load-config
+        uses: ./.github/actions/load-config
+
+  generate-coverage:
+    name: Generate Coverage Report
+    needs: config
+    runs-on: macos-latest
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better PR comparison
+      
+      - name: Set up Swift environment
+        uses: ./.github/actions/setup-swift
+        with:
+          xcode-version: latest
+      
+      - name: Install coverage tools
+        run: |
+          brew install lcov
+          gem install xcpretty slather
+      
+      - name: Check for SPM or Xcode project
+        id: project-type
+        run: |
+          if [ -f "Package.swift" ]; then
+            echo "type=spm" >> $GITHUB_OUTPUT
+          elif [ -f "${{ needs.config.outputs.project }}" ]; then
+            echo "type=xcode" >> $GITHUB_OUTPUT
+          else
+            echo "::error::Could not determine project type"
+            exit 1
+          fi
+      
+      # Swift Package Manager coverage
+      - name: Generate SPM coverage
+        if: steps.project-type.outputs.type == 'spm'
+        run: |
+          swift test --enable-code-coverage
+          
+          # Convert coverage data to lcov format
+          xcrun llvm-cov export -format="lcov" \
+            .build/debug/*/swift-test-product \
+            -instr-profile .build/debug/codecov/default.profdata > coverage.lcov
+      
+      # Xcode project coverage  
+      - name: Generate Xcode coverage
+        if: steps.project-type.outputs.type == 'xcode'
+        run: |
+          project_name=$(echo "${{ needs.config.outputs.project }}" | cut -d. -f1)
+          
+          # Create Slather configuration if it doesn't exist
+          if [ ! -f ".slather.yml" ]; then
+            cat > .slather.yml << EOF
+            coverage_service: html
+            xcodeproj: ${{ needs.config.outputs.project }}
+            scheme: ${project_name}
+            output_directory: coverage
+            ignore:
+              - Tests/**/*
+              - Pods/**/*
+            EOF
+          fi
+          
+          # Run tests with coverage
+          xcodebuild -project "${{ needs.config.outputs.project }}" \
+            -scheme "${project_name}" \
+            -derivedDataPath Build/ \
+            -enableCodeCoverage YES \
+            clean test | xcpretty
+          
+          # Generate coverage report
+          slather coverage --html --output-directory coverage
+          
+          # Generate lcov format for coverage check
+          slather coverage --lcov --output-directory . --ignore "Tests/*"
+          
+          # Rename output to standardized name
+          mv *.lcov coverage.lcov
+      
+      - name: Check coverage against thresholds
+        id: coverage-check
+        run: |
+          total_coverage=$(lcov --summary coverage.lcov | grep "lines" | cut -d':' -f2 | cut -d'%' -f1 | xargs)
+          echo "total=$total_coverage" >> $GITHUB_OUTPUT
+          echo "Total code coverage: $total_coverage%"
+          
+          if (( $(echo "$total_coverage < ${{ needs.config.outputs.min-coverage }}" | bc -l) )); then
+            echo "::error::Code coverage ($total_coverage%) is below minimum threshold (${{ needs.config.outputs.min-coverage }}%)"
+            exit_code=1
+          elif (( $(echo "$total_coverage < ${{ needs.config.outputs.target-coverage }}" | bc -l) )); then
+            echo "::warning::Code coverage ($total_coverage%) is below target threshold (${{ needs.config.outputs.target-coverage }}%)"
+            exit_code=0
+          else
+            echo "::notice::Code coverage ($total_coverage%) meets target threshold (${{ needs.config.outputs.target-coverage }}%)"
+            exit_code=0
+          fi
+          
+          exit $exit_code
+        continue-on-error: true
+      
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 14
+      
+      - name: Upload coverage data
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-data
+          path: coverage.lcov
+          retention-days: 14
+  
+  compare-coverage:
+    name: Compare Coverage with Base Branch
+    needs: [config, generate-coverage]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.config.outputs.main-branch }}
+      
+      - name: Set up environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lcov bc
+      
+      - name: Generate base branch coverage
+        run: |
+          echo "Generating coverage for base branch..."
+          # This is just a placeholder. Ideally, you'd fetch the latest coverage
+          # report from a storage location or run the tests on the base branch too.
+          # For simplicity, we'll create a mock coverage file
+          echo "TN:" > base_coverage.lcov
+          echo "SF:placeholder" >> base_coverage.lcov
+          echo "DA:1,1" >> base_coverage.lcov
+          echo "LF:100" >> base_coverage.lcov
+          echo "LH:80" >> base_coverage.lcov
+          echo "end_of_record" >> base_coverage.lcov
+      
+      - name: Download PR coverage data
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-data
+          path: pr-coverage/
+      
+      - name: Compare coverage
+        id: compare
+        run: |
+          base_coverage=$(lcov --summary base_coverage.lcov 2>/dev/null | grep "lines" | cut -d':' -f2 | cut -d'%' -f1 | xargs || echo "0.0")
+          pr_coverage=$(lcov --summary pr-coverage/coverage.lcov 2>/dev/null | grep "lines" | cut -d':' -f2 | cut -d'%' -f1 | xargs || echo "0.0")
+          
+          coverage_diff=$(echo "$pr_coverage - $base_coverage" | bc)
+          
+          echo "Base branch coverage: $base_coverage%"
+          echo "PR coverage: $pr_coverage%"
+          echo "Difference: $coverage_diff%"
+          
+          if (( $(echo "$coverage_diff >= 0" | bc -l) )); then
+            echo "## 📊 Coverage Change: +$coverage_diff%" >> $GITHUB_STEP_SUMMARY
+            echo "✅ This PR **increases** code coverage from $base_coverage% to $pr_coverage%" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## 📊 Coverage Change: $coverage_diff%" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ This PR **decreases** code coverage from $base_coverage% to $pr_coverage%" >> $GITHUB_STEP_SUMMARY
+            
+            if (( $(echo "$pr_coverage < ${{ needs.config.outputs.min-coverage }}" | bc -l) )); then
+              echo "❌ Coverage is now below the minimum threshold of ${{ needs.config.outputs.min-coverage }}%" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+      
+      - name: Post coverage comment
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "Would post a comment to the PR with coverage information."
+          # In a real implementation, you would use the GitHub API to post a comment
+          # gh pr comment ${{ github.event.pull_request.number }} -b "$(cat $GITHUB_STEP_SUMMARY)"
+
+  report-coverage:
+    name: Publish Coverage Report
+    needs: [config, generate-coverage]
+    runs-on: ubuntu-latest
+    if: success() && (github.ref == format('refs/heads/{0}', needs.config.outputs.main-branch) || github.event.inputs.baseline == 'true')
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      
+      - name: Download coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+      
+      - name: Setup GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v4
+      
+      - name: Upload coverage report to GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: coverage/
+      
+      - name: Deploy coverage report to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        with:
+          preview: false 

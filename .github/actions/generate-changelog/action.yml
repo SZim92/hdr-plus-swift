@@ -1,0 +1,190 @@
+name: 'Generate Changelog'
+description: 'Generates a changelog from git commits between tags or refs'
+
+inputs:
+  from-tag:
+    description: 'Start tag/ref for the changelog'
+    required: false
+    default: ''
+  to-tag:
+    description: 'End tag/ref for the changelog (defaults to HEAD)'
+    required: false
+    default: 'HEAD'
+  include-hash:
+    description: 'Include commit hash in the changelog'
+    required: false
+    default: 'true'
+  include-author:
+    description: 'Include commit author in the changelog'
+    required: false
+    default: 'true'
+  include-pr:
+    description: 'Include PR number in the changelog'
+    required: false
+    default: 'true'
+  group-by-type:
+    description: 'Group commits by conventional type'
+    required: false
+    default: 'true'
+  output-file:
+    description: 'File to output the changelog to (leave empty to only set output)'
+    required: false
+    default: ''
+
+outputs:
+  changelog:
+    description: 'The generated changelog'
+    value: ${{ steps.generate.outputs.changelog }}
+  latest-tag:
+    description: 'The latest tag found in the repository'
+    value: ${{ steps.find-tag.outputs.latest_tag }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Find latest tag
+      id: find-tag
+      shell: bash
+      run: |
+        # Find the latest tag
+        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+        echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+        echo "Latest tag found: $LATEST_TAG"
+
+    - name: Set from tag
+      id: set-from
+      shell: bash
+      run: |
+        # Set the from tag either from input or from latest tag
+        FROM_TAG="${{ inputs.from-tag }}"
+        if [ -z "$FROM_TAG" ]; then
+          FROM_TAG="${{ steps.find-tag.outputs.latest_tag }}"
+          
+          # If the latest tag is the same as the to-tag, find the previous one
+          if [ "$FROM_TAG" = "${{ inputs.to-tag }}" ]; then
+            PREV_TAG=$(git describe --tags --abbrev=0 $FROM_TAG^ 2>/dev/null || echo "")
+            if [ -n "$PREV_TAG" ]; then
+              FROM_TAG="$PREV_TAG"
+            else
+              # If no previous tag exists, use the first commit
+              FROM_TAG=$(git rev-list --max-parents=0 HEAD)
+            fi
+          fi
+        fi
+        
+        echo "from_tag=$FROM_TAG" >> $GITHUB_OUTPUT
+        echo "Using from tag: $FROM_TAG"
+
+    - name: Generate changelog
+      id: generate
+      shell: bash
+      run: |
+        FROM_TAG="${{ steps.set-from.outputs.from_tag }}"
+        TO_TAG="${{ inputs.to-tag }}"
+        
+        echo "Generating changelog from $FROM_TAG to $TO_TAG"
+        
+        # Include commit hash if requested
+        HASH_FORMAT=""
+        if [ "${{ inputs.include-hash }}" = "true" ]; then
+          HASH_FORMAT="%h"
+        fi
+        
+        # Include author if requested
+        AUTHOR_FORMAT=""
+        if [ "${{ inputs.include-author }}" = "true" ]; then
+          AUTHOR_FORMAT="(%an)"
+        fi
+        
+        # Format string
+        FORMAT_STRING="$HASH_FORMAT $AUTHOR_FORMAT %s"
+        
+        # Generate raw log
+        if [ "$FROM_TAG" = "$TO_TAG" ]; then
+          # If the tags are the same, use a single commit for the changelog
+          COMMITS=$(git log -1 --pretty=format:"$FORMAT_STRING" "$TO_TAG")
+        else
+          COMMITS=$(git log --pretty=format:"$FORMAT_STRING" "$FROM_TAG..$TO_TAG")
+        fi
+        
+        # Extract PR numbers if requested
+        if [ "${{ inputs.include-pr }}" = "true" ]; then
+          COMMITS=$(echo "$COMMITS" | sed -E 's/\(#([0-9]+)\)/\[PR #\1\]/g')
+        fi
+        
+        # Process by conventional commit types if requested
+        if [ "${{ inputs.group-by-type }}" = "true" ]; then
+          # Initialize sections
+          FEATURES=""
+          FIXES=""
+          DOCS=""
+          TESTS=""
+          CHORE=""
+          OTHER=""
+          
+          # Process each line
+          while IFS= read -r line; do
+            if [[ "$line" =~ ^.*feat(\(.*\))?:.*$ ]]; then
+              FEATURES="$FEATURES\n- $line"
+            elif [[ "$line" =~ ^.*fix(\(.*\))?:.*$ ]]; then
+              FIXES="$FIXES\n- $line"
+            elif [[ "$line" =~ ^.*docs(\(.*\))?:.*$ ]]; then
+              DOCS="$DOCS\n- $line"
+            elif [[ "$line" =~ ^.*test(\(.*\))?:.*$ ]]; then
+              TESTS="$TESTS\n- $line"
+            elif [[ "$line" =~ ^.*chore(\(.*\))?:.*$ ]]; then
+              CHORE="$CHORE\n- $line"
+            else
+              OTHER="$OTHER\n- $line"
+            fi
+          done <<< "$COMMITS"
+          
+          # Build markdown
+          CHANGELOG="# Changelog\n\n## $TO_TAG\n"
+          
+          if [ -n "$FEATURES" ]; then
+            CHANGELOG="$CHANGELOG\n### ✨ Features\n$FEATURES\n"
+          fi
+          
+          if [ -n "$FIXES" ]; then
+            CHANGELOG="$CHANGELOG\n### 🐛 Bug Fixes\n$FIXES\n"
+          fi
+          
+          if [ -n "$DOCS" ]; then
+            CHANGELOG="$CHANGELOG\n### 📚 Documentation\n$DOCS\n"
+          fi
+          
+          if [ -n "$TESTS" ]; then
+            CHANGELOG="$CHANGELOG\n### 🧪 Tests\n$TESTS\n"
+          fi
+          
+          if [ -n "$CHORE" ]; then
+            CHANGELOG="$CHANGELOG\n### 🧹 Chores\n$CHORE\n"
+          fi
+          
+          if [ -n "$OTHER" ]; then
+            CHANGELOG="$CHANGELOG\n### 🔄 Other Changes\n$OTHER\n"
+          fi
+        else
+          # Simple list format
+          CHANGELOG="# Changelog\n\n## $TO_TAG\n"
+          while IFS= read -r line; do
+            CHANGELOG="$CHANGELOG\n- $line"
+          done <<< "$COMMITS"
+        fi
+        
+        # Escape special characters for GitHub Actions
+        CHANGELOG="${CHANGELOG//'%'/'%25'}"
+        CHANGELOG="${CHANGELOG//$'\n'/'%0A'}"
+        CHANGELOG="${CHANGELOG//$'\r'/'%0D'}"
+        
+        echo "changelog=$CHANGELOG" >> $GITHUB_OUTPUT
+        
+        # Write to file if requested
+        if [ -n "${{ inputs.output-file }}" ]; then
+          echo -e "${CHANGELOG//'%0A'/\\n}" > "${{ inputs.output-file }}"
+          echo "Wrote changelog to ${{ inputs.output-file }}"
+        fi
+        
+        # Display information about the generated changelog
+        echo "Generated changelog from $FROM_TAG to $TO_TAG" 

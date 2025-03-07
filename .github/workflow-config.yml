@@ -1,0 +1,72 @@
+# HDR+ Swift - Shared Workflow Configuration
+# This file contains shared configuration values that can be loaded by GitHub Actions workflows
+
+# Version information
+version:
+  major: 0
+  minor: 1
+  patch: 0
+
+# Build configuration
+build:
+  project: burstphoto.xcodeproj
+  schemes:
+    gui: gui
+    cli: cli
+  configurations:
+    debug: Debug
+    release: Release
+  retention:
+    default: 7
+    extended: 90
+    releases: 365
+
+# Environment support
+environments:
+  macos:
+    - name: macos-14
+      display_name: macOS Sonoma (Apple Silicon)
+      xcode: "15.2"
+    - name: macos-13
+      display_name: macOS Ventura
+      xcode: "15.0"
+  linux:
+    - name: ubuntu-latest
+      display_name: Ubuntu Latest
+      swift: "5.9"
+    - name: ubuntu-20.04
+      display_name: Ubuntu 20.04
+      swift: "5.8"
+
+# Notification settings
+notifications:
+  slack:
+    alerts: ci-alerts
+    releases: releases
+    general: general
+
+# Repository settings
+repository:
+  main_branch: main
+  docs_branch: gh-pages
+  release_tag_pattern: v*
+  readme_title: "HDR+ Swift"
+
+# Performance thresholds
+thresholds:
+  max_binary_size: 50
+  max_perf_regression: 5
+  coverage:
+    minimum: 75
+    target: 85
+
+# Security settings
+security:
+  secrets:
+    enabled: true
+  dependencies:
+    scan_schedule: "0 5 * * 1"  # Monday at 5am UTC
+  codeql:
+    languages:
+      - swift
+    queries: security-and-quality 

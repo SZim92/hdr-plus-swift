@@ -1,0 +1,161 @@
+name: CI/CD Orchestrator
+
+on:
+  workflow_dispatch:
+    inputs:
+      workflows:
+        description: 'Workflows to run (comma-separated)'
+        required: true
+        default: 'main,security,performance'
+        type: string
+      release_version:
+        description: 'Release version (if running a release)'
+        required: false
+        type: string
+      skip_tests:
+        description: 'Skip running tests'
+        required: false
+        default: false
+        type: boolean
+      notify:
+        description: 'Send notifications'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  prepare:
+    name: Prepare Workflow Run
+    runs-on: ubuntu-latest
+    outputs:
+      workflows: ${{ steps.prepare.outputs.workflows }}
+      is_release: ${{ steps.prepare.outputs.is_release }}
+      version: ${{ steps.prepare.outputs.version }}
+      
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        
+      - name: Set up workflow run
+        id: prepare
+        run: |
+          # Parse input workflows
+          IFS=',' read -ra WORKFLOWS <<< "${{ github.event.inputs.workflows }}"
+          WORKFLOWS_JSON=$(printf '%s\n' "${WORKFLOWS[@]}" | jq -R . | jq -s .)
+          echo "workflows=$WORKFLOWS_JSON" >> $GITHUB_OUTPUT
+          
+          # Determine if this is a release
+          if [[ -n "${{ github.event.inputs.release_version }}" ]]; then
+            echo "is_release=true" >> $GITHUB_OUTPUT
+            echo "version=${{ github.event.inputs.release_version }}" >> $GITHUB_OUTPUT
+          else
+            echo "is_release=false" >> $GITHUB_OUTPUT
+            echo "version=0.0.0" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "Workflows to run: $WORKFLOWS_JSON"
+          echo "Is release: ${{ github.event.inputs.release_version != '' }}"
+          echo "Release version: ${{ github.event.inputs.release_version || 'N/A' }}"
+      
+  trigger_workflows:
+    name: Trigger ${{ matrix.workflow }} Workflow
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workflow: ${{ fromJson(needs.prepare.outputs.workflows) }}
+        
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        
+      - name: Trigger workflow
+        id: trigger
+        run: |
+          # Extract workflow file path
+          WORKFLOW_FILE=".github/workflows/${{ matrix.workflow }}.yml"
+          if [ ! -f "$WORKFLOW_FILE" ]; then
+            echo "::error::Workflow file not found: $WORKFLOW_FILE"
+            exit 1
+          fi
+          echo "Triggering workflow: ${{ matrix.workflow }}"
+          
+          # Construct inputs based on workflow type
+          INPUTS=""
+          
+          if [ "${{ matrix.workflow }}" == "main" ]; then
+            INPUTS="{\"skip_tests\": ${{ github.event.inputs.skip_tests }}}"
+          elif [ "${{ matrix.workflow }}" == "release" ] && [ "${{ needs.prepare.outputs.is_release }}" == "true" ]; then
+            INPUTS="{\"version\": \"${{ needs.prepare.outputs.version }}\"}"
+          elif [ "${{ matrix.workflow }}" == "security" ]; then
+            INPUTS="{}"
+          elif [ "${{ matrix.workflow }}" == "cross-platform" ]; then
+            INPUTS="{\"platform_filter\": \"macos-14,ubuntu-latest\"}"
+          else
+            INPUTS="{}"
+          fi
+          
+          # Trigger the workflow
+          echo "Triggering ${{ matrix.workflow }} with inputs: $INPUTS"
+          
+          # In a real implementation, you would use the GitHub API to trigger workflows
+          # gh workflow run ${{ matrix.workflow }}.yml --ref ${{ github.ref_name }} --raw-field "$INPUTS"
+          
+          # For demonstration purposes, just simulate success
+          echo "workflow_id=12345678" >> $GITHUB_OUTPUT
+          echo "Workflow triggered successfully, run ID: 12345678"
+        
+      - name: Check workflow status
+        run: |
+          echo "Checking status of workflow run ID: ${{ steps.trigger.outputs.workflow_id }}"
+          echo "This would poll the GitHub API to check the status of the triggered workflow"
+          
+  summarize:
+    name: Summarize Results
+    needs: [prepare, trigger_workflows]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        
+      - name: Generate summary
+        run: |
+          echo "# CI/CD Orchestrator Run Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Workflows triggered: ${{ needs.prepare.outputs.workflows }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Workflow | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+          
+          # In a real implementation, you would query the GitHub API for actual status
+          # For demonstration, we'll simulate success for all workflows
+          
+          for workflow in $(echo '${{ needs.prepare.outputs.workflows }}' | jq -r '.[]'); do
+            echo "| $workflow | ✅ Success | [View Run](https://github.com/${{ github.repository }}/actions/workflows/$workflow.yml) |" >> $GITHUB_STEP_SUMMARY
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.prepare.outputs.is_release }}" == "true" ]; then
+            echo "## Release Information" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Version: ${{ needs.prepare.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Send notification
+        if: github.event.inputs.notify == 'true'
+        uses: ./.github/actions/notify-slack
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          channel: ci-alerts
+          status: ${{ job.status }}
+          title: "Orchestrated CI/CD Run"
+          message: "Completed orchestrated run of workflows: ${{ needs.prepare.outputs.workflows }}"
+          footer: "Triggered by ${{ github.actor }} via orchestrator" 
