@@ -1,0 +1,271 @@
+name: 'Run Performance Benchmarks'
+description: 'Runs Swift performance benchmarks and tracks results over time'
+
+inputs:
+  benchmark-target:
+    description: 'Name of the benchmark target'
+    required: false
+    default: 'HDRBenchmarks'
+  iterations:
+    description: 'Number of benchmark iterations'
+    required: false
+    default: '5'
+  compare-with-baseline:
+    description: 'Compare results with baseline'
+    required: false
+    default: 'true'
+  create-baseline:
+    description: 'Create a new baseline from this run'
+    required: false
+    default: 'false'
+  results-path:
+    description: 'Path to store benchmark results'
+    required: false
+    default: 'benchmark-results'
+  regression-threshold:
+    description: 'Percentage threshold for regression warnings'
+    required: false
+    default: '5'
+
+outputs:
+  average-runtime:
+    description: 'Average benchmark runtime in milliseconds'
+    value: ${{ steps.analyze.outputs.average_runtime }}
+  max-memory:
+    description: 'Maximum memory usage in MB'
+    value: ${{ steps.analyze.outputs.max_memory }}
+  has-regression:
+    description: 'Whether performance regression was detected'
+    value: ${{ steps.analyze.outputs.has_regression }}
+  regression-details:
+    description: 'Details of any detected regressions'
+    value: ${{ steps.analyze.outputs.regression_details }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up benchmark environment
+      shell: bash
+      run: |
+        echo "Setting up benchmark environment..."
+        
+        # Create results directory
+        mkdir -p ${{ inputs.results-path }}
+        
+        # Install benchmark tools if needed
+        if ! command -v swift-benchmark &> /dev/null; then
+          echo "Installing Swift Benchmark tools..."
+          
+          if [ "$(uname)" == "Darwin" ]; then
+            # macOS setup
+            brew install swift-benchmark || echo "Using Xcode's built-in benchmark tools"
+          elif [ "$(uname)" == "Linux" ]; then
+            # Linux setup
+            sudo apt-get update
+            sudo apt-get install -y swift
+          fi
+        fi
+    
+    - name: Run performance benchmarks
+      id: run
+      shell: bash
+      run: |
+        echo "Running benchmarks with ${{ inputs.iterations }} iterations..."
+        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        RESULTS_FILE="${{ inputs.results-path }}/benchmark_${TIMESTAMP}.json"
+        
+        # Detect if using Swift Package Manager or Xcode project
+        if [ -f "Package.swift" ]; then
+          # SPM benchmark approach
+          echo "Running Swift Package Manager benchmarks..."
+          
+          # Check if benchmark target exists
+          if swift package dump-package | grep -q "${{ inputs.benchmark-target }}"; then
+            # Run benchmark using SPM
+            swift run -c release ${{ inputs.benchmark-target }} --iterations ${{ inputs.iterations }} --output $RESULTS_FILE
+          else
+            # Fallback to custom benchmark code in test target
+            echo "Benchmark target not found, running via test target..."
+            swift test -c release --filter "PerformanceTests" | tee benchmark_output.txt
+            
+            # Parse results from output and create JSON
+            echo "{" > $RESULTS_FILE
+            echo "  \"benchmarks\": [" >> $RESULTS_FILE
+            grep "average time" benchmark_output.txt | sed -E 's/.*: ([0-9.]+) seconds.*/    {"name": "performance_test", "time": \1},/' >> $RESULTS_FILE
+            # Remove trailing comma from last entry
+            sed -i.bak '$ s/,$//' $RESULTS_FILE
+            echo "  ]" >> $RESULTS_FILE
+            echo "}" >> $RESULTS_FILE
+            rm -f benchmark_output.txt
+          fi
+          
+        elif [ -d "*.xcodeproj" ]; then
+          # Xcode benchmark approach
+          echo "Running Xcode benchmarks..."
+          
+          # Use xcodebuild with benchmark target
+          if xcodebuild -list | grep -q "${{ inputs.benchmark-target }}"; then
+            # Run specific benchmark target
+            xcodebuild test -scheme "${{ inputs.benchmark-target }}" \
+              -destination "platform=iOS Simulator,name=iPhone 15" \
+              -resultBundlePath TestResults.xcresult
+          else
+            # Fallback to performance tests in main test target
+            xcodebuild test -scheme "$(ls *.xcodeproj | sed 's/\.xcodeproj//')" \
+              -destination "platform=iOS Simulator,name=iPhone 15" \
+              -only-testing:PerformanceTests \
+              -resultBundlePath TestResults.xcresult
+          fi
+          
+          # Extract and convert results to JSON
+          echo "Extracting performance results from Xcode..."
+          xcrun xcresulttool get --format json --path TestResults.xcresult > xcode_results.json
+          
+          # Convert Xcode results to our benchmark format
+          python3 -c "
+import json, sys
+with open('xcode_results.json', 'r') as f:
+    data = json.load(f)
+results = {'benchmarks': []}
+for action in data.get('actions', {}).get('_values', []):
+    for test in action.get('actionResult', {}).get('testsRef', {}).get('tests', {}).get('_values', []):
+        if 'performanceMetrics' in test:
+            for metric in test.get('performanceMetrics', {}).get('_values', []):
+                name = test.get('identifier', {}).get('_value', 'unknown')
+                time = metric.get('averageValue', {}).get('_value', 0)
+                results['benchmarks'].append({'name': name, 'time': float(time)})
+with open('$RESULTS_FILE', 'w') as f:
+    json.dump(results, f, indent=2)
+          "
+          rm -f xcode_results.json
+        else
+          echo "No recognizable project structure found."
+          exit 1
+        fi
+        
+        # Check if file was created
+        if [ ! -f "$RESULTS_FILE" ]; then
+          echo "Error: Benchmark results file was not created."
+          exit 1
+        fi
+        
+        echo "Benchmark results saved to $RESULTS_FILE"
+        echo "results_file=$RESULTS_FILE" >> $GITHUB_OUTPUT
+    
+    - name: Create baseline if requested
+      if: inputs.create-baseline == 'true'
+      shell: bash
+      run: |
+        echo "Creating new baseline from current results..."
+        cp ${{ steps.run.outputs.results_file }} ${{ inputs.results-path }}/baseline.json
+        echo "New benchmark baseline created."
+    
+    - name: Analyze benchmark results
+      id: analyze
+      shell: bash
+      run: |
+        RESULTS_FILE="${{ steps.run.outputs.results_file }}"
+        BASELINE_FILE="${{ inputs.results-path }}/baseline.json"
+        
+        # Check if baseline exists for comparison
+        if [ "${{ inputs.compare-with-baseline }}" == "true" ] && [ -f "$BASELINE_FILE" ]; then
+          echo "Comparing with baseline..."
+          
+          # Extract metrics
+          AVERAGE_TIME=$(jq '.benchmarks | map(.time) | add / length' $RESULTS_FILE)
+          echo "average_runtime=$AVERAGE_TIME" >> $GITHUB_OUTPUT
+          
+          # Get baseline metrics
+          BASELINE_TIME=$(jq '.benchmarks | map(.time) | add / length' $BASELINE_FILE)
+          
+          # Calculate percentage difference
+          PERCENT_CHANGE=$(echo "scale=2; 100 * ($AVERAGE_TIME - $BASELINE_TIME) / $BASELINE_TIME" | bc)
+          
+          echo "Current average: $AVERAGE_TIME seconds"
+          echo "Baseline average: $BASELINE_TIME seconds"
+          echo "Percentage change: $PERCENT_CHANGE%"
+          
+          # Check for regression
+          if (( $(echo "$PERCENT_CHANGE > ${{ inputs.regression-threshold }}" | bc -l) )); then
+            echo "has_regression=true" >> $GITHUB_OUTPUT
+            REGRESSION_MSG="⚠️ Performance regression detected: $PERCENT_CHANGE% slower than baseline"
+            echo "regression_details=$REGRESSION_MSG" >> $GITHUB_OUTPUT
+            echo "$REGRESSION_MSG"
+          else
+            echo "has_regression=false" >> $GITHUB_OUTPUT
+            echo "No significant regression detected"
+          fi
+          
+          # Generate performance report
+          echo "## Performance Benchmark Results" > performance_report.md
+          echo "" >> performance_report.md
+          echo "| Metric | Current | Baseline | Change |" >> performance_report.md
+          echo "|--------|---------|----------|--------|" >> performance_report.md
+          echo "| Average runtime (s) | $AVERAGE_TIME | $BASELINE_TIME | $PERCENT_CHANGE% |" >> performance_report.md
+          
+          # Add individual benchmark results
+          echo "" >> performance_report.md
+          echo "### Individual Benchmarks" >> performance_report.md
+          echo "" >> performance_report.md
+          echo "| Benchmark | Current (s) | Baseline (s) | Change |" >> performance_report.md
+          echo "|-----------|-------------|--------------|--------|" >> performance_report.md
+          
+          # Use jq to extract individual benchmark results and compare
+          jq -r '.benchmarks[] | .name' $RESULTS_FILE | while read -r benchmark; do
+            CURRENT=$(jq -r ".benchmarks[] | select(.name == \"$benchmark\") | .time" $RESULTS_FILE)
+            BASELINE=$(jq -r ".benchmarks[] | select(.name == \"$benchmark\") | .time" $BASELINE_FILE)
+            
+            if [ "$BASELINE" != "null" ] && [ "$CURRENT" != "null" ]; then
+              CHANGE=$(echo "scale=2; 100 * ($CURRENT - $BASELINE) / $BASELINE" | bc)
+              echo "| $benchmark | $CURRENT | $BASELINE | $CHANGE% |" >> performance_report.md
+            else
+              echo "| $benchmark | $CURRENT | N/A | N/A |" >> performance_report.md
+            fi
+          done
+          
+        else
+          # No baseline comparison, just report current results
+          echo "No baseline for comparison. Reporting current results only."
+          
+          # Extract metrics
+          AVERAGE_TIME=$(jq '.benchmarks | map(.time) | add / length' $RESULTS_FILE)
+          echo "average_runtime=$AVERAGE_TIME" >> $GITHUB_OUTPUT
+          echo "has_regression=false" >> $GITHUB_OUTPUT
+          
+          # Generate performance report
+          echo "## Performance Benchmark Results" > performance_report.md
+          echo "" >> performance_report.md
+          echo "| Metric | Value |" >> performance_report.md
+          echo "|--------|-------|" >> performance_report.md
+          echo "| Average runtime (s) | $AVERAGE_TIME |" >> performance_report.md
+          
+          # Add individual benchmark results
+          echo "" >> performance_report.md
+          echo "### Individual Benchmarks" >> performance_report.md
+          echo "" >> performance_report.md
+          echo "| Benchmark | Time (s) |" >> performance_report.md
+          echo "|-----------|----------|" >> performance_report.md
+          
+          jq -r '.benchmarks[] | "| \(.name) | \(.time) |"' $RESULTS_FILE >> performance_report.md
+        fi
+        
+        # Save performance report as an artifact
+        cp performance_report.md ${{ inputs.results-path }}/latest_report.md
+    
+    - name: Post results to PR if available
+      if: github.event_name == 'pull_request' && inputs.compare-with-baseline == 'true'
+      shell: bash
+      run: |
+        if [ "${{ steps.analyze.outputs.has_regression }}" == "true" ]; then
+          echo "::warning::${{ steps.analyze.outputs.regression_details }}"
+          echo "Check the performance report in the workflow artifacts for details."
+        else
+          echo "::notice::No performance regressions detected."
+        fi
+    
+    - name: Upload performance results
+      uses: actions/upload-artifact@v4
+      with:
+        name: performance-benchmarks
+        path: ${{ inputs.results-path }}
+        retention-days: 90 

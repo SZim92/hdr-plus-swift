@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & Discussions
+    url: https://github.com/your-org/hdr-plus-swift/discussions
+    about: For questions, ideas or general discussion, please use the discussions section
+  - name: Documentation
+    url: https://your-org.github.io/hdr-plus-swift/
+    about: Check the documentation for answers to common questions 
