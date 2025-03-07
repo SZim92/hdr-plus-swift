@@ -4,12 +4,47 @@
 using namespace metal;
 
 /**
+ * @file frequency.metal
+ * @brief Metal shaders for frequency-domain operations in computational photography
+ * 
+ * This file implements various frequency-domain transforms and operations used in
+ * the burst photography pipeline, including Fast Fourier Transform (FFT) implementations,
+ * deconvolution algorithms, and frequency-domain merging techniques for noise reduction
+ * and image enhancement.
+ *
+ * The operations implemented here are critical for the alignment and merging of multiple
+ * frames in burst photography, working with complex numbers in frequency space to
+ * enable advanced image processing that would be more difficult in the spatial domain.
+ *
  This is the most important function required for the frequency-based merging approach. It is based on ideas from several publications:
  - [Hasinoff 2016]: https://graphics.stanford.edu/papers/hdrp/hasinoff-hdrplus-sigasia16.pdf
  - [Monod 2021]: https://www.ipol.im/pub/art/2021/336/
  - [Liba 2019]: https://graphics.stanford.edu/papers/night-sight-sigasia19/night-sight-sigasia19.pdf
  - [Delbracio 2015]: https://openaccess.thecvf.com/content_cvpr_2015/papers/Delbracio_Burst_Deblurring_Removing_2015_CVPR_paper.pdf
 */
+/**
+ * Merges multiple image frames in the frequency domain to reduce noise while preserving details.
+ *
+ * This kernel performs the core frequency-domain merging process, combining a reference frame 
+ * with an aligned comparison frame. It implements a sophisticated merging algorithm that:
+ * 1. Analyzes local frequency content to determine optimal merging weights
+ * 2. Applies Wiener-like filtering with robustness against misalignment
+ * 3. Handles varying exposure levels and noise characteristics across frames
+ * 4. Applies subpixel Fourier-based alignment for enhanced image quality
+ *
+ * @param ref_texture_ft         Reference frame in frequency domain
+ * @param aligned_texture_ft     Aligned comparison frame in frequency domain
+ * @param out_texture_ft         Output texture for merged result
+ * @param rms_texture            Texture containing estimated noise levels
+ * @param mismatch_texture       Texture with local alignment quality metrics
+ * @param highlights_norm_texture Texture with highlight handling factors
+ * @param robustness_norm        Parameter controlling noise reduction strength
+ * @param read_noise             Base sensor read noise estimate
+ * @param max_motion_norm        Maximum motion threshold for merging
+ * @param tile_size              Processing tile size
+ * @param uniform_exposure       Flag indicating if exposures are uniform across frames
+ * @param gid                    Thread position in grid
+ */
 kernel void merge_frequency_domain(texture2d<float, access::read> ref_texture_ft [[texture(0)]],
                                    texture2d<float, access::read> aligned_texture_ft [[texture(1)]],
                                    texture2d<float, access::read_write> out_texture_ft [[texture(2)]],
@@ -56,6 +91,15 @@ kernel void merge_frequency_domain(texture2d<float, access::read> ref_texture_ft
         total_diff[i] = 0.0f;
     }
     
+    /**
+     * Subpixel alignment based on the Fourier shift theorem
+     * 
+     * The Fourier shift theorem states that a spatial shift corresponds to a phase shift in frequency domain:
+     * f(x-x₀) ⟷ F(ω)·e^(-jωx₀)
+     * 
+     * This allows precise sub-pixel alignment without interpolation in spatial domain.
+     * We test 7×7 discrete shifts between -0.5 and +0.5 pixels to find the optimal alignment.
+     */
     // subpixel alignment based on the Fourier shift theorem: test shifts between -0.5 and +0.5 pixels specified on the pixel scale of each color channel, which corresponds to -1.0 and +1.0 pixels specified on the original pixel scale
     for (int dn = 0; dn < tile_size; dn++) {
         for (int dm = 0; dm < tile_size; dm++) {
@@ -110,6 +154,18 @@ kernel void merge_frequency_domain(texture2d<float, access::read> ref_texture_ft
     float const best_shift_x = -0.5f + int(best_i % 7) * shift_step_size;
     float const best_shift_y = -0.5f + int(best_i / 7) * shift_step_size;
     
+    /**
+     * Frequency-domain merging using an advanced Wiener filtering approach
+     * 
+     * This implements a sophisticated merging technique that:
+     * 1. Applies the optimal subpixel shift found above using the Fourier shift theorem
+     * 2. Uses a frequency-dependent weighting based on signal-to-noise ratio
+     * 3. Applies special handling for highlights to prevent color casts
+     * 4. Implements motion-adaptive merging for regions with varying alignment quality
+     * 
+     * The merging weight calculation follows the Wiener filter formula: w = d²/(d²+n²)
+     * where d is the difference between frames and n is the estimated noise level.
+     */
     // perform the merging of the reference tile and the aligned comparison tile
     for (int dn = 0; dn < tile_size; dn++) {
         for (int dm = 0; dm < tile_size; dm++) {
@@ -176,6 +232,21 @@ kernel void merge_frequency_domain(texture2d<float, access::read> ref_texture_ft
 }
 
 
+/**
+ * Calculates the absolute difference between two RGBA textures.
+ *
+ * This kernel computes the absolute pixel-wise difference between a reference texture
+ * and an aligned texture. The result is used in subsequent processing to:
+ * 1. Measure local alignment quality
+ * 2. Detect motion or misalignment between frames
+ * 3. Provide input for the mismatch calculation
+ *
+ * @param ref_texture      Reference texture
+ * @param aligned_texture  Aligned comparison texture
+ * @param abs_diff_texture Output texture for absolute differences
+ * @param tile_size        Processing tile size
+ * @param gid              Thread position in grid
+ */
 kernel void calculate_abs_diff_rgba(texture2d<float, access::read> ref_texture [[texture(0)]],
                                     texture2d<float, access::read> aligned_texture [[texture(1)]],
                                     texture2d<float, access::write> abs_diff_texture [[texture(2)]],
@@ -188,6 +259,21 @@ kernel void calculate_abs_diff_rgba(texture2d<float, access::read> ref_texture [
 }
 
 
+/**
+ * Calculates normalization factor for clipped highlights in an RGBA texture.
+ *
+ * This kernel computes a normalization factor to correct clipped highlight regions.
+ * It scans a tile from the aligned texture to determine the fraction of pixels that are in the highlight region,
+ * then produces a correction factor that is applied during the frequency-domain merging.
+ *
+ * @param aligned_texture  Input aligned RGBA texture.
+ * @param highlights_norm_texture Output texture for highlight normalization factors.
+ * @param tile_size        Tile size for processing.
+ * @param exposure_factor  Exposure factor to account for non-uniform exposure.
+ * @param white_level      Maximum white level used for highlight thresholding.
+ * @param black_level_mean Mean black level to adjust pixel values.
+ * @param gid              Thread position in grid.
+ */
 kernel void calculate_highlights_norm_rgba(texture2d<float, access::read> aligned_texture [[texture(0)]],
                                            texture2d<float, access::write> highlights_norm_texture [[texture(1)]],
                                            constant int& tile_size [[buffer(0)]],
@@ -231,6 +317,23 @@ kernel void calculate_highlights_norm_rgba(texture2d<float, access::read> aligne
 }
 
 
+/**
+ * Calculates the local mismatch ratio using the absolute difference and noise estimation.
+ *
+ * This kernel processes a tile from the absolute difference texture along with the noise estimation from the RMS texture.
+ * It computes a mismatch metric that is used to adapt merging weights in subsequent processing.
+ *
+ * The mismatch is computed by applying a modified raised cosine window (for smooth transition near tile borders)
+ * and normalizing by the estimated noise levels. The output mismatch value is an average over the tile and is used
+ * to guide the frequency-domain merging process, particularly in regions with misalignment or non-uniform exposure.
+ *
+ * @param abs_diff_texture  Texture containing absolute differences between the reference and aligned frames.
+ * @param rms_texture       Texture containing noise estimation (RMS) values.
+ * @param mismatch_texture  Output texture for storing the computed mismatch values.
+ * @param tile_size         Tile size used for processing.
+ * @param exposure_factor   Exposure factor for adjusting mismatch sensitivity.
+ * @param gid               Thread position in the grid.
+ */
 kernel void calculate_mismatch_rgba(texture2d<float, access::read> abs_diff_texture [[texture(0)]],
                                     texture2d<float, access::read> rms_texture [[texture(1)]],
                                     texture2d<float, access::write> mismatch_texture [[texture(2)]],
@@ -546,8 +649,9 @@ kernel void backward_dft(texture2d<float, access::read> in_texture_ft [[texture(
  Highly-optimized fast Fourier transform applied to each color channel independently
  The aim of this function is to provide improved performance compared to the more simple function backward_dft() while providing equal results. It uses the following features for reduced calculation times:
  - the four color channels are stored as a float4 and all calculations employ SIMD instructions.
- - the one-dimensional transformation along y-direction employs the fast Fourier transform algorithm: At first, 4 small DFTs are calculated and then final results are obtained by two steps of cross-combination of values (based on a so-called butterfly diagram). This approach reduces the total number of memory reads and computational steps considerably.
+ - the one-dimensional transformation along y-direction is a discrete Fourier transform. As the input image is real-valued, the frequency domain representation is symmetric and only values for N/2+1 rows have to be calculated.
  - the one-dimensional transformation along x-direction employs the fast Fourier transform algorithm: At first, 4 small DFTs are calculated and then final results are obtained by two steps of cross-combination of values (based on a so-called butterfly diagram). This approach reduces the total number of memory reads and computational steps considerably.
+ - due to the symmetry mentioned earlier, only N/2+1 rows have to be transformed and the remaining N/2-1 rows can be directly inferred.
  */
 kernel void backward_fft(texture2d<float, access::read> in_texture_ft [[texture(0)]],
                          texture2d<float, access::write> out_texture [[texture(1)]],
@@ -621,21 +725,28 @@ kernel void backward_fft(texture2d<float, access::read> in_texture_ft [[texture(
             }
             
             // first butterfly to combine results
-            coefRe = cos(angle*2*dm);
-            coefIm = sin(angle*2*dm);
-            Re00 = Re0 + coefRe*Re1 - coefIm*Im1;
-            Im00 = Im0 + coefIm*Re1 + coefRe*Im1;
-            Re22 = Re2 + coefRe*Re3 - coefIm*Im3;
-            Im22 = Im2 + coefIm*Re3 + coefRe*Im3;
+            // Butterfly operations combine smaller DFTs to form larger ones
+            // This is the core technique that makes FFT more efficient than direct DFT
+            coefRe = cos(angle*2*dm);  // Real part of twiddle factor
+            coefIm = sin(angle*2*dm);  // Imaginary part of twiddle factor
+            Re00 = Re0 + coefRe*Re1 - coefIm*Im1;  // First butterfly output: real part (combination of smaller DFTs)
+            Im00 = Im0 + coefIm*Re1 + coefRe*Im1;  // First butterfly output: imaginary part
+            Re22 = Re2 + coefRe*Re3 - coefIm*Im3;  // Second butterfly output: real part
+            Im22 = Im2 + coefIm*Re3 + coefRe*Im3;  // Second butterfly output: imaginary part
                         
+            // Calculate twiddle factors for the second butterfly stage using 1/4 tile width offset
             coefRe = cos(angle*2*(dm+tile_size_14));
             coefIm = sin(angle*2*(dm+tile_size_14));
+            // Combine first two inputs with twiddle factors
             Re11 = Re0 + coefRe*Re1 - coefIm*Im1;
             Im11 = Im0 + coefIm*Re1 + coefRe*Im1;
+            // Combine second two inputs with same twiddle factors
             Re33 = Re2 + coefRe*Re3 - coefIm*Im3;
             Im33 = Im2 + coefIm*Re3 + coefRe*Im3;
-            
+                    
             // second butterfly to combine results
+            // Final stage of the FFT butterfly combines intermediate results
+            // Each output is a combination of intermediate values with appropriate phase rotations
             Re0 = Re00 + cos(angle*dm)*Re22                - sin(angle*dm)*Im22;
             Im0 = Im00 + sin(angle*dm)*Re22                + cos(angle*dm)*Im22;
             Re2 = Re00 + cos(angle*(dm+tile_size_24))*Re22 - sin(angle*(dm+tile_size_24))*Im22;
@@ -829,9 +940,8 @@ kernel void forward_dft(texture2d<float, access::read> in_texture [[texture(0)]]
  Highly-optimized fast Fourier transform applied to each color channel independently
  The aim of this function is to provide improved performance compared to the more simple function forward_dft() while providing equal results. It uses the following features for reduced calculation times:
  - the four color channels are stored as a float4 and all calculations employ SIMD instructions.
- - the one-dimensional transformation along y-direction is a discrete Fourier transform. As the input image is real-valued, the frequency domain representation is symmetric and only values for N/2+1 rows have to be calculated.
+ - the one-dimensional transformation along y-direction employs the fast Fourier transform algorithm: At first, 4 small DFTs are calculated and then final results are obtained by two steps of cross-combination of values (based on a so-called butterfly diagram). This approach reduces the total number of memory reads and computational steps considerably.
  - the one-dimensional transformation along x-direction employs the fast Fourier transform algorithm: At first, 4 small DFTs are calculated and then final results are obtained by two steps of cross-combination of values (based on a so-called butterfly diagram). This approach reduces the total number of memory reads and computational steps considerably.
- - due to the symmetry mentioned earlier, only N/2+1 rows have to be transformed and the remaining N/2-1 rows can be directly inferred.
  */
 
 kernel void forward_fft(texture2d<float, access::read> in_texture [[texture(0)]],
@@ -961,14 +1071,19 @@ kernel void forward_fft(texture2d<float, access::read> in_texture [[texture(0)]]
             Re22 = Re2 + coefRe*Re3 - coefIm*Im3;
             Im22 = Im2 + coefIm*Re3 + coefRe*Im3;
                         
+            // Calculate twiddle factors for the second butterfly stage using 1/4 tile width offset
             coefRe = cos(angle*2*(dm+tile_size_14));
             coefIm = sin(angle*2*(dm+tile_size_14));
+            // Combine first two inputs with twiddle factors
             Re11 = Re0 + coefRe*Re1 - coefIm*Im1;
             Im11 = Im0 + coefIm*Re1 + coefRe*Im1;
+            // Combine second two inputs with same twiddle factors
             Re33 = Re2 + coefRe*Re3 - coefIm*Im3;
             Im33 = Im2 + coefIm*Re3 + coefRe*Im3;
                     
             // second butterfly to combine results
+            // Final stage of the FFT butterfly combines intermediate results
+            // Each output is a combination of intermediate values with appropriate phase rotations
             Re0 = Re00 + cos(angle*dm)*Re22                - sin(angle*dm)*Im22;
             Im0 = Im00 + sin(angle*dm)*Re22                + cos(angle*dm)*Im22;
             Re2 = Re00 + cos(angle*(dm+tile_size_24))*Re22 - sin(angle*(dm+tile_size_24))*Im22;
@@ -979,34 +1094,37 @@ kernel void forward_fft(texture2d<float, access::read> in_texture [[texture(0)]]
             Im3 = Im11 + sin(angle*(dm+tile_size_34))*Re33 + cos(angle*(dm+tile_size_34))*Im33;
                            
             // write into output texture
-            out_texture_ft.write(Re0, uint2(m+0, n));
-            out_texture_ft.write(Im0, uint2(m+1, n));
-            out_texture_ft.write(Re1, uint2(m+tile_size_24+0, n));
-            out_texture_ft.write(Im1, uint2(m+tile_size_24+1, n));
-            out_texture_ft.write(Re2, uint2(m+tile_size+0, n));
-            out_texture_ft.write(Im2, uint2(m+tile_size+1, n));
-            out_texture_ft.write(Re3, uint2(m+tile_size_24*3+0, n));
-            out_texture_ft.write(Im3, uint2(m+tile_size_24*3+1, n));
+            // Store the computed Fourier coefficients in the output texture
+            // Coefficients are arranged in specific frequency order for efficient access
+            out_texture_ft.write(Re0, uint2(m+0, n));                    // DC/low frequency component (real)
+            out_texture_ft.write(Im0, uint2(m+1, n));                    // DC/low frequency component (imaginary)
+            out_texture_ft.write(Re1, uint2(m+tile_size_24+0, n));       // Mid-low frequency component (real)
+            out_texture_ft.write(Im1, uint2(m+tile_size_24+1, n));       // Mid-low frequency component (imaginary)
+            out_texture_ft.write(Re2, uint2(m+tile_size+0, n));          // Mid-high frequency component (real)
+            out_texture_ft.write(Im2, uint2(m+tile_size+1, n));          // Mid-high frequency component (imaginary)
+            out_texture_ft.write(Re3, uint2(m+tile_size_24*3+0, n));     // High frequency component (real)
+            out_texture_ft.write(Im3, uint2(m+tile_size_24*3+1, n));     // High frequency component (imaginary)
               
             // exploit symmetry of real dft and set values for remaining rows
+            // Using Hermitian symmetry property of real-valued DFT: F(k) = F*(-k) where F* is complex conjugate
             if(dn > 0 & dn != tile_size/2)
             {
-                int const n2 = n0 + tile_size-dn;
-                //int const m20 = 2*(m0 + (dm==0 ? 0 : tile_size-dm));
-                int const m20 = 2*(m0 + min(dm, 1)*(tile_size-dm));
-                int const m21 = 2*(m0 + tile_size-dm-tile_size_14);
-                int const m22 = 2*(m0 + tile_size-dm-tile_size_24);
-                int const m23 = 2*(m0 + tile_size-dm-tile_size_14*3);
+                int const n2 = n0 + tile_size-dn;  // Calculate output row index based on input index and displacement
+                int const m20 = 2*(m0 + min(dm, 1)*(tile_size-dm));  // Base column index for first frequency component
+                int const m21 = 2*(m0 + tile_size-dm-tile_size_14);  // Column index for second component (1/4 frequency shift)
+                int const m22 = 2*(m0 + tile_size-dm-tile_size_24);  // Column index for third component (1/2 frequency shift)
+                int const m23 = 2*(m0 + tile_size-dm-tile_size_14*3);  // Column index for fourth component (3/4 frequency shift)
                 
                 // write into output texture
-                out_texture_ft.write( Re0, uint2(m20+0, n2));
-                out_texture_ft.write(-Im0, uint2(m20+1, n2));
-                out_texture_ft.write( Re1, uint2(m21+0, n2));
-                out_texture_ft.write(-Im1, uint2(m21+1, n2));
-                out_texture_ft.write( Re2, uint2(m22+0, n2));
-                out_texture_ft.write(-Im2, uint2(m22+1, n2));
-                out_texture_ft.write( Re3, uint2(m23+0, n2));
-                out_texture_ft.write(-Im3, uint2(m23+1, n2));
+                // Storing complex values in adjacent memory locations: each even/odd pair stores (real, -imaginary)
+                out_texture_ft.write( Re0, uint2(m20+0, n2));  // First component: real part
+                out_texture_ft.write(-Im0, uint2(m20+1, n2));  // First component: negated imaginary part
+                out_texture_ft.write( Re1, uint2(m21+0, n2));  // Second component: real part
+                out_texture_ft.write(-Im1, uint2(m21+1, n2));  // Second component: negated imaginary part
+                out_texture_ft.write( Re2, uint2(m22+0, n2));  // Third component: real part
+                out_texture_ft.write(-Im2, uint2(m22+1, n2));  // Third component: negated imaginary part
+                out_texture_ft.write( Re3, uint2(m23+0, n2));  // Fourth component: real part
+                out_texture_ft.write(-Im3, uint2(m23+1, n2));  // Fourth component: negated imaginary part
             }
         }
     }
