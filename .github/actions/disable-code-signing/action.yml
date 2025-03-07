@@ -8,19 +8,14 @@ runs:
       shell: bash
       run: |
         echo "Creating configuration to disable code signing..."
-        
-        # Create a temporary xcconfig file to disable code signing
-        cat > ci_signing_disabled.xcconfig << EOF
-CODE_SIGN_IDENTITY = -
-CODE_SIGNING_REQUIRED = NO
-CODE_SIGN_ENTITLEMENTS = 
-CODE_SIGNING_ALLOWED = NO
-EXPANDED_CODE_SIGN_IDENTITY = -
-EXPANDED_CODE_SIGN_IDENTITY_NAME = -
-DEVELOPMENT_TEAM = 
-PROVISIONING_PROFILE_SPECIFIER = 
-EOF
-        
+        echo "CODE_SIGN_IDENTITY = -" > ci_signing_disabled.xcconfig
+        echo "CODE_SIGNING_REQUIRED = NO" >> ci_signing_disabled.xcconfig
+        echo "CODE_SIGN_ENTITLEMENTS = " >> ci_signing_disabled.xcconfig
+        echo "CODE_SIGNING_ALLOWED = NO" >> ci_signing_disabled.xcconfig
+        echo "EXPANDED_CODE_SIGN_IDENTITY = -" >> ci_signing_disabled.xcconfig
+        echo "EXPANDED_CODE_SIGN_IDENTITY_NAME = -" >> ci_signing_disabled.xcconfig
+        echo "DEVELOPMENT_TEAM = " >> ci_signing_disabled.xcconfig
+        echo "PROVISIONING_PROFILE_SPECIFIER = " >> ci_signing_disabled.xcconfig
         echo "Created xcconfig to disable code signing at: $(pwd)/ci_signing_disabled.xcconfig"
     
     - name: Export build environment variables
