@@ -53,6 +53,165 @@ jobs:
               - fix: resolve critical bug
               - docs: improve documentation
   
+  # Analyze PR content and provide feedback
+  pr-analysis:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Analyze PR size
+        id: pr_size
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            
+            let totalChanges = 0;
+            let fileCount = files.length;
+            let fileTypes = new Set();
+            let largeFiles = [];
+            
+            files.forEach(file => {
+              const changes = file.additions + file.deletions;
+              totalChanges += changes;
+              fileTypes.add(file.filename.split('.').pop());
+              
+              if (changes > 300) {
+                largeFiles.push({name: file.filename, changes});
+              }
+            });
+            
+            // Determine the size category
+            let sizeCategory = '';
+            if (totalChanges < 100) sizeCategory = 'xs';
+            else if (totalChanges < 300) sizeCategory = 'small';
+            else if (totalChanges < 1000) sizeCategory = 'medium';
+            else if (totalChanges < 2000) sizeCategory = 'large';
+            else sizeCategory = 'xl';
+            
+            core.setOutput('size_category', sizeCategory);
+            core.setOutput('total_changes', totalChanges);
+            core.setOutput('file_count', fileCount);
+            
+            // Create a pull request comment with analysis
+            let comment = '## PR Analysis\n\n';
+            comment += '| Metric | Value |\n';
+            comment += '|--------|-------|\n';
+            comment += `| Size | ${sizeCategory.toUpperCase()} (${totalChanges} lines changed) |\n`;
+            comment += `| Files Changed | ${fileCount} |\n`;
+            comment += `| File Types | ${Array.from(fileTypes).join(', ')} |\n`;
+            
+            // Add recommendations based on size
+            comment += '\n### Recommendations\n\n';
+            
+            if (sizeCategory === 'large' || sizeCategory === 'xl') {
+              comment += '- 🔍 **Consider breaking this PR into smaller ones**\n';
+              comment += '- 👥 **Request careful review** from experienced reviewers\n';
+            }
+            
+            if (largeFiles.length > 0) {
+              comment += '\n### Large Files\n\n';
+              comment += 'The following files have significant changes and may need extra attention:\n';
+              largeFiles.forEach(file => {
+                comment += `- \`${file.name}\` (${file.changes} lines)\n`;
+              });
+            }
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+            
+            // Add a label based on size
+            github.rest.issues.addLabels({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: [`size/${sizeCategory}`]
+            });
+
+      - name: Get PR Files
+        id: pr_files
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            
+            const swiftFiles = files.filter(file => file.filename.endsWith('.swift'));
+            const hasSwiftFiles = swiftFiles.length > 0;
+            
+            core.setOutput('has_swift_files', hasSwiftFiles ? 'true' : 'false');
+            
+            // Check if any tests were modified
+            const testFiles = files.filter(file => file.filename.includes('test') || file.filename.includes('Test'));
+            core.setOutput('has_test_files', testFiles.length > 0 ? 'true' : 'false');
+            
+            // Check if documentation was updated
+            const docFiles = files.filter(file => 
+              file.filename.endsWith('.md') || 
+              file.filename.includes('doc') || 
+              file.filename.includes('Doc')
+            );
+            core.setOutput('has_doc_files', docFiles.length > 0 ? 'true' : 'false');
+            
+            return {files: files.map(f => f.filename)};
+      
+      - name: Provide test suggestions
+        if: steps.pr_files.outputs.has_swift_files == 'true' && steps.pr_files.outputs.has_test_files == 'false'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '## Test Coverage Reminder\n\n' +
+                   'This PR modifies Swift code but doesn\'t appear to include test updates.\n' +
+                   'Consider adding tests to cover the new functionality or modifications.\n\n' +
+                   'Good test coverage helps ensure:\n' +
+                   '- Your code works as expected\n' +
+                   '- Future changes don\'t break your implementation\n' +
+                   '- Others understand how to use your code\n\n' +
+                   'If you believe tests aren\'t needed for this change, please comment explaining why.'
+            });
+      
+      - name: Provide documentation suggestions
+        if: steps.pr_files.outputs.has_swift_files == 'true' && steps.pr_files.outputs.has_doc_files == 'false'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '## Documentation Reminder\n\n' +
+                   'This PR modifies Swift code but doesn\'t appear to include documentation updates.\n' +
+                   'Consider updating documentation if your changes:\n' +
+                   '- Modify public interfaces\n' +
+                   '- Change behavior that users rely on\n' +
+                   '- Add new features\n' +
+                   '- Fix notable bugs\n\n' +
+                   'Good documentation helps other developers understand how to use your code effectively.'
+            });
+  
   build:
     strategy:
       matrix:
