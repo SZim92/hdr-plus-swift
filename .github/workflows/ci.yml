@@ -157,7 +157,7 @@ jobs:
           find . -name "*.app" -path "*gui*" -o -name "*.app" | xargs -I {} zip -r ../burstphoto-gui-${{ github.ref_name }}.zip {}
           find . -name "*.app" -path "*cli*" -o -name "*.app" | xargs -I {} zip -r ../burstphoto-cli-${{ github.ref_name }}.zip {}
       
-      - name: Upload Release Assets
+      - name: Upload GUI Release Asset
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -165,4 +165,74 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./burstphoto-gui-${{ github.ref_name }}.zip
           asset_name: burstphoto-gui-${{ github.ref_name }}.zip
-          asset_content_type: application/zip 
+          asset_content_type: application/zip
+      
+      - name: Upload CLI Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./burstphoto-cli-${{ github.ref_name }}.zip
+          asset_name: burstphoto-cli-${{ github.ref_name }}.zip
+          asset_content_type: application/zip
+
+  # This job creates a status badge for the README
+  update-badge:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Create status badge
+        run: |
+          # Check if README.md exists
+          if [ -f "README.md" ]; then
+            # Check if the badge is already in the README
+            if ! grep -q "![Build Status]" README.md; then
+              # Create temporary file with badge at the top
+              echo "# HDR+ Swift" > temp_readme
+              echo "![Build Status](https://github.com/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/badge.svg)" >> temp_readme
+              echo "" >> temp_readme
+              
+              # If there's already a heading, skip it, otherwise include all content
+              if grep -q "^# " README.md; then
+                tail -n +2 README.md >> temp_readme
+              else
+                cat README.md >> temp_readme
+              fi
+              
+              # Replace the original README with our modified version
+              mv temp_readme README.md
+              
+              # Configure git
+              git config --local user.email "github-actions[bot]@users.noreply.github.com"
+              git config --local user.name "github-actions[bot]"
+              
+              # Commit and push changes
+              git add README.md
+              git commit -m "docs: Add build status badge to README [skip ci]"
+              git push
+              
+              echo "Added build status badge to README.md"
+            else
+              echo "Badge already exists in README.md"
+            fi
+          else
+            echo "README.md not found, creating one with badge"
+            echo "# HDR+ Swift" > README.md
+            echo "![Build Status](https://github.com/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/badge.svg)" >> README.md
+            echo "" >> README.md
+            
+            # Configure git
+            git config --local user.email "github-actions[bot]@users.noreply.github.com"
+            git config --local user.name "github-actions[bot]"
+            
+            # Commit and push changes
+            git add README.md
+            git commit -m "docs: Create README with build status badge [skip ci]"
+            git push
+            
+            echo "Created README.md with build status badge"
+          fi 
