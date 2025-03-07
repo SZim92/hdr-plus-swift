@@ -1,0 +1,95 @@
+name: 'Extract Version Info'
+description: 'Extracts version information from git tags and environment'
+
+inputs:
+  env-file:
+    description: 'Path to environment file with version variables'
+    required: false
+    default: '.github/versions.env'
+  fallback-version:
+    description: 'Fallback version if no git tag found'
+    required: false
+    default: 'v0.0.0'
+
+outputs:
+  tag:
+    description: 'Git tag (vX.Y.Z)'
+    value: ${{ steps.extract.outputs.tag }}
+  major:
+    description: 'Major version number'
+    value: ${{ steps.extract.outputs.major }}
+  minor:
+    description: 'Minor version number'
+    value: ${{ steps.extract.outputs.minor }}
+  patch:
+    description: 'Patch version number'
+    value: ${{ steps.extract.outputs.patch }}
+  commits_since_tag:
+    description: 'Number of commits since tag'
+    value: ${{ steps.extract.outputs.commits_since_tag }}
+  build_number:
+    description: 'Build number (X.Y.Z.C)'
+    value: ${{ steps.extract.outputs.build_number }}
+  git_hash:
+    description: 'Git hash (short)'
+    value: ${{ steps.extract.outputs.git_hash }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Extract version information
+      id: extract
+      shell: bash
+      run: |
+        # Load environment variables if file exists
+        if [ -f "${{ inputs.env-file }}" ]; then
+          source "${{ inputs.env-file }}"
+          echo "Loaded version environment from ${{ inputs.env-file }}"
+        fi
+        
+        # Try to get git tag, fallback to env vars or default
+        git_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "${{ inputs.fallback-version }}")
+        echo "Current git tag: $git_tag"
+        
+        # Extract version components
+        version=${git_tag#v}  # Remove 'v' prefix if present
+        
+        # Use values from environment variables if available
+        if [ -n "$VERSION_MAJOR" ] && [ -n "$VERSION_MINOR" ] && [ -n "$VERSION_PATCH" ]; then
+          echo "Using version from environment: $VERSION_MAJOR.$VERSION_MINOR.$VERSION_PATCH"
+          major=$VERSION_MAJOR
+          minor=$VERSION_MINOR
+          patch=$VERSION_PATCH
+        else
+          major=$(echo $version | cut -d. -f1)
+          minor=$(echo $version | cut -d. -f2)
+          patch=$(echo $version | cut -d. -f3)
+        fi
+        
+        # Count commits since tag
+        commits_since_tag=$(git rev-list $git_tag..HEAD --count 2>/dev/null || echo "0")
+        
+        # Create build number
+        build_number="$major.$minor.$patch.$commits_since_tag"
+        
+        # Get short hash
+        git_hash=$(git rev-parse --short HEAD)
+        
+        # Set outputs
+        echo "tag=$git_tag" >> $GITHUB_OUTPUT
+        echo "major=$major" >> $GITHUB_OUTPUT
+        echo "minor=$minor" >> $GITHUB_OUTPUT
+        echo "patch=$patch" >> $GITHUB_OUTPUT
+        echo "commits_since_tag=$commits_since_tag" >> $GITHUB_OUTPUT
+        echo "build_number=$build_number" >> $GITHUB_OUTPUT
+        echo "git_hash=$git_hash" >> $GITHUB_OUTPUT
+        
+        # Display versioning information
+        echo "Version Information:"
+        echo "  Git Tag: $git_tag"
+        echo "  Major: $major"
+        echo "  Minor: $minor"
+        echo "  Patch: $patch"
+        echo "  Commits Since Tag: $commits_since_tag"
+        echo "  Build Number: $build_number"
+        echo "  Git Hash: $git_hash" 

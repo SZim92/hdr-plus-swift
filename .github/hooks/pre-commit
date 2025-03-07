@@ -1,0 +1,12 @@
+#!/bin/bash
+# pre-commit hook that runs our local validation script
+# To enable: copy this file to .git/hooks/pre-commit and make it executable
+
+# Get the root directory of the repository
+ROOT_DIR=$(git rev-parse --show-toplevel)
+
+# Run the validation script
+$ROOT_DIR/.github/scripts/local-validate.sh
+
+# Exit with the status of the validation script
+exit $? 

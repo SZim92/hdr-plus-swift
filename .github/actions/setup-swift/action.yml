@@ -1,0 +1,50 @@
+name: 'Setup Swift Environment'
+description: 'Sets up Swift environment with caching for faster builds'
+
+inputs:
+  xcode-version:
+    description: 'Xcode version to use (optional)'
+    required: false
+    default: 'latest'
+  cache-key-prefix:
+    description: 'Prefix for cache key'
+    required: false
+    default: 'swift'
+  package-resolved:
+    description: 'Path to Package.resolved file'
+    required: false
+    default: '**/Package.resolved'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Select Xcode version
+      if: inputs.xcode-version != 'latest'
+      shell: bash
+      run: |
+        sudo xcode-select -s /Applications/Xcode_${{ inputs.xcode-version }}.app/Contents/Developer
+        echo "Using Xcode ${{ inputs.xcode-version }}"
+        xcodebuild -version
+
+    - name: Setup Swift environment
+      uses: actions/cache@v4
+      id: swift-cache
+      with:
+        path: |
+          ~/Library/Developer/Xcode/DerivedData
+          ~/.swiftpm
+        key: ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ hashFiles(inputs.package-resolved) }}
+        restore-keys: |
+          ${{ inputs.cache-key-prefix }}-${{ runner.os }}-
+
+    - name: Install Swift tools
+      shell: bash
+      run: |
+        # Install common Swift development tools
+        brew install swiftlint || echo "SwiftLint already installed"
+        brew install swift-format || echo "swift-format already installed"
+      
+    - name: Report cache status
+      shell: bash
+      run: |
+        echo "Swift environment cache hit: ${{ steps.swift-cache.outputs.cache-hit == 'true' }}" 

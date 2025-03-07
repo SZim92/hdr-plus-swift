@@ -1,0 +1,70 @@
+name: 'Notify Slack'
+description: 'Sends a notification to Slack with build status'
+
+inputs:
+  webhook-url:
+    description: 'Slack webhook URL'
+    required: true
+  channel:
+    description: 'Slack channel'
+    required: true
+  status:
+    description: 'Status of the build (success, failure, warning)'
+    required: true
+  title:
+    description: 'Title of the message'
+    required: true
+  message:
+    description: 'Message to send'
+    required: true
+  icon:
+    description: 'Icon URL'
+    required: false
+    default: 'https://github.com/rtCamp.png?size=48'
+  footer:
+    description: 'Footer text'
+    required: false
+    default: 'Sent by GitHub Actions'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Determine color
+      id: color
+      shell: bash
+      run: |
+        if [[ "${{ inputs.status }}" == "success" ]]; then
+          echo "color=good" >> $GITHUB_OUTPUT
+        elif [[ "${{ inputs.status }}" == "failure" ]]; then
+          echo "color=danger" >> $GITHUB_OUTPUT
+        elif [[ "${{ inputs.status }}" == "warning" ]]; then
+          echo "color=warning" >> $GITHUB_OUTPUT
+        else
+          echo "color=#0066ff" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Add status emoji
+      id: emoji
+      shell: bash
+      run: |
+        if [[ "${{ inputs.status }}" == "success" ]]; then
+          echo "emoji=✅" >> $GITHUB_OUTPUT
+        elif [[ "${{ inputs.status }}" == "failure" ]]; then
+          echo "emoji=❌" >> $GITHUB_OUTPUT
+        elif [[ "${{ inputs.status }}" == "warning" ]]; then
+          echo "emoji=⚠️" >> $GITHUB_OUTPUT
+        else
+          echo "emoji=ℹ️" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Send to Slack
+      uses: rtCamp/action-slack-notify@v2
+      env:
+        SLACK_WEBHOOK: ${{ inputs.webhook-url }}
+        SLACK_CHANNEL: ${{ inputs.channel }}
+        SLACK_COLOR: ${{ steps.color.outputs.color }}
+        SLACK_ICON: ${{ inputs.icon }}
+        SLACK_TITLE: "${{ steps.emoji.outputs.emoji }} ${{ inputs.title }}"
+        SLACK_MESSAGE: ${{ inputs.message }}
+        SLACK_FOOTER: ${{ inputs.footer }}
+        MSG_MINIMAL: false 

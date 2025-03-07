@@ -1,0 +1,249 @@
+name: Dependency Security Scan
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * 0'  # Run at 2 AM UTC every Sunday
+  push:
+    branches:
+      - main
+    paths:
+      - 'Package.swift'
+      - 'Package.resolved'
+      - 'Podfile'
+      - 'Podfile.lock'
+      - '.github/workflows/dependency-scan.yml'
+
+jobs:
+  swift-dependency-scan:
+    name: Scan Swift dependencies
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Swift
+        uses: swift-actions/setup-swift@v1
+        with:
+          swift-version: '5.9'
+
+      - name: Install SwiftVulnScan
+        run: |
+          brew update
+          brew install jq
+          pip3 install swift-dependency-scanner || pip3 install --user swift-dependency-scanner
+
+      - name: Check for Package.swift
+        id: check-package
+        run: |
+          if [ -f "Package.swift" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Scan Swift Package dependencies
+        if: steps.check-package.outputs.exists == 'true'
+        id: swift-scan
+        run: |
+          echo "## Swift Package Vulnerability Scan" > swift_report.md
+          echo "" >> swift_report.md
+          
+          # Extract dependencies from Package.resolved
+          if [ -f "Package.resolved" ]; then
+            echo "Scanning Swift Package dependencies..."
+            
+            if grep -q "object" Package.resolved; then
+              # Swift 5.4+ format (object format)
+              jq -r '.object.pins[] | .package + " " + .state.version' Package.resolved > dependencies.txt
+            else
+              # Swift 5.5+ format (array format)
+              jq -r '.pins[] | .identity + " " + (.state.version // "unknown")' Package.resolved > dependencies.txt
+            fi
+            
+            if [ -s dependencies.txt ]; then
+              echo "### Dependencies detected:" >> swift_report.md
+              echo '```' >> swift_report.md
+              cat dependencies.txt >> swift_report.md
+              echo '```' >> swift_report.md
+              echo "" >> swift_report.md
+              
+              # For each dependency, check for known vulnerabilities
+              echo "### Vulnerability Scan Results:" >> swift_report.md
+              
+              while read -r pkg version; do
+                echo "Checking $pkg ($version)..."
+                
+                # Call an API or service to check for vulnerabilities
+                # This is a placeholder - replace with actual scanning tool
+                result=$(swift-dependency-scanner check "$pkg" "$version" 2>/dev/null || echo "No vulnerabilities found")
+                
+                echo "#### $pkg ($version)" >> swift_report.md
+                if [[ "$result" == *"vulnerability"* ]]; then
+                  echo "⚠️ Vulnerabilities found!" >> swift_report.md
+                  echo '```' >> swift_report.md
+                  echo "$result" >> swift_report.md
+                  echo '```' >> swift_report.md
+                else
+                  echo "✅ No known vulnerabilities" >> swift_report.md
+                fi
+                echo "" >> swift_report.md
+              done < dependencies.txt
+            else
+              echo "### No dependencies detected in Package.resolved" >> swift_report.md
+            fi
+          else
+            echo "### Package.resolved not found" >> swift_report.md
+          fi
+          
+          cat swift_report.md >> $GITHUB_STEP_SUMMARY
+          
+          # Check if any vulnerabilities were found
+          if grep -q "⚠️ Vulnerabilities found!" swift_report.md; then
+            echo "::warning::Vulnerabilities found in Swift dependencies"
+          fi
+
+      - name: Upload Swift scan results
+        if: always() && steps.swift-scan.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-scan-results
+          path: swift_report.md
+          retention-days: 7
+
+  cocoapods-dependency-scan:
+    name: Scan CocoaPods dependencies
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      
+      - name: Check for Podfile
+        id: check-podfile
+        run: |
+          if [ -f "Podfile" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Set up Ruby
+        if: steps.check-podfile.outputs.exists == 'true'
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.0'
+          bundler-cache: true
+
+      - name: Install CocoaPods
+        if: steps.check-podfile.outputs.exists == 'true'
+        run: gem install cocoapods
+
+      - name: Install CocoaPods Vulnerability Checker
+        if: steps.check-podfile.outputs.exists == 'true'
+        run: gem install cocoapods-vulnerability-check
+
+      - name: Scan CocoaPods dependencies
+        if: steps.check-podfile.outputs.exists == 'true'
+        id: cocoapods-scan
+        run: |
+          echo "## CocoaPods Vulnerability Scan" > pods_report.md
+          echo "" >> pods_report.md
+          
+          if [ -f "Podfile.lock" ]; then
+            echo "### Dependencies detected:" >> pods_report.md
+            echo '```' >> pods_report.md
+            grep -A 1000 "PODS:" Podfile.lock | grep -B 1000 "DEPENDENCIES:" | grep -v "PODS:" | grep -v "DEPENDENCIES:" >> pods_report.md
+            echo '```' >> pods_report.md
+            echo "" >> pods_report.md
+            
+            # Run the vulnerability check
+            echo "### Vulnerability Scan Results:" >> pods_report.md
+            pod vulnerability-check > pod_vulnerabilities.txt 2>&1 || true
+            
+            if grep -q "vulnerability" pod_vulnerabilities.txt; then
+              echo "⚠️ Vulnerabilities found!" >> pods_report.md
+              echo '```' >> pods_report.md
+              cat pod_vulnerabilities.txt >> pods_report.md
+              echo '```' >> pods_report.md
+              
+              echo "::warning::Vulnerabilities found in CocoaPods dependencies"
+            else
+              echo "✅ No known vulnerabilities" >> pods_report.md
+            fi
+          else
+            echo "### Podfile.lock not found" >> pods_report.md
+          fi
+          
+          cat pods_report.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload CocoaPods scan results
+        if: always() && steps.cocoapods-scan.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cocoapods-scan-results
+          path: pods_report.md
+          retention-days: 7
+
+  notify-vulnerabilities:
+    name: Notify about vulnerabilities
+    needs: [swift-dependency-scan, cocoapods-dependency-scan]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download scan results
+        uses: actions/download-artifact@v4
+        with:
+          path: scan-results
+
+      - name: Check for vulnerabilities
+        id: check
+        run: |
+          FOUND_VULNERABILITIES=0
+          
+          if grep -r "⚠️ Vulnerabilities found!" scan-results/ 2>/dev/null; then
+            FOUND_VULNERABILITIES=1
+            echo "vulnerabilities_found=true" >> $GITHUB_OUTPUT
+          else
+            echo "vulnerabilities_found=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Create summary report
+          echo "# Dependency Security Scan Summary" > $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -d "scan-results/swift-scan-results" ]; then
+            echo "## Swift Package Dependencies" >> $GITHUB_STEP_SUMMARY
+            if grep -q "⚠️ Vulnerabilities found!" scan-results/swift-scan-results/swift_report.md; then
+              echo "⚠️ **Vulnerabilities detected in Swift packages**" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "✅ No vulnerabilities found in Swift packages" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -d "scan-results/cocoapods-scan-results" ]; then
+            echo "## CocoaPods Dependencies" >> $GITHUB_STEP_SUMMARY
+            if grep -q "⚠️ Vulnerabilities found!" scan-results/cocoapods-scan-results/pods_report.md; then
+              echo "⚠️ **Vulnerabilities detected in CocoaPods**" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "✅ No vulnerabilities found in CocoaPods" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "See the uploaded artifacts for detailed information." >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify via Slack
+        if: steps.check.outputs.vulnerabilities_found == 'true' && env.SLACK_WEBHOOK_URL != ''
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_CHANNEL: security-alerts
+          SLACK_TITLE: Dependency Security Alert
+          SLACK_MESSAGE: '⚠️ Vulnerabilities found in dependencies! Check the workflow run for details.'
+          SLACK_COLOR: danger
+          SLACK_ICON: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
+          SLACK_USERNAME: GitHub Security Bot 

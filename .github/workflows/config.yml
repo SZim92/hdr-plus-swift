@@ -1,0 +1,83 @@
+# HDR+ Swift - Shared CI Configuration
+# This file contains shared configuration values used across all workflows
+
+# Version information
+version:
+  # Current major version of the project
+  major: 0
+  # Current minor version of the project
+  minor: 1
+  # Current patch version of the project
+  patch: 0
+
+# Build configuration
+build:
+  # Project identifiers
+  project: burstphoto.xcodeproj
+  # Scheme names
+  schemes:
+    gui: gui
+    cli: cli
+  # Build configurations
+  configurations:
+    debug: Debug
+    release: Release
+  # Artifact retention (days)
+  retention:
+    default: 7
+    extended: 90
+    releases: 365
+
+# Environment support
+environments:
+  # Supported macOS versions for testing
+  macos:
+    - macos-14  # Sonoma
+    - macos-13  # Ventura
+  # Container image for Linux testing (if applicable)
+  linux: 
+    - ubuntu-latest
+
+# Notification settings
+notifications:
+  # Slack channels
+  slack:
+    alerts: ci-alerts
+    releases: releases
+    general: general
+
+# Repository settings
+repository:
+  # Default branch for releases and deployment
+  main_branch: main
+  # Documentation branch
+  docs_branch: gh-pages
+  # Release tag pattern
+  release_tag_pattern: v*
+  # Default README header
+  readme_title: "HDR+ Swift"
+
+# Performance thresholds
+thresholds:
+  # Maximum binary size in MB before warning
+  max_binary_size: 50
+  # Maximum benchmark regression percentage before warning
+  max_perf_regression: 5
+  # Code coverage targets
+  coverage:
+    minimum: 75
+    target: 85
+
+# Security settings
+security:
+  # Secret detection settings
+  secrets:
+    enabled: true
+  # Dependency scanning settings
+  dependencies:
+    scan_schedule: "0 5 * * 1"  # Monday at 5am UTC
+  # CodeQL settings
+  codeql:
+    languages: 
+      - swift
+    queries: security-and-quality 
