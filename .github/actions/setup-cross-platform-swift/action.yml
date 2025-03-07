@@ -1,0 +1,66 @@
+name: 'Setup Swift - Cross Platform'
+description: 'Sets up Swift environment for any platform (macOS, Ubuntu) with proper configuration'
+
+inputs:
+  swift-version:
+    description: 'Swift version to install on non-macOS platforms'
+    required: false
+    default: '5.9'
+  xcode-version:
+    description: 'Xcode version to use on macOS (optional)'
+    required: false
+    default: 'latest'
+  cache-key-prefix:
+    description: 'Prefix for cache key'
+    required: false
+    default: 'swift'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Detect platform
+      id: detect-platform
+      shell: bash
+      run: |
+        if [[ "$RUNNER_OS" == "macOS" ]]; then
+          echo "platform=macos" >> $GITHUB_OUTPUT
+          echo "Detected platform: macOS"
+        elif [[ "$RUNNER_OS" == "Linux" ]]; then
+          echo "platform=linux" >> $GITHUB_OUTPUT
+          echo "Detected platform: Linux"
+        else
+          echo "platform=unsupported" >> $GITHUB_OUTPUT
+          echo "Warning: Unsupported platform $RUNNER_OS, Swift setup may fail"
+        fi
+
+    # macOS-specific setup
+    - name: Setup Swift on macOS
+      if: steps.detect-platform.outputs.platform == 'macos'
+      uses: ./.github/actions/setup-swift
+      with:
+        xcode-version: ${{ inputs.xcode-version }}
+        cache-key-prefix: ${{ inputs.cache-key-prefix }}
+
+    # Ubuntu-specific setup
+    - name: Setup Swift on Ubuntu
+      if: steps.detect-platform.outputs.platform == 'linux'
+      uses: ./.github/actions/setup-swift-ubuntu
+      with:
+        swift-version: ${{ inputs.swift-version }}
+
+    # Generic setup for unsupported platforms - best effort
+    - name: Generic Swift setup (best effort)
+      if: steps.detect-platform.outputs.platform == 'unsupported'
+      shell: bash
+      run: |
+        echo "Attempting generic Swift setup (best effort)"
+        
+        # Try to detect if Swift is already installed
+        if command -v swift &> /dev/null; then
+          echo "Swift is already installed:"
+          swift --version
+        else
+          echo "Swift is not installed. Unable to automatically install on this platform."
+          echo "Please manually install Swift or use a supported runner OS (macOS or Ubuntu)."
+          exit 1
+        fi 

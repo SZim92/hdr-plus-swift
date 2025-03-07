@@ -7,7 +7,7 @@ on:
 jobs:
   # Verify PR title follows conventional commits format
   pr-title-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Check PR title
         uses: amannn/action-semantic-pull-request@v5
@@ -38,7 +38,7 @@ jobs:
   
   # Analyze PR content and provide feedback
   pr-analysis:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -197,7 +197,7 @@ jobs:
   # Comment on pull requests with build status
   pr-comment:
     needs: [pr-analysis]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Wait for main build to complete
         id: wait_for_build
