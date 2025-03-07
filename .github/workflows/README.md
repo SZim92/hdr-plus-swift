@@ -24,6 +24,8 @@ The CI/CD system is organized into multiple specialized workflows:
 | [dependency-updates.yml](dependency-updates.yml) | Automated dependency updates | Weekly schedule, manual |
 | [stale-management.yml](stale-management.yml) | Manage stale issues and PRs | Daily schedule, manual |
 | [release-candidate.yml](release-candidate.yml) | Release candidate testing | Manual only |
+| [performance-benchmarks.yml](performance-benchmarks.yml) | Performance regression detection | Push to main, PRs, weekly schedule, manual |
+| [cleanup-artifacts.yml](cleanup-artifacts.yml) | Clean up old workflow artifacts | Weekly schedule, manual |
 
 ## Reusable Components
 
@@ -40,11 +42,16 @@ The CI system uses several reusable components:
 - [generate-changelog](../.github/actions/generate-changelog) - Generates formatted changelog from commits
 - [load-config](../.github/actions/load-config) - Loads shared configuration values from YAML
 - [build-cache](../.github/actions/build-cache) - Advanced caching strategy for Swift/Xcode builds
+- [run-benchmarks](../.github/actions/run-benchmarks) - Runs and analyzes performance benchmarks
 
 ### Local Development Tools
 - [local-validate.sh](../.github/scripts/local-validate.sh) - Script for validating changes locally
 - [setup-hooks.sh](../.github/scripts/setup-hooks.sh) - Script for setting up git hooks
 - [branch-protection.sh](../.github/branch-protection.sh) - Script for configuring branch protection rules
+
+### Project Templates
+- [PULL_REQUEST_TEMPLATE.md](../.github/PULL_REQUEST_TEMPLATE.md) - Template for pull requests
+- [ISSUE_TEMPLATE](../.github/ISSUE_TEMPLATE) - Templates for bug reports, feature requests, and documentation updates
 
 ## Advanced Features
 
@@ -96,6 +103,18 @@ Set up comprehensive branch protection rules:
 .github/branch-protection.sh YOUR_GITHUB_TOKEN owner repo
 ```
 
+### Performance Benchmarking
+Track and analyze performance metrics, detecting regressions automatically:
+```
+gh workflow run performance-benchmarks.yml
+```
+
+### Artifact Cleanup
+Clean up old workflow artifacts to save storage space:
+```
+gh workflow run cleanup-artifacts.yml -f days_old=30 -f dry_run=true
+```
+
 ## Build Optimization
 
 The CI system includes several optimizations to improve build performance:
@@ -134,6 +153,15 @@ If a workflow is failing:
 3. Try running the workflow manually to isolate issues
 4. For PR validation issues, make sure your PR follows the required conventions
 
+### Performance Testing
+
+When running performance tests:
+
+1. Use the `run-benchmarks` action in your workflow
+2. Create baselines from stable releases
+3. Check for regressions in PRs automatically
+4. View historical benchmark data to identify long-term trends
+
 ## Continuous Improvement
 
 We welcome suggestions for improving these workflows. If you have ideas:
@@ -163,6 +191,7 @@ graph TD
     P[Weekly Schedule] --> Q[Scheduled Tasks]
     P --> R[Dependency Scan]
     P --> S[Dependency Updates]
+    P --> AC[Cleanup Artifacts]
     T[Daily Schedule] --> U[CI Dashboard]
     T --> V[Stale Management]
     W[Manual Trigger] --> X[Orchestrator]
@@ -176,4 +205,8 @@ graph TD
     AA --> AB{Testing Period}
     AB -->|Success| O
     AB -->|Issues| G
+    B --> AD[Performance Benchmarks]
+    AD --> AE{Regression?}
+    AE -->|Yes| AF[Report in PR]
+    AE -->|No| AG[Update History]
 ``` 
