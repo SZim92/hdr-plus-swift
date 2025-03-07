@@ -1,6 +1,22 @@
+/**
+ * @file align.swift
+ * @brief Swift implementation of the hierarchical alignment algorithm for burst photography
+ *
+ * This file implements the Swift side of the burst photo alignment pipeline, which uses Metal shaders
+ * to perform efficient GPU-based alignment of multiple frames in a burst sequence. The implementation
+ * follows a coarse-to-fine hierarchical approach where alignment is refined at each resolution level.
+ *
+ * The alignment process:
+ * 1. Builds image pyramids by downsampling the input images
+ * 2. Starts alignment at the coarsest level
+ * 3. Propagates and refines alignment vectors to finer levels
+ * 4. Corrects alignment at object boundaries
+ * 5. Warps the final aligned image
+ */
 import Foundation
 import MetalPerformanceShaders
 
+// Metal compute pipeline states for the various shader functions
 let avg_pool_state                              = create_pipeline(with_function_name: "avg_pool",                               and_label: "Avg Pool")
 let avg_pool_normalization_state                = create_pipeline(with_function_name: "avg_pool_normalization",                 and_label: "Avg Pool (Normalized)")
 let compute_tile_differences_state              = create_pipeline(with_function_name: "compute_tile_differences",               and_label: "Compute Tile Difference")
@@ -11,6 +27,19 @@ let find_best_tile_alignment_state              = create_pipeline(with_function_
 let warp_texture_bayer_state                    = create_pipeline(with_function_name: "warp_texture_bayer",                     and_label: "Warp Texture (Bayer)")
 let warp_texture_xtrans_state                   = create_pipeline(with_function_name: "warp_texture_xtrans",                    and_label: "Warp Texture (XTrans)")
 
+/**
+ * Aligns a comparison texture to a reference texture using hierarchical alignment approach
+ *
+ * @param ref_pyramid           Array of reference textures at different resolutions (coarse to fine)
+ * @param comp_texture          Comparison texture to be aligned to the reference
+ * @param downscale_factor_array Array of downscale factors for each pyramid level
+ * @param tile_size_array       Array of tile sizes for each pyramid level
+ * @param search_dist_array     Array of search distances for each pyramid level
+ * @param uniform_exposure      Flag indicating whether exposure is uniform between frames
+ * @param black_level_mean      Mean black level of the sensor
+ * @param color_factors3        Array of color correction factors (R, G, B)
+ * @return                      The aligned comparison texture
+ */
 func align_texture(_ ref_pyramid: [MTLTexture], _ comp_texture: MTLTexture, _ downscale_factor_array: Array<Int>, _ tile_size_array: Array<Int>, _ search_dist_array: Array<Int>, _ uniform_exposure: Bool, _ black_level_mean: Double, _ color_factors3: Array<Double>) -> MTLTexture {
         
     // initialize tile alignments
@@ -26,7 +55,7 @@ func align_texture(_ ref_pyramid: [MTLTexture], _ comp_texture: MTLTexture, _ do
     // build comparison pyramid
     let comp_pyramid = build_pyramid(comp_texture, downscale_factor_array, black_level_mean, color_factors3)
     
-    // align tiles
+    // align tiles - starting from the coarsest level (highest index) and refining to finer levels
     for i in (0 ... downscale_factor_array.count-1).reversed() {
         
         // load layer params
@@ -80,7 +109,16 @@ func align_texture(_ ref_pyramid: [MTLTexture], _ comp_texture: MTLTexture, _ do
     return aligned_texture
 }
 
-
+/**
+ * Performs average pooling on an input texture to downsample it
+ *
+ * @param input_texture     The texture to downsample
+ * @param scale             The scale factor for downsampling
+ * @param black_level_mean  Mean black level of the sensor to be subtracted
+ * @param normalization     Whether to apply color normalization
+ * @param color_factors3    Array of color correction factors (R, G, B)
+ * @return                  The downsampled texture
+ */
 func avg_pool(_ input_texture: MTLTexture, _ scale: Int, _ black_level_mean: Double, _ normalization: Bool, _ color_factors3: Array<Double>) -> MTLTexture {
 
     // always set pixel format to float16 with reduced bit depth to make alignment as fast as possible
@@ -116,7 +154,15 @@ func avg_pool(_ input_texture: MTLTexture, _ scale: Int, _ black_level_mean: Dou
     return output_texture
 }
 
-
+/**
+ * Builds a pyramid of downsampled textures for multi-scale alignment
+ *
+ * @param input_texture       The highest resolution input texture
+ * @param downscale_factor_list Array of scale factors for each pyramid level
+ * @param black_level_mean    Mean black level of the sensor
+ * @param color_factors3      Array of color correction factors (R, G, B)
+ * @return                    Array of textures at different resolution levels (finest to coarsest)
+ */
 func build_pyramid(_ input_texture: MTLTexture, _ downscale_factor_list: Array<Int>, _ black_level_mean: Double, _ color_factors3: Array<Double>) -> Array<MTLTexture> {
     
     // iteratively resize the current layer in the pyramid
@@ -132,7 +178,18 @@ func build_pyramid(_ input_texture: MTLTexture, _ downscale_factor_list: Array<I
     return pyramid
 }
 
-
+/**
+ * Computes the differences between tiles in reference and comparison textures
+ *
+ * @param ref_layer         Reference texture
+ * @param comp_layer        Comparison texture
+ * @param prev_alignment    Previous alignment vectors
+ * @param downscale_factor  Scale factor between current and previous level
+ * @param uniform_exposure  Flag indicating whether exposure is uniform between frames
+ * @param use_ssd           Whether to use Sum of Squared Differences (L2 norm) instead of L1 norm
+ * @param tile_info         Structure containing tile parameters
+ * @return                  Texture containing tile differences
+ */
 func compute_tile_diff(_ ref_layer: MTLTexture, _ comp_layer: MTLTexture, _ prev_alignment: MTLTexture, _ downscale_factor: Int, _ uniform_exposure: Bool, _ use_ssd: Bool, _ tile_info: TileInfo) -> MTLTexture {
     
     // create a 'tile difference' texture
@@ -172,7 +229,21 @@ func compute_tile_diff(_ ref_layer: MTLTexture, _ comp_layer: MTLTexture, _ prev
     return tile_diff
 }
 
-
+/**
+ * Corrects alignment errors at boundaries between moving objects and static backgrounds
+ *
+ * This function evaluates three candidate alignment vectors for each tile to improve
+ * alignment at motion boundaries: the upsampled vector and vectors from neighboring tiles.
+ *
+ * @param ref_layer         Reference texture
+ * @param comp_layer        Comparison texture
+ * @param prev_alignment    Previous alignment vectors
+ * @param downscale_factor  Scale factor between current and previous level
+ * @param uniform_exposure  Flag indicating whether exposure is uniform between frames
+ * @param use_ssd           Whether to use Sum of Squared Differences (L2 norm) instead of L1 norm
+ * @param tile_info         Structure containing tile parameters
+ * @return                  Texture containing corrected alignment vectors
+ */
 func correct_upsampling_error(_ ref_layer: MTLTexture, _ comp_layer: MTLTexture, _ prev_alignment: MTLTexture, _ downscale_factor: Int, _ uniform_exposure: Bool, _ use_ssd: Bool, _ tile_info: TileInfo) -> MTLTexture {
     
     // create texture for corrected alignment
@@ -207,7 +278,15 @@ func correct_upsampling_error(_ ref_layer: MTLTexture, _ comp_layer: MTLTexture,
     return prev_alignment_corrected
 }
 
-
+/**
+ * Finds the best alignment vector for each tile by selecting the displacement with minimum difference
+ *
+ * @param tile_diff         Texture containing tile differences for each displacement
+ * @param prev_alignment    Previous alignment vectors
+ * @param current_alignment Output texture for storing the best alignment vectors
+ * @param downscale_factor  Scale factor between current and previous level
+ * @param tile_info         Structure containing tile parameters
+ */
 func find_best_tile_alignment(_ tile_diff: MTLTexture, _ prev_alignment: MTLTexture, _ current_alignment: MTLTexture, _ downscale_factor: Int, _ tile_info: TileInfo) {
     
     let command_buffer = command_queue.makeCommandBuffer()!
@@ -228,7 +307,19 @@ func find_best_tile_alignment(_ tile_diff: MTLTexture, _ prev_alignment: MTLText
     command_buffer.commit()
 }
 
-
+/**
+ * Warps a texture based on the computed alignment vectors
+ *
+ * This function applies the computed alignment vectors to transform the input texture,
+ * effectively aligning it with the reference frame. It uses either the Bayer-specific
+ * warping function or the more general X-Trans function depending on the downscale factor.
+ *
+ * @param texture_to_warp   The texture to be warped
+ * @param alignment         Texture containing alignment vectors
+ * @param tile_info         Structure containing tile parameters
+ * @param downscale_factor  Scale factor for the alignment vectors
+ * @return                  The warped and aligned texture
+ */
 func warp_texture(_ texture_to_warp: MTLTexture, _ alignment: MTLTexture, _ tile_info: TileInfo, _ downscale_factor: Int) -> MTLTexture {
     
     let warped_texture_descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: texture_to_warp.pixelFormat, width: texture_to_warp.width, height: texture_to_warp.height, mipmapped: false)
