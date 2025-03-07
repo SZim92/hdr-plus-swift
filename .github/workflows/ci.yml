@@ -1,0 +1,19 @@
+name: macOS CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      
+      - name: Build and Run Tests
+        run: |
+          # Adjust the project and scheme names as necessary
+          xcodebuild -project BurstPhoto.xcodeproj -scheme BurstPhoto -destination 'platform=macOS' clean test 
