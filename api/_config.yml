@@ -1,0 +1,146 @@
+# =============================================================================
+# SITE INFORMATION
+# =============================================================================
+# Core settings that define the site identity, appearance, and functionality
+# The values here are used throughout the site templates
+
+# Site title - appears in the browser tab, search results, and site header
+title: Burst Photo
+
+# Site description - appears in search results and metadata
+# The > symbol allows for a multi-line description in YAML
+description: >-
+  Night mode on any camera. Simply capture a burst of RAW images and
+  use our free app to merge them. Works with handheld photos and dynamic
+  scences.
+
+# Theme skin - controls the color scheme of the Minimal Mistakes theme
+# Options include: default, air, aqua, contrast, dark, dirt, mint, neon, plum, sunrise
+minimal_mistakes_skin: default
+
+# Whether to enable site-wide search functionality
+search: false
+
+# =============================================================================
+# BUILD SETTINGS
+# =============================================================================
+# Configuration for how Jekyll processes and generates the site
+
+# Markdown processor - kramdown is the default for Jekyll
+# It offers advanced Markdown features like tables and footnotes
+markdown: kramdown
+
+# Theme - using a remote theme hosted on GitHub
+# Minimal Mistakes is a flexible Jekyll theme with extensive customization options
+remote_theme: mmistakes/minimal-mistakes
+
+# =============================================================================
+# OUTPUT SETTINGS
+# =============================================================================
+# Configuration for the site's URL structure and file processing
+
+# URL structure - defines how post URLs are formatted
+# This format creates URLs like "/category-name/post-name/"
+permalink: /:categories/:title/
+
+# Files and directories to include in the build
+# By default, Jekyll ignores files/directories that begin with underscore
+# This ensures the _pages directory is processed
+include:
+  - _pages
+
+# =============================================================================
+# PLUGINS
+# =============================================================================
+# Jekyll plugins that extend the site's functionality
+# These must also be included in the Gemfile to work properly
+
+plugins:
+  # Adds pagination functionality for breaking up blog posts or collections into pages
+  - jekyll-paginate
+  
+  # Generates a sitemap.xml file for better search engine indexing
+  - jekyll-sitemap
+  
+  # Allows embedding GitHub gists (code snippets) in your pages
+  - jekyll-gist
+  
+  # Generates an Atom feed for your posts at /feed.xml
+  - jekyll-feed
+  
+  # Adds GitHub-flavored emoji support to the site
+  - jemoji
+  
+  # Provides advanced include tag functionality with caching
+  - jekyll-include-cache
+  
+  # Enables URL redirects for moved or renamed pages
+  - jekyll-redirect-from
+  
+  # Enhances SEO with meta tags for search engines and social media
+  - jekyll-seo-tag
+
+# =============================================================================
+# FOOTER CONFIGURATION
+# =============================================================================
+# Settings for the site's footer content, including social media links and contact info
+
+footer:
+  # Social media and external links that appear in the footer
+  links:
+    # GitHub repository link with Font Awesome icon
+    - label: "GitHub"
+      icon: "fab fa-fw fa-github"
+      url: "https://github.com/martin-marek/hdr-plus-swift"
+    
+    # Twitter profile link with Font Awesome icon
+    - label: "Twitter"
+      icon: "fab fa-fw fa-twitter-square"
+      url: "https://twitter.com/burst_photo"
+    
+    # Instagram profile link with Font Awesome icon
+    - label: "Instagram"
+      icon: "fab fa-fw fa-instagram"
+      url: "https://www.instagram.com/burst.photo/"
+  
+  # Contact email address
+  email: "martin.marek1999@gmail.com"
+
+# =============================================================================
+# DEFAULT LAYOUTS AND SETTINGS
+# =============================================================================
+# Default front matter to automatically apply to specific content types
+# This reduces the need to specify the same settings in each file's front matter
+
+defaults:
+  # _posts
+  # Default settings for blog posts
+  - scope:
+      # Apply to all files (empty path) of type "posts"
+      path: ""
+      type: posts
+    values:
+      # Use the "single" layout template (displays one post per page)
+      layout: single
+      # Don't show author profile sidebar
+      author_profile: false
+      # Don't show estimated reading time
+      read_time: false
+      # Don't enable comments
+      comments: false
+      # Don't show social sharing buttons
+      share: false
+      # Don't show related posts suggestions
+      related: false
+      
+  # _pages
+  # Default settings for static pages
+  - scope:
+      # Apply to files in the _pages directory
+      path: "_pages"
+      type: pages
+    values:
+      # Use the "single" layout template
+      layout: single
+      # Don't show author profile sidebar
+      author_profile: false
