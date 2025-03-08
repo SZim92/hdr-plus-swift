@@ -9,6 +9,11 @@ on:
     - cron: '0 5 * * 1'  # Run at 5 AM UTC every Monday
   workflow_dispatch:  # Allow manual triggering
 
+# Ensure we don't run multiple workflows on the same branch at the same time
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Security scanning for vulnerabilities and best practices
   security-scan:
