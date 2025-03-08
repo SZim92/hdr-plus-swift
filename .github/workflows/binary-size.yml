@@ -21,7 +21,12 @@ on:
       - '**/*.xcodeproj/**'
       - 'Package.swift'
       - '.github/workflows/binary-size.yml'
-  workflow_dispatch:
+  workflow_dispatch:  # Allow manual triggering
+
+# Ensure we don't run multiple workflows on the same branch at the same time
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check-size:
@@ -57,65 +62,58 @@ jobs:
           
           # Create a simple representative executable based on the file counts
           # This is just an approximation for size comparison over time
-          cat > size_estimate.swift << EOF
-          import Foundation
-          
-          // This file creates a representative binary for size analysis
-          // It doesn't need to run - just needs to have similar binary characteristics
-          
-          // Create structures similar to what would be in the real app
-          struct ImageProcessor {
-              var buffer: [UInt8]
-              var width: Int
-              var height: Int
-              
-              func process() -> [UInt8] {
-                  return buffer
-              }
-          }
-          
-          // Generate dummy code to approximate the app's size
-          func generateCode() {
-              var data: [UInt8] = []
-              
-              // Simulate the app's code volume
-              for i in 0..<10000 {
-                  data.append(UInt8(i % 256))
-              }
-              
-              let processor = ImageProcessor(buffer: data, width: 100, height: 100)
-              _ = processor.process()
-          }
-          
-          // Main function
-          func main() {
-              generateCode()
-              print("App would process images here")
-          }
-          
-          main()
-          EOF
+          echo "import Foundation" > size_estimate.swift
+          echo "" >> size_estimate.swift
+          echo "// This file creates a representative binary for size analysis" >> size_estimate.swift
+          echo "// It doesn't need to run - just needs to have similar binary characteristics" >> size_estimate.swift
+          echo "" >> size_estimate.swift
+          echo "// Simulate the size impact of $SWIFT_COUNT Swift files" >> size_estimate.swift
+          echo "func main() {" >> size_estimate.swift
+          echo "    // Add some data structures to simulate app complexity" >> size_estimate.swift
+          echo "    var data: [String: Any] = [:]" >> size_estimate.swift
+          echo "    " >> size_estimate.swift
+          echo "    // Add entries based on file count to simulate complexity" >> size_estimate.swift
+          echo "    for i in 0..<$SWIFT_COUNT {" >> size_estimate.swift
+          echo "        data[\"key_\\(i)\"] = \"This is simulating source file \\(i) impact on binary size\"" >> size_estimate.swift
+          echo "    }" >> size_estimate.swift
+          echo "    " >> size_estimate.swift
+          echo "    // Create some structures to simulate app models" >> size_estimate.swift
+          echo "    struct Model {" >> size_estimate.swift
+          echo "        let id: Int" >> size_estimate.swift
+          echo "        let name: String" >> size_estimate.swift
+          echo "        let value: Double" >> size_estimate.swift
+          echo "    }" >> size_estimate.swift
+          echo "    " >> size_estimate.swift
+          echo "    // Create array of models" >> size_estimate.swift
+          echo "    var models: [Model] = []" >> size_estimate.swift
+          echo "    for i in 0..<min($SWIFT_COUNT, 100) {" >> size_estimate.swift
+          echo "        models.append(Model(id: i, name: \"Item \\(i)\", value: Double(i) * 1.5))" >> size_estimate.swift
+          echo "    }" >> size_estimate.swift
+          echo "    " >> size_estimate.swift
+          echo "    // Print something to avoid optimization removing everything" >> size_estimate.swift
+          echo "    print(\"Generated model with \\(models.count) items and \\(data.count) dictionary entries\")" >> size_estimate.swift
+          echo "}" >> size_estimate.swift
+          echo "" >> size_estimate.swift
+          echo "main()" >> size_estimate.swift
           
           # Compile the simple file
           swiftc -O size_estimate.swift -o "$TEMP_BUILD_DIR/DummyApp.app/Contents/MacOS/DummyApp"
           
           # Create basic Info.plist
-          cat > "$TEMP_BUILD_DIR/DummyApp.app/Contents/Info.plist" << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleExecutable</key>
-              <string>DummyApp</string>
-              <key>CFBundleIdentifier</key>
-              <string>org.example.DummyApp</string>
-              <key>CFBundleName</key>
-              <string>DummyApp</string>
-              <key>CFBundleVersion</key>
-              <string>1.0</string>
-          </dict>
-          </plist>
-          EOF
+          echo '<?xml version="1.0" encoding="UTF-8"?>' > "$TEMP_BUILD_DIR/DummyApp.app/Contents/Info.plist"
+          echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' >> "$TEMP_BUILD_DIR/DummyApp.app/Contents/Info.plist"
+          echo '<plist version="1.0">' >> "$TEMP_BUILD_DIR/DummyApp.app/Contents/Info.plist"
+          echo '<dict>' >> "$TEMP_BUILD_DIR/DummyApp.app/Contents/Info.plist"
+          echo '    <key>CFBundleExecutable</key>' >> "$TEMP_BUILD_DIR/DummyApp.app/Contents/Info.plist"
+          echo '    <string>DummyApp</string>' >> "$TEMP_BUILD_DIR/DummyApp.app/Contents/Info.plist"
+          echo '    <key>CFBundleIdentifier</key>' >> "$TEMP_BUILD_DIR/DummyApp.app/Contents/Info.plist"
+          echo '    <string>com.example.dummyapp</string>' >> "$TEMP_BUILD_DIR/DummyApp.app/Contents/Info.plist"
+          echo '    <key>CFBundleVersion</key>' >> "$TEMP_BUILD_DIR/DummyApp.app/Contents/Info.plist"
+          echo '    <string>1.0</string>' >> "$TEMP_BUILD_DIR/DummyApp.app/Contents/Info.plist"
+          echo '    <key>CFBundleShortVersionString</key>' >> "$TEMP_BUILD_DIR/DummyApp.app/Contents/Info.plist"
+          echo '    <string>1.0</string>' >> "$TEMP_BUILD_DIR/DummyApp.app/Contents/Info.plist"
+          echo '</dict>' >> "$TEMP_BUILD_DIR/DummyApp.app/Contents/Info.plist"
+          echo '</plist>' >> "$TEMP_BUILD_DIR/DummyApp.app/Contents/Info.plist"
           
           echo "Created representative app at $TEMP_BUILD_DIR/DummyApp.app"
           echo "app_path=$TEMP_BUILD_DIR/DummyApp.app" >> $GITHUB_OUTPUT
