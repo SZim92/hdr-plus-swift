@@ -55,6 +55,9 @@ jobs:
           SWIFT_COUNT=$(find . -name "*.swift" | wc -l)
           OBJC_COUNT=$(find . -name "*.m" -o -name "*.mm" | wc -l)
           
+          # Create a variable without spaces for Swift code generation
+          SWIFT_COUNT_NO_SPACES=$(echo $SWIFT_COUNT | tr -d ' ')
+          
           echo "Project has approximately $SWIFT_COUNT Swift files and $OBJC_COUNT Objective-C files"
           
           # Create a simple Swift app bundle to analyze
@@ -67,13 +70,13 @@ jobs:
           echo "// This file creates a representative binary for size analysis" >> size_estimate.swift
           echo "// It doesn't need to run - just needs to have similar binary characteristics" >> size_estimate.swift
           echo "" >> size_estimate.swift
-          echo "// Simulate the size impact of $SWIFT_COUNT Swift files" >> size_estimate.swift
+          echo "// Simulate the size impact of $SWIFT_COUNT_NO_SPACES Swift files" >> size_estimate.swift
           echo "func main() {" >> size_estimate.swift
           echo "    // Add some data structures to simulate app complexity" >> size_estimate.swift
           echo "    var data: [String: Any] = [:]" >> size_estimate.swift
           echo "    " >> size_estimate.swift
           echo "    // Add entries based on file count to simulate complexity" >> size_estimate.swift
-          echo "    for i in 0..<$SWIFT_COUNT {" >> size_estimate.swift
+          echo "    for i in 0..<$SWIFT_COUNT_NO_SPACES {" >> size_estimate.swift
           echo "        data[\"key_\\(i)\"] = \"This is simulating source file \\(i) impact on binary size\"" >> size_estimate.swift
           echo "    }" >> size_estimate.swift
           echo "    " >> size_estimate.swift
@@ -86,7 +89,7 @@ jobs:
           echo "    " >> size_estimate.swift
           echo "    // Create array of models" >> size_estimate.swift
           echo "    var models: [Model] = []" >> size_estimate.swift
-          echo "    for i in 0..<min($SWIFT_COUNT, 100) {" >> size_estimate.swift
+          echo "    for i in 0..<min($SWIFT_COUNT_NO_SPACES, 100) {" >> size_estimate.swift
           echo "        models.append(Model(id: i, name: \"Item \\(i)\", value: Double(i) * 1.5))" >> size_estimate.swift
           echo "    }" >> size_estimate.swift
           echo "    " >> size_estimate.swift
