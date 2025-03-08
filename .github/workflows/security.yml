@@ -220,7 +220,7 @@ jobs:
           
   # Dependency audit job running weekly
   dependency-audit:
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: macos-latest
     steps:
       - name: Checkout repository
