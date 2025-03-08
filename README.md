@@ -37,6 +37,8 @@
 
 ![Build Status](https://github.com/SZim92/hdr-plus-swift/actions/workflows/main.yml/badge.svg)
 
+![Build Status](https://github.com/SZim92/hdr-plus-swift/actions/workflows/main.yml/badge.svg)
+
 ![Build Status](https://github.com/SZim92/hdr-plus-swift/actions/workflows/ci.yml/badge.svg)
 
 ![Build Status](https://github.com/SZim92/hdr-plus-swift/actions/workflows/ci.yml/badge.svg)
