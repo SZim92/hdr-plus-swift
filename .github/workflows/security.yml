@@ -244,8 +244,17 @@ jobs:
           
           echo "Dependency audit complete"
       
+      - name: Check for Slack webhook
+        id: check-webhook
+        run: |
+          if [ -n "${{ secrets.SLACK_WEBHOOK }}" ]; then
+            echo "has_webhook=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_webhook=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Notify results
-        if: always()
+        if: always() && github.event_name == 'schedule' && steps.check-webhook.outputs.has_webhook == 'true'
         uses: rtCamp/action-slack-notify@v2
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
@@ -256,7 +265,19 @@ jobs:
           SLACK_MESSAGE: "Weekly dependency check completed for ${{ github.repository }}. Check the logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           SLACK_FOOTER: "Automated weekly check"
           MSG_MINIMAL: false
-
+          
+      - name: Generate report without Slack
+        if: always() && (github.event_name != 'schedule' || steps.check-webhook.outputs.has_webhook != 'true')
+        run: |
+          echo "## Dependency Audit Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Dependency audit completed at $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Swift Package Dependencies | ✅ Checked |" >> $GITHUB_STEP_SUMMARY
+          echo "| Homebrew Dependencies | ✅ Checked |" >> $GITHUB_STEP_SUMMARY
+      
   # macOS-specific security scan
   macos-security-scan:
     runs-on: macos-latest
