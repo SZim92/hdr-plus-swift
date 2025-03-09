@@ -471,10 +471,10 @@ jobs:
           path: dashboard/
           retention-days: 5
       
-      - name: Deploy dashboard to GitHub Pages
-        uses: actions/upload-pages-artifact@v3
+      - name: Upload dashboard to GitHub Pages
+        uses: actions/upload-pages-artifact@v4
         with:
-          path: dashboard/
+          path: ./dashboard-build
       
       - name: Deploy to GitHub Pages
         id: deployment
