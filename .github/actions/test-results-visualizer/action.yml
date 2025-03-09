@@ -28,6 +28,9 @@ outputs:
   total-tests:
     description: 'Total number of tests run'
     value: ${{ steps.generate-report.outputs.total_tests }}
+  used-synthetic-data:
+    description: 'Whether synthetic test data was used instead of real test results'
+    value: ${{ steps.check-xcresult.outputs.generate_synthetic }}
 
 runs:
   using: 'composite'
@@ -562,6 +565,25 @@ runs:
             f.write(f"# {report_name} Test Report\n\n")
             f.write(f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
             
+            # Add a clear status indicator at the top
+            if force_synthetic:
+                f.write("## ⚠️ WARNING: SYNTHETIC TEST DATA\n\n")
+                f.write("This report contains artificially generated test data because:\n")
+                
+                if os.path.exists(f"{results_path}/build-failed-tests-skipped"):
+                    f.write("- ❌ **The build failed, so tests were skipped**\n")
+                elif os.path.exists(f"{results_path}/tests-ran-but-failed"):
+                    f.write("- ❌ **Tests were executed but failed**\n")
+                else:
+                    f.write("- ⚠️ **Test results were not available**\n")
+                    
+                f.write("\nThe data below is **NOT** from actual test runs.\n\n")
+            elif failing_tests > 0:
+                failure_percentage = round((failing_tests / total_tests) * 100, 1)
+                f.write(f"## ❌ TEST FAILURE: {failing_tests} of {total_tests} tests failed ({failure_percentage}%)\n\n")
+            else:
+                f.write(f"## ✅ SUCCESS: All {total_tests} tests passed\n\n")
+            
             f.write("## Summary\n\n")
             f.write(f"- **Total Tests:** {total_tests}\n")
             f.write(f"- **Passing:** {passing_tests} ({success_rate}%)\n")
@@ -622,6 +644,29 @@ runs:
       shell: bash
       run: |
         echo "## Test Results for ${{ inputs.report-name }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Add status badge based on test results
+        if [[ "${{ steps.check-xcresult.outputs.generate_synthetic }}" == "true" ]]; then
+          echo "⚠️ **WARNING: This report contains synthetic test data**" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "${{ inputs.results-path }}/build-failed-tests-skipped" ]; then
+            echo "❌ **Build Failed - Tests were skipped**" >> $GITHUB_STEP_SUMMARY
+          elif [ -f "${{ inputs.results-path }}/tests-ran-but-failed" ]; then
+            echo "❌ **Tests Failed - See details below**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **No Test Results Available**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+        else
+          # Check success rate to determine if all tests passed
+          if [[ "${{ steps.generate-report.outputs.success_rate }}" == "100" ]]; then
+            echo "✅ **All Tests Passed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Some Tests Failed - See details below**" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+        
         echo "" >> $GITHUB_STEP_SUMMARY
         
         if [ -f test-reports/test-report.md ]; then
