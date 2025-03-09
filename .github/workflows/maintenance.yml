@@ -17,83 +17,48 @@ jobs:
         run: |
           # Check if README.md exists
           if [ -f "README.md" ]; then
-            MODIFIED=false
-            README_CONTENT=$(cat README.md)
-            
-            # Define the badges we want to ensure are in the README
+            # Define the badge we want to ensure is in the README
             MAIN_BADGE="![Build Status](https://github.com/${GITHUB_REPOSITORY}/actions/workflows/main.yml/badge.svg)"
             
-            # First check - if we don't have any badges at all, add after first heading
-            if ! grep -q "![Build Status]" README.md; then
-              echo "No badges found - adding badges to README.md"
-              
-              # Insert the badges after the first heading or at the top if no heading
-              if grep -q "^# " README.md; then
-                # Get the first heading line number
-                FIRST_HEADING_LINE=$(grep -n "^# " README.md | head -1 | cut -d':' -f1)
-                
-                # Create the new README with badges after the first heading
-                head -n $FIRST_HEADING_LINE README.md > temp_readme
-                echo "" >> temp_readme
-                echo "$MAIN_BADGE" >> temp_readme
-                echo "" >> temp_readme
-                tail -n +$((FIRST_HEADING_LINE + 1)) README.md >> temp_readme
-              else
-                # No heading, add badges at the top
-                echo "$MAIN_BADGE" > temp_readme
-                echo "" >> temp_readme
-                cat README.md >> temp_readme
-              fi
-              
-              mv temp_readme README.md
-              MODIFIED=true
-            else
-              # Check for and remove duplicate badges
-              BADGE_LINES=$(grep -n "![Build Status]" README.md | wc -l)
-              
-              if [ "$BADGE_LINES" -gt 1 ]; then
-                echo "Found $BADGE_LINES badge lines - removing duplicates"
-                
-                # Extract the first badge line and keep only that one
-                FIRST_BADGE_LINE=$(grep -n "![Build Status]" README.md | head -1 | cut -d':' -f1)
-                FIRST_BADGE=$(sed -n "${FIRST_BADGE_LINE}p" README.md)
-                
-                # Replace all badge lines with nothing
-                sed -i '/!\[Build Status\]/d' README.md
-                
-                # Re-insert the main badge where the first badge was
-                awk -v line="$FIRST_BADGE_LINE" -v badge="$MAIN_BADGE" 'NR==line{print badge}NR!=line{print}' README.md > temp_readme
-                mv temp_readme README.md
-                MODIFIED=true
-              else
-                # Update the badge URL if needed (in case workflow file changed)
-                if ! grep -q "$MAIN_BADGE" README.md; then
-                  echo "Updating badge URL"
-                  sed -i 's|!\[Build Status\](https://github.com/.*)|'"$MAIN_BADGE"'|' README.md
-                  MODIFIED=true
-                else
-                  echo "Badge is already up to date"
-                fi
-              fi
-            fi
+            # First, let's get the title of the README (first line with # at the start)
+            TITLE=$(grep -m 1 "^# " README.md || echo "# HDR+ Swift")
             
-            # Only commit if we made changes
-            if [ "$MODIFIED" = true ]; then
+            # Create a new README with the badge right after the title
+            echo "$TITLE" > README.md.new
+            echo "" >> README.md.new
+            echo "$MAIN_BADGE" >> README.md.new
+            echo "" >> README.md.new
+            
+            # Now append everything from the original README except:
+            # - The title (which we already added)
+            # - Any lines with ![Build Status] (to remove existing badges)
+            grep -v "^# " README.md | grep -v "!\[Build Status\]" >> README.md.new
+            
+            # Compare if the README changed
+            if ! cmp -s README.md README.md.new; then
+              # Files are different, so we need to update
+              mv README.md.new README.md
+              
               # Configure git
               git config --local user.email "github-actions[bot]@users.noreply.github.com"
               git config --local user.name "github-actions[bot]"
               
               # Commit and push changes
               git add README.md
-              git commit -m "docs: Update build status badge in README [skip ci]"
+              git commit -m "docs: Fix badge in README [skip ci]"
               git push
               
               echo "Updated build status badge in README.md"
+            else
+              # Files are the same, no need to update
+              rm README.md.new
+              echo "README.md already has the correct badge configuration"
             fi
           else
             echo "README.md not found, creating one with badge"
             echo "# HDR+ Swift" > README.md
-            echo "$MAIN_BADGE" >> README.md
+            echo "" >> README.md
+            echo "![Build Status](https://github.com/${GITHUB_REPOSITORY}/actions/workflows/main.yml/badge.svg)" >> README.md
             echo "" >> README.md
             
             # Configure git
