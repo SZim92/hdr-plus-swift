@@ -164,24 +164,105 @@ jobs:
           echo "::endgroup::"
           
       - name: Check Test Status
+        id: test-status
         run: |
+          # Initialize variables
+          FAILURE_FOUND=0
+          
           # Check if tests actually ran and failed
           if [ -f "TestResults.xcresult/tests-ran-but-failed" ]; then
-            echo "::error::Tests were executed but failed. See test reports for details."
-            exit 1
+            echo "::error title=Test Failure::Tests were executed but failed. See test reports for details."
+            echo "failure_reason=Tests failed during execution" >> $GITHUB_OUTPUT
+            
+            # Try to extract failure information for more detailed annotations
+            if [ -f "test-reports/test-report.md" ]; then
+              # Find failed test sections in the Markdown report
+              FAILED_TESTS=$(sed -n '/^### .*$/,/^$/p' test-reports/test-report.md | grep "^###" | sed 's/^### //')
+              
+              # Output each failed test as a separate annotation
+              for TEST in $FAILED_TESTS; do
+                ERROR_MSG=$(sed -n "/^### $TEST$/,/^$/p" test-reports/test-report.md | grep "Error:" | sed 's/- \*\*Error:\*\* //')
+                LOCATION=$(sed -n "/^### $TEST$/,/^$/p" test-reports/test-report.md | grep "Location:" | sed 's/- \*\*Location:\*\* //')
+                
+                if [ -n "$LOCATION" ]; then
+                  FILE=$(echo $LOCATION | cut -d':' -f1)
+                  LINE=$(echo $LOCATION | cut -d':' -f2)
+                  echo "::error file=$FILE,line=$LINE,title=Failed Test ($TEST)::$ERROR_MSG"
+                else
+                  echo "::error title=Failed Test ($TEST)::$ERROR_MSG"
+                fi
+              done
+            fi
+            
+            FAILURE_FOUND=1
           fi
           
           # Check if build failed
           if [ -f "TestResults.xcresult/build-failed-tests-skipped" ]; then
-            echo "::error::Build failed, so tests were skipped. See build logs for details."
-            exit 1
+            echo "::error title=Build Failure::Build failed, so tests were skipped. See build logs for details."
+            echo "failure_reason=Build failed, tests were skipped" >> $GITHUB_OUTPUT
+            
+            # Try to extract build errors from logs
+            if [ -f "build.log" ]; then
+              # Extract error lines from the build log
+              grep -A 3 "error:" build.log | head -n 10 | while read -r LINE; do
+                echo "::error title=Build Error::$LINE"
+              done
+            fi
+            
+            FAILURE_FOUND=1
           fi
           
           # Check for synthetic data generation
           if [ "${{ steps.test-visualizer.outputs.used-synthetic-data }}" == "true" ]; then
-            echo "::warning::This run used synthetic test data. Real tests may have failed or not run at all."
+            echo "::warning title=Synthetic Data::This run used synthetic test data. Real tests may have failed or not run at all."
+            echo "used_synthetic_data=true" >> $GITHUB_OUTPUT
           fi
           
+          # Set output for failure found
+          echo "failure_found=$FAILURE_FOUND" >> $GITHUB_OUTPUT
+          
+          # Fail the workflow if failures were found
+          if [ $FAILURE_FOUND -eq 1 ]; then
+            exit 1
+          fi
+          
+      - name: Comment on PR for test failures
+        if: github.event_name == 'pull_request' && steps.test-status.outputs.failure_found == '1'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issueNumber = context.issue.number;
+            const failureReason = '${{ steps.test-status.outputs.failure_reason }}';
+            
+            let body = `## ❌ Test Failure on ${{ matrix.os }}
+            
+            Tests failed on this PR. The failure reason was:
+            
+            **${failureReason}**
+            
+            Please review the [test report](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) for details.
+            `;
+            
+            // If used synthetic data, add warning
+            if ('${{ steps.test-status.outputs.used_synthetic_data }}' === 'true') {
+              body += '\n⚠️ **Warning**: Synthetic test data was used in this run. The actual test results may be incomplete.';
+            }
+            
+            // Add link to test artifacts
+            body += `
+            
+            [View Test Artifacts](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/artifacts)
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: issueNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+      
       - name: Archive test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -267,9 +348,13 @@ jobs:
         uses: actions/download-artifact@v4
         
       - name: Generate Summary
+        id: summary
         run: |
           echo "## CI Results Summary" > $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Initialize variables
+          FAILED_TESTS=0
           
           echo "### Linting Status" >> $GITHUB_STEP_SUMMARY
           if [ -d "lint-results" ]; then
@@ -285,8 +370,10 @@ jobs:
               # Check for test failure markers
               if [ -f "test-results-$os/TestResults.xcresult/tests-ran-but-failed" ]; then
                 echo "❌ Tests on $os failed - Check test report for details" >> $GITHUB_STEP_SUMMARY
+                FAILED_TESTS=1
               elif [ -f "test-results-$os/TestResults.xcresult/build-failed-tests-skipped" ]; then
                 echo "❌ Build on $os failed - Tests were skipped" >> $GITHUB_STEP_SUMMARY
+                FAILED_TESTS=1
               else
                 # Check if test report exists
                 if [ -f "test-results-$os/test-reports/test-report.html" ]; then
@@ -296,11 +383,22 @@ jobs:
                   if grep -q "Success Rate:" "test-results-$os/test-reports/test-report.md" 2>/dev/null; then
                     SUCCESS_RATE=$(grep "Success Rate:" "test-results-$os/test-reports/test-report.md" | sed 's/.*: //')
                     echo "   - Success Rate: $SUCCESS_RATE" >> $GITHUB_STEP_SUMMARY
+                    
+                    # Check if success rate is below threshold (95%)
+                    RATE_VALUE=$(echo "$SUCCESS_RATE" | sed 's/%//')
+                    if (( $(echo "$RATE_VALUE < 95" | bc -l) )); then
+                      echo "   - ⚠️ Success rate below 95% threshold" >> $GITHUB_STEP_SUMMARY
+                      FAILED_TESTS=1
+                    fi
                   fi
                   
                   # Check if synthetic data was used
                   if grep -q "synthetic test data" "test-results-$os/test-reports/test-report.md" 2>/dev/null; then
                     echo "   - ⚠️ Used synthetic data - real tests may have failed" >> $GITHUB_STEP_SUMMARY
+                    # If synthetic data was used due to failure, count as failed test
+                    if grep -q "Tests were executed but failed" "test-results-$os/test-reports/test-report.md" 2>/dev/null; then
+                      FAILED_TESTS=1
+                    fi
                   fi
                 else
                   echo "⚠️ Tests on $os may have issues - Test report not found" >> $GITHUB_STEP_SUMMARY
@@ -308,6 +406,7 @@ jobs:
               fi
             else
               echo "❌ Tests on $os failed or did not complete" >> $GITHUB_STEP_SUMMARY
+              FAILED_TESTS=1
             fi
           done
           
@@ -317,6 +416,7 @@ jobs:
             echo "✅ Build completed" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ Build failed or did not complete" >> $GITHUB_STEP_SUMMARY
+            FAILED_TESTS=1
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -324,4 +424,17 @@ jobs:
           echo "This workflow used a new optimized CI setup with:" >> $GITHUB_STEP_SUMMARY
           echo "- Parallel testing across macOS versions" >> $GITHUB_STEP_SUMMARY
           echo "- Intelligent caching for faster builds" >> $GITHUB_STEP_SUMMARY
-          echo "- Separate lint job for faster feedback" >> $GITHUB_STEP_SUMMARY 
+          echo "- Separate lint job for faster feedback" >> $GITHUB_STEP_SUMMARY
+          
+          # Add overall summary
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Overall Status" >> $GITHUB_STEP_SUMMARY
+          if [ $FAILED_TESTS -eq 0 ]; then
+            echo "✅ **All tests passed successfully**" >> $GITHUB_STEP_SUMMARY
+            echo "pass=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ **One or more tests failed or had issues**" >> $GITHUB_STEP_SUMMARY
+            echo "pass=false" >> $GITHUB_OUTPUT
+            # Mark the workflow as failed if there were actual test failures
+            exit 1
+          fi 
