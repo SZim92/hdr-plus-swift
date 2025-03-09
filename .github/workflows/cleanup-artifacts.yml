@@ -1,193 +1,119 @@
 name: Cleanup Artifacts
 
 on:
-  workflow_dispatch:
-    inputs:
-      days_old:
-        description: 'Delete artifacts older than this many days'
-        required: true
-        default: '30'
-        type: string
-      dry_run:
-        description: 'Only list artifacts without deleting them'
-        required: false
-        default: false
-        type: boolean
   schedule:
-    - cron: '0 2 * * 0'  # Run at 2 AM UTC every Sunday
-
-permissions:
-  actions: write
+    - cron: '0 0 * * 0'  # Run at midnight every Sunday
+  workflow_dispatch:  # Allow manual triggering
 
 jobs:
   cleanup:
-    name: Cleanup Old Artifacts
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      
-      - name: Set up environment
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
-      
-      - name: Get artifact retention settings
-        id: retention
-        run: |
-          # Default to 30 days if not specified
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            DAYS_OLD="${{ github.event.inputs.days_old }}"
-          else
-            DAYS_OLD="30"
-          fi
-          
-          # Try to get retention settings from config file
-          if [ -f ".github/workflow-config.yml" ]; then
-            if command -v yq &> /dev/null; then
-              RETENTION_DEFAULT=$(yq '.build.retention.default' .github/workflow-config.yml)
-              if [ "$RETENTION_DEFAULT" != "null" ]; then
-                # Convert retention days to a cutoff for deletion (older items will be deleted)
-                # For scheduled runs, we use config value if available
-                if [ "${{ github.event_name }}" == "schedule" ] && [ "$RETENTION_DEFAULT" != "null" ]; then
-                  DAYS_OLD="$RETENTION_DEFAULT"
-                fi
-              fi
-            fi
-          fi
-          
-          # Calculate cutoff date
-          CUTOFF_DATE=$(date -d "-${DAYS_OLD} days" +%s)
-          echo "days_old=$DAYS_OLD" >> $GITHUB_OUTPUT
-          echo "cutoff_date=$CUTOFF_DATE" >> $GITHUB_OUTPUT
-          
-          echo "Will delete artifacts older than $DAYS_OLD days (before $(date -d "@$CUTOFF_DATE" -I))"
-      
-      - name: Setup GitHub CLI
-        run: |
-          type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
-          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-          sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-          sudo apt update
-          sudo apt install gh -y
-      
-      - name: List Artifacts
-        id: list
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Get list of all artifacts
-          echo "Listing artifacts..."
-          gh api repos/${{ github.repository }}/actions/artifacts --paginate | jq -r '.artifacts[] | "\(.id) \(.name) \(.created_at) \(.size_in_bytes)"' > artifacts.txt
-          
-          TOTAL_COUNT=$(wc -l < artifacts.txt)
-          echo "Total artifacts: $TOTAL_COUNT"
-          
-          # Filter artifacts by age
-          CUTOFF_DATE=${{ steps.retention.outputs.cutoff_date }}
-          
-          # Create summary file
-          echo "## Artifact Cleanup Summary" > artifact_summary.md
-          echo "" >> artifact_summary.md
-          echo "Total artifacts found: $TOTAL_COUNT" >> artifact_summary.md
-          
-          # Filter artifacts older than cutoff date
-          OLD_ARTIFACTS=0
-          OLD_SIZE=0
-          
-          while read -r id name created_at size; do
-            # Convert created_at to timestamp
-            CREATED_DATE=$(date -d "$created_at" +%s)
+      - name: Cleanup Artifacts
+        id: cleanup
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+
+            console.log('Starting cleanup of old artifacts...');
             
-            if [ $CREATED_DATE -lt $CUTOFF_DATE ]; then
-              echo "$id $name $created_at $size" >> old_artifacts.txt
-              OLD_ARTIFACTS=$((OLD_ARTIFACTS + 1))
-              OLD_SIZE=$((OLD_SIZE + size))
-            fi
-          done < artifacts.txt
-          
-          # Convert size to human readable
-          if [ $OLD_SIZE -ge 1073741824 ]; then
-            OLD_SIZE_HUMAN=$(echo "scale=2; $OLD_SIZE/1073741824" | bc)
-            OLD_SIZE_UNIT="GB"
-          elif [ $OLD_SIZE -ge 1048576 ]; then
-            OLD_SIZE_HUMAN=$(echo "scale=2; $OLD_SIZE/1048576" | bc)
-            OLD_SIZE_UNIT="MB"
-          elif [ $OLD_SIZE -ge 1024 ]; then
-            OLD_SIZE_HUMAN=$(echo "scale=2; $OLD_SIZE/1024" | bc)
-            OLD_SIZE_UNIT="KB"
-          else
-            OLD_SIZE_HUMAN=$OLD_SIZE
-            OLD_SIZE_UNIT="bytes"
-          fi
-          
-          # Update summary
-          echo "Artifacts older than ${{ steps.retention.outputs.days_old }} days: $OLD_ARTIFACTS" >> artifact_summary.md
-          echo "Total size to clean up: $OLD_SIZE_HUMAN $OLD_SIZE_UNIT" >> artifact_summary.md
-          echo "" >> artifact_summary.md
-          
-          # Add full list of artifacts to be deleted to summary
-          if [ $OLD_ARTIFACTS -gt 0 ]; then
-            echo "### Artifacts to be deleted:" >> artifact_summary.md
-            echo "" >> artifact_summary.md
-            echo "| ID | Name | Created At | Size |" >> artifact_summary.md
-            echo "|---|---|---|---|" >> artifact_summary.md
+            // Configuration
+            const now = new Date();
+            const retentionDays = {
+              // Keep successful build artifacts for 3 days
+              "build-artifacts": 3,
+              // Keep reports for 7 days
+              "reports": 7,
+              // Keep security and performance data for longer (14 days)
+              "security": 14,
+              "performance": 14,
+              // Default retention: 7 days
+              "default": 7
+            };
             
-            while read -r id name created_at size; do
-              # Convert size to human readable
-              if [ $size -ge 1048576 ]; then
-                size_human=$(echo "scale=2; $size/1048576" | bc)
-                size_unit="MB"
-              elif [ $size -ge 1024 ]; then
-                size_human=$(echo "scale=2; $size/1024" | bc)
-                size_unit="KB"
-              else
-                size_human=$size
-                size_unit="bytes"
-              fi
+            // Get all artifacts
+            const artifacts = await github.rest.actions.listArtifactsForRepo({
+              owner,
+              repo,
+              per_page: 100
+            });
+            
+            console.log(`Found ${artifacts.data.artifacts.length} artifacts in the repository`);
+            
+            let totalFreed = 0;
+            let deletedCount = 0;
+            
+            // Process each artifact
+            for (const artifact of artifacts.data.artifacts) {
+              // Skip already expired artifacts
+              if (artifact.expired) {
+                continue;
+              }
               
-              echo "| $id | $name | $created_at | $size_human $size_unit |" >> artifact_summary.md
-            done < old_artifacts.txt
-          else
-            echo "No artifacts found older than ${{ steps.retention.outputs.days_old }} days." >> artifact_summary.md
-          fi
-          
-          # Copy summary to GitHub step summary
-          cat artifact_summary.md >> $GITHUB_STEP_SUMMARY
-          
-          echo "old_artifacts=$OLD_ARTIFACTS" >> $GITHUB_OUTPUT
-      
-      - name: Delete Old Artifacts
-        if: steps.list.outputs.old_artifacts > 0 && (github.event.inputs.dry_run != 'true')
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              const createdAt = new Date(artifact.created_at);
+              const ageDays = (now - createdAt) / (1000 * 60 * 60 * 24);
+              
+              // Determine retention period based on name pattern
+              let retentionPeriod = retentionDays.default;
+              
+              if (artifact.name.includes('build-artifacts')) {
+                retentionPeriod = retentionDays["build-artifacts"];
+              } else if (artifact.name.includes('reports')) {
+                retentionPeriod = retentionDays["reports"];
+              } else if (artifact.name.includes('security')) {
+                retentionPeriod = retentionDays["security"];
+              } else if (artifact.name.includes('performance') || artifact.name.includes('benchmark')) {
+                retentionPeriod = retentionDays["performance"];
+              }
+              
+              // Delete if older than retention period
+              if (ageDays > retentionPeriod) {
+                console.log(`Deleting ${artifact.name} (${artifact.size_in_bytes} bytes, ${ageDays.toFixed(1)} days old)...`);
+                try {
+                  await github.rest.actions.deleteArtifact({
+                    owner,
+                    repo,
+                    artifact_id: artifact.id
+                  });
+                  
+                  totalFreed += artifact.size_in_bytes;
+                  deletedCount++;
+                  console.log(`Successfully deleted ${artifact.name}`);
+                } catch (error) {
+                  console.log(`Failed to delete ${artifact.name}: ${error.message}`);
+                }
+              } else {
+                console.log(`Keeping ${artifact.name} (${(artifact.size_in_bytes / 1024 / 1024).toFixed(2)} MB, ${ageDays.toFixed(1)} days old)`);
+              }
+            }
+            
+            // Convert bytes to human-readable format
+            const formatSize = (bytes) => {
+              const units = ['B', 'KB', 'MB', 'GB'];
+              let size = bytes;
+              let unitIndex = 0;
+              
+              while (size >= 1024 && unitIndex < units.length - 1) {
+                size /= 1024;
+                unitIndex++;
+              }
+              
+              return `${size.toFixed(2)} ${units[unitIndex]}`;
+            };
+            
+            // Create summary
+            const freedSpace = formatSize(totalFreed);
+            console.log(`Cleanup complete. Deleted ${deletedCount} artifacts, freed ${freedSpace}.`);
+            
+            return {
+              deletedCount,
+              freedSpace
+            };
+
+      - name: Create summary
         run: |
-          echo "Deleting old artifacts..."
-          
-          if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
-            echo "Dry run mode, not deleting artifacts"
-            exit 0
-          fi
-          
-          while read -r id name created_at size; do
-            echo "Deleting artifact $name (ID: $id)"
-            gh api -X DELETE repos/${{ github.repository }}/actions/artifacts/$id
-          done < old_artifacts.txt
-          
-          echo "## Cleanup Complete" >> $GITHUB_STEP_SUMMARY
+          echo "## Artifact Cleanup Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Deleted ${{ steps.list.outputs.old_artifacts }} artifacts." >> $GITHUB_STEP_SUMMARY
-      
-      - name: No Artifacts to Delete
-        if: steps.list.outputs.old_artifacts == 0
-        run: |
-          echo "No artifacts found to delete."
-      
-      - name: Dry Run Mode
-        if: github.event.inputs.dry_run == 'true' && steps.list.outputs.old_artifacts > 0
-        run: |
-          echo "## Dry Run Mode" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "No artifacts were deleted. This was a dry run." >> $GITHUB_STEP_SUMMARY 
+          echo "- Artifacts deleted: ${{ fromJSON(steps.cleanup.outputs.result).deletedCount }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Space freed: ${{ fromJSON(steps.cleanup.outputs.result).freedSpace }}" >> $GITHUB_STEP_SUMMARY 
