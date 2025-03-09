@@ -5,6 +5,11 @@ on:
   schedule:
     - cron: '0 0 * * *'  # Daily at midnight UTC
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 jobs:
   config:
     name: Load Configuration
@@ -190,6 +195,9 @@ jobs:
     name: Generate Dashboard
     needs: [config, gather-data]
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     
     steps:
       - name: Check out repository

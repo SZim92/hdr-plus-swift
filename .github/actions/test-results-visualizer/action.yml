@@ -101,7 +101,7 @@ runs:
         import matplotlib.pyplot as plt
         import seaborn as sns
         from datetime import datetime
-        from jinja2 import Template
+        from jinja2 import Template, FileSystemLoader, Environment
         
         # Paths
         results_path = "${{ inputs.results-path }}"
@@ -452,245 +452,72 @@ runs:
         # Save the charts
         plt.savefig('test-reports/test_charts.png', dpi=100, bbox_inches='tight')
         
-        # Generate HTML report
-        html_template = '''
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>{{ report_name }} - Test Report</title>
-            <style>
-                body {
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                    line-height: 1.6;
-                    color: #333;
-                    max-width: 1200px;
-                    margin: 0 auto;
-                    padding: 20px;
-                }
-                h1, h2, h3 {
-                    color: #2c3e50;
-                }
-                .header {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    margin-bottom: 20px;
-                    padding-bottom: 20px;
-                    border-bottom: 1px solid #eee;
-                }
-                .summary {
-                    display: flex;
-                    flex-wrap: wrap;
-                    gap: 20px;
-                    margin-bottom: 30px;
-                }
-                .summary-card {
-                    background: #f8f9fa;
-                    border-radius: 8px;
-                    padding: 15px;
-                    min-width: 150px;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-                }
-                .big-number {
-                    font-size: 24px;
-                    font-weight: bold;
-                    margin-bottom: 5px;
-                }
-                .charts {
-                    margin: 30px 0;
-                }
-                table {
-                    width: 100%;
-                    border-collapse: collapse;
-                    margin: 20px 0;
-                    font-size: 14px;
-                }
-                th, td {
-                    padding: 12px 15px;
-                    text-align: left;
-                    border-bottom: 1px solid #e1e1e1;
-                }
-                th {
-                    background-color: #f8f9fa;
-                    font-weight: bold;
-                }
-                tr:hover {
-                    background-color: #f5f5f5;
-                }
-                .passed {
-                    color: #4CAF50;
-                }
-                .failed {
-                    color: #F44336;
-                }
-                .skipped {
-                    color: #FFC107;
-                }
-                .status-indicator {
-                    display: inline-block;
-                    width: 12px;
-                    height: 12px;
-                    border-radius: 50%;
-                    margin-right: 6px;
-                }
-                .status-passed {
-                    background-color: #4CAF50;
-                }
-                .status-failed {
-                    background-color: #F44336;
-                }
-                .status-skipped {
-                    background-color: #FFC107;
-                }
-                .timestamp {
-                    color: #7f8c8d;
-                    font-size: 14px;
-                }
-                .error-message {
-                    background-color: #ffebee;
-                    border-left: 3px solid #F44336;
-                    padding: 10px;
-                    margin: 5px 0;
-                    font-family: monospace;
-                    white-space: pre-wrap;
-                    font-size: 13px;
-                }
-                .filter-controls {
-                    margin: 20px 0;
-                    display: flex;
-                    gap: 10px;
-                }
-                .filter-controls button {
-                    padding: 8px 12px;
-                    border: none;
-                    border-radius: 4px;
-                    background-color: #f8f9fa;
-                    cursor: pointer;
-                }
-                .filter-controls button.active {
-                    background-color: #2c3e50;
-                    color: white;
-                }
-                .coverage-bar {
-                    height: 20px;
-                    background-color: #eee;
-                    border-radius: 10px;
-                    margin-top: 5px;
-                    overflow: hidden;
-                }
-                .coverage-fill {
-                    height: 100%;
-                    background-color: #4CAF50;
-                    width: {{ coverage_percent }}%;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="header">
+        # Check if the template file exists
+        template_path = ".github/actions/test-results-visualizer/template.html"
+        if os.path.exists(template_path):
+            print(f"Using template from {template_path}")
+            with open(template_path, 'r') as f:
+                template_content = f.read()
+                template = Template(template_content)
+        else:
+            print("Template file not found, using simple template")
+            template = Template('''
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>{{ report_name }} - Test Report</title>
+                <style>
+                    body { font-family: sans-serif; margin: 20px; }
+                    h1 { color: #333; }
+                    .summary { margin: 20px 0; }
+                    table { border-collapse: collapse; width: 100%; }
+                    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                    th { background-color: #f2f2f2; }
+                    .passed { color: green; }
+                    .failed { color: red; }
+                    .skipped { color: orange; }
+                </style>
+            </head>
+            <body>
                 <h1>{{ report_name }}</h1>
-                <div class="timestamp">Generated on {{ timestamp }}</div>
-            </div>
-            
-            <div class="summary">
-                <div class="summary-card">
-                    <div>Total Tests</div>
-                    <div class="big-number">{{ total_tests }}</div>
+                <div class="summary">
+                    <p>Total Tests: {{ total_tests }}</p>
+                    <p>Success Rate: {{ success_rate }}%</p>
+                    <p>Duration: {{ test_duration }}s</p>
+                    {% if include_coverage %}
+                    <p>Code Coverage: {{ coverage_percent }}%</p>
+                    {% endif %}
                 </div>
-                <div class="summary-card">
-                    <div>Success Rate</div>
-                    <div class="big-number">{{ success_rate }}%</div>
-                </div>
-                <div class="summary-card">
-                    <div>Duration</div>
-                    <div class="big-number">{{ test_duration }}s</div>
-                </div>
-                {% if include_coverage %}
-                <div class="summary-card">
-                    <div>Code Coverage</div>
-                    <div class="big-number">{{ coverage_percent }}%</div>
-                    <div class="coverage-bar">
-                        <div class="coverage-fill"></div>
-                    </div>
-                </div>
-                {% endif %}
-            </div>
-            
-            <div class="charts">
-                <h2>Test Results Visualization</h2>
-                <img src="test_charts.png" alt="Test Result Charts" style="max-width: 100%;">
-            </div>
-            
-            <h2>Test Details</h2>
-            
-            <div class="filter-controls">
-                <button class="filter-btn active" data-status="all">All ({{ total_tests }})</button>
-                <button class="filter-btn" data-status="passed">Passed ({{ passing_tests }})</button>
-                <button class="filter-btn" data-status="failed">Failed ({{ failing_tests }})</button>
-                <button class="filter-btn" data-status="skipped">Skipped ({{ skipped_tests }})</button>
-            </div>
-            
-            <table id="test-results-table">
-                <thead>
+                <img src="test_charts.png" alt="Test Results" style="max-width: 100%;">
+                <h2>Test Details</h2>
+                <table>
                     <tr>
                         <th>Status</th>
                         <th>Test Name</th>
-                        <th>Duration (s)</th>
+                        <th>Duration</th>
                         <th>Details</th>
                     </tr>
-                </thead>
-                <tbody>
                     {% for test in test_results %}
-                    <tr class="test-row" data-status="{{ test.status }}">
-                        <td>
-                            <span class="status-indicator status-{{ test.status }}"></span>
-                            <span class="{{ test.status }}">{{ test.status|capitalize }}</span>
-                        </td>
+                    <tr>
+                        <td class="{{ test.status }}">{{ test.status }}</td>
                         <td>{{ test.name }}</td>
-                        <td>{{ test.duration }}</td>
+                        <td>{{ test.duration }}s</td>
                         <td>
                             {% if test.status == 'failed' and test.message %}
-                            <div class="error-message">{{ test.message }}
-                                {% if test.location %}
-                                <div>at {{ test.location }}</div>
-                                {% endif %}
-                            </div>
+                            <pre>{{ test.message }}</pre>
+                            {% if test.location %}
+                            <p>at {{ test.location }}</p>
+                            {% endif %}
                             {% endif %}
                         </td>
                     </tr>
                     {% endfor %}
-                </tbody>
-            </table>
-            
-            <script>
-                // Simple filtering functionality
-                document.querySelectorAll('.filter-btn').forEach(button => {
-                    button.addEventListener('click', function() {
-                        // Update active button
-                        document.querySelectorAll('.filter-btn').forEach(btn => {
-                            btn.classList.remove('active');
-                        });
-                        this.classList.add('active');
-                        
-                        // Filter table rows
-                        const status = this.getAttribute('data-status');
-                        document.querySelectorAll('.test-row').forEach(row => {
-                            if (status === 'all' || row.getAttribute('data-status') === status) {
-                                row.style.display = '';
-                            } else {
-                                row.style.display = 'none';
-                            }
-                        });
-                    });
-                });
-            </script>
-        </body>
-        </html>
-        '''
+                </table>
+            </body>
+            </html>
+            ''')
         
-        # Create a Jinja2 template
-        template = Template(html_template)
-        
-        # Render the template with our data
+        # Render the template
         html_output = template.render(
             report_name=report_name,
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
