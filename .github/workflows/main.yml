@@ -163,6 +163,25 @@ jobs:
           echo "Report available at: ${{ steps.test-visualizer.outputs.report-path }}"
           echo "::endgroup::"
           
+      - name: Check Test Status
+        run: |
+          # Check if tests actually ran and failed
+          if [ -f "TestResults.xcresult/tests-ran-but-failed" ]; then
+            echo "::error::Tests were executed but failed. See test reports for details."
+            exit 1
+          fi
+          
+          # Check if build failed
+          if [ -f "TestResults.xcresult/build-failed-tests-skipped" ]; then
+            echo "::error::Build failed, so tests were skipped. See build logs for details."
+            exit 1
+          fi
+          
+          # Check for synthetic data generation
+          if [ "${{ steps.test-visualizer.outputs.used-synthetic-data }}" == "true" ]; then
+            echo "::warning::This run used synthetic test data. Real tests may have failed or not run at all."
+          fi
+          
       - name: Archive test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -263,7 +282,30 @@ jobs:
           echo "### Testing Status" >> $GITHUB_STEP_SUMMARY
           for os in "macos-13" "macos-14"; do
             if [ -d "test-results-$os" ]; then
-              echo "✅ Tests on $os completed" >> $GITHUB_STEP_SUMMARY
+              # Check for test failure markers
+              if [ -f "test-results-$os/TestResults.xcresult/tests-ran-but-failed" ]; then
+                echo "❌ Tests on $os failed - Check test report for details" >> $GITHUB_STEP_SUMMARY
+              elif [ -f "test-results-$os/TestResults.xcresult/build-failed-tests-skipped" ]; then
+                echo "❌ Build on $os failed - Tests were skipped" >> $GITHUB_STEP_SUMMARY
+              else
+                # Check if test report exists
+                if [ -f "test-results-$os/test-reports/test-report.html" ]; then
+                  echo "✅ Tests on $os completed" >> $GITHUB_STEP_SUMMARY
+                  
+                  # Extract success rate if available
+                  if grep -q "Success Rate:" "test-results-$os/test-reports/test-report.md" 2>/dev/null; then
+                    SUCCESS_RATE=$(grep "Success Rate:" "test-results-$os/test-reports/test-report.md" | sed 's/.*: //')
+                    echo "   - Success Rate: $SUCCESS_RATE" >> $GITHUB_STEP_SUMMARY
+                  fi
+                  
+                  # Check if synthetic data was used
+                  if grep -q "synthetic test data" "test-results-$os/test-reports/test-report.md" 2>/dev/null; then
+                    echo "   - ⚠️ Used synthetic data - real tests may have failed" >> $GITHUB_STEP_SUMMARY
+                  fi
+                else
+                  echo "⚠️ Tests on $os may have issues - Test report not found" >> $GITHUB_STEP_SUMMARY
+                fi
+              fi
             else
               echo "❌ Tests on $os failed or did not complete" >> $GITHUB_STEP_SUMMARY
             fi
