@@ -1,0 +1,187 @@
+name: Build Time Analyzer
+
+on:
+  # Run on schedule to avoid slowing down regular CI
+  schedule:
+    - cron: '0 1 * * 1'  # Every Monday at 1 AM
+  # Also allow manual runs
+  workflow_dispatch:
+  # Run on PRs that modify the build system
+  pull_request:
+    paths:
+      - '**/*.xcodeproj/**'
+      - '**/*.xcconfig'
+      - '.github/workflows/build-time-analyzer.yml'
+
+jobs:
+  analyze-build-time:
+    name: Analyze Build Times
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Swift environment
+        uses: ./.github/actions/optimized-swift-setup
+        with:
+          cache-name: 'build-time-analyzer'
+          
+      - name: Install build time analyzer tools
+        run: |
+          echo "Installing build time analysis tools..."
+          # Install xcprofiler for analyzing build times
+          gem install xcprofiler
+          
+      - name: Measure detailed build times
+        run: |
+          echo "Measuring detailed Swift build times..."
+          mkdir -p build-reports
+          
+          # Clean any existing build to ensure accurate timing
+          xcodebuild clean \
+            -project burstphoto.xcodeproj \
+            -scheme gui \
+            -destination "platform=macOS"
+          
+          # Run build with timing information
+          START_TIME=$(date +%s)
+          
+          # Use a log formatter that produces build timing information
+          xcodebuild build \
+            -project burstphoto.xcodeproj \
+            -scheme gui \
+            -destination "platform=macOS" \
+            OTHER_SWIFT_FLAGS="-Xfrontend -debug-time-function-bodies -Xfrontend -debug-time-compilation" \
+            | tee build-time.log | xcprofiler --output build-reports/build-times.txt
+            
+          END_TIME=$(date +%s)
+          TOTAL_TIME=$((END_TIME - START_TIME))
+          
+          echo "Total build time: $TOTAL_TIME seconds"
+          echo "TOTAL_BUILD_TIME=$TOTAL_TIME" >> $GITHUB_ENV
+          
+          # Check if build-times.txt was generated successfully
+          if [ ! -s build-reports/build-times.txt ]; then
+            # As a fallback, extract timing information from the log
+            echo "Extracting build times from raw logs..."
+            grep -E "[0-9]+\.[0-9]+ms" build-time.log | sort -nr > build-reports/build-times.txt
+          fi
+          
+      - name: Generate optimization report
+        run: |
+          echo "Generating build time optimization report..."
+          
+          # Create the optimization report
+          cat > build-reports/optimization-report.md << EOF
+          # Build Time Optimization Report
+          
+          Generated on $(date)
+          
+          Total build time: **$TOTAL_BUILD_TIME seconds**
+          
+          ## Slowest Files to Compile
+          
+          EOF
+          
+          # Extract the slowest files
+          if grep -q "compiled" build-reports/build-times.txt; then
+            # xcprofiler output format
+            head -10 build-reports/build-times.txt >> build-reports/optimization-report.md
+          else
+            # Raw timing format
+            echo "\`\`\`" >> build-reports/optimization-report.md
+            grep -E "[0-9]+\.[0-9]+ms" build-time.log | sort -nr | head -10 >> build-reports/optimization-report.md
+            echo "\`\`\`" >> build-reports/optimization-report.md
+          fi
+          
+          # Extract the slowest individual functions
+          echo "" >> build-reports/optimization-report.md
+          echo "## Slowest Individual Functions" >> build-reports/optimization-report.md
+          echo "" >> build-reports/optimization-report.md
+          echo "\`\`\`" >> build-reports/optimization-report.md
+          grep -E "[0-9]+\.[0-9]+ms.*\[.*\]" build-time.log | grep -v "scope entry\|scope exit" | sort -nr | head -20 >> build-reports/optimization-report.md
+          echo "\`\`\`" >> build-reports/optimization-report.md
+          
+          # Add optimization recommendations
+          cat >> build-reports/optimization-report.md << 'EOF'
+          
+          ## Optimization Recommendations
+          
+          Based on common Swift build time issues, here are some recommendations:
+          
+          ### For Slow Files:
+          
+          1. **Break Up Large Files**: Files over 1000 lines often compile slowly.
+          2. **Reduce Type Complexity**: Deeply nested generic types are expensive.
+          3. **Review Type Inference**: Add explicit types to complex expressions.
+          4. **Limit Protocol Conformances**: Don't add unnecessary protocol conformances.
+          
+          ### For Slow Functions:
+          
+          1. **Simplify Complex Generic Functions**: These are often compilation bottlenecks.
+          2. **Review Closures**: Closures with complex type inference can be slow.
+          3. **Check for Expensive Type Checking**: Long expressions with implied types.
+          4. **Moderate Use of Property Wrappers**: They can generate complex code.
+          
+          ### General Tips:
+          
+          1. **Use Explicit Types**: `let x: [String] = []` is faster than `let x = [String]()`
+          2. **Limit Overloading**: Excessive function overloading slows the compiler.
+          3. **Be Cautious with Complex DSLs**: SwiftUI DSLs can be slow to compile.
+          4. **Use @inlinable Sparingly**: Only for critical performance code.
+          EOF
+          
+          # Output to GitHub step summary
+          cat build-reports/optimization-report.md >> $GITHUB_STEP_SUMMARY
+          
+      - name: Upload build time report
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-time-report
+          path: build-reports/
+          retention-days: 30
+          
+      - name: Comment on PR with optimization suggestions
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            
+            try {
+              const reportContent = fs.readFileSync('build-reports/optimization-report.md', 'utf8');
+              
+              // Extract only the most important parts to avoid overly long comments
+              const buildTime = reportContent.match(/Total build time: \*\*(\d+) seconds\*\*/)[1];
+              
+              let commentBody = `## Build Time Analysis
+              
+              This PR affects the build system. Here's a performance analysis:
+              
+              - Total build time: **${buildTime} seconds**
+              
+              `;
+              
+              // Add the top 5 slowest files
+              const slowestFilesSection = reportContent.split('## Slowest Files to Compile')[1].split('##')[0];
+              commentBody += `### Slowest Files to Compile\n\n${slowestFilesSection.trim().split('\n').slice(0, 5).join('\n')}\n\n`;
+              
+              // Add optimization tips
+              commentBody += `### Key Optimization Tips\n\n`;
+              commentBody += `1. Break up large files (>1000 lines)\n`;
+              commentBody += `2. Add explicit types to complex expressions\n`;
+              commentBody += `3. Simplify complex generic functions\n`;
+              commentBody += `4. Reduce unnecessary protocol conformances\n\n`;
+              
+              commentBody += `[Full Report](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`;
+              
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: commentBody
+              });
+            } catch (error) {
+              console.error('Error adding PR comment:', error);
+            } 
