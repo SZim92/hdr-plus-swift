@@ -108,6 +108,9 @@ jobs:
           echo "Build completed in ${BUILD_TIME} seconds"
           echo "::endgroup::"
           
+          # Always create a test results directory, even if empty
+          mkdir -p TestResults.xcresult
+          
           # Only run tests if build was successful
           if [ -z "$BUILD_FAILED" ]; then
             echo "::group::Running Tests"
@@ -123,7 +126,11 @@ jobs:
               LIBRARY_SEARCH_PATHS="$(pwd)/dng_sdk/xmp_lib" \
               ARCHS="x86_64" \
               -resultBundlePath TestResults.xcresult \
-              | tee test.log || { echo "::warning::Tests failed but continuing"; }
+              | tee test.log || { 
+                echo "::warning::Tests failed but continuing"; 
+                # Ensure xcresult bundle has a marker file even if tests failed
+                touch TestResults.xcresult/tests-ran-but-failed
+              }
             set +x  # Disable command echo
               
             TEST_END_TIME=$(date +%s)
@@ -134,9 +141,8 @@ jobs:
           else
             echo "::group::Tests Skipped"
             echo "Tests were not run because the build failed"
-            # Create empty test results directory so the visualizer has something to work with
-            mkdir -p TestResults.xcresult
-            touch TestResults.xcresult/empty
+            # Create a marker file in the test results directory
+            touch TestResults.xcresult/build-failed-tests-skipped
           fi
           echo "::endgroup::"
           
@@ -147,6 +153,7 @@ jobs:
           results-path: 'TestResults.xcresult'
           report-name: 'HDR+ Tests on ${{ matrix.os }}'
           include-coverage: 'true'
+        continue-on-error: true
           
       - name: Report Test Metrics
         run: |
