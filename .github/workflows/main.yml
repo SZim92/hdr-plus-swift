@@ -75,10 +75,16 @@ jobs:
           echo "::group::Building HDR+ Project"
           START_TIME=$(date +%s)
           
+          # Print environment details
+          echo "Current directory: $(pwd)"
+          echo "Available DNG libraries:"
+          ls -la dng_sdk/xmp_lib/
+          
           # Ensure correct library paths
           mkdir -p ~/Library/Developer/Xcode/DerivedData/burstphoto-*/Build/Products/Debug
           
-          # Build the project with correct library paths
+          # Build the project with correct library paths and diagnostics
+          set -x  # Enable command echo for debugging
           xcodebuild clean build-for-testing \
             -project burstphoto.xcodeproj \
             -scheme gui \
@@ -87,7 +93,14 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             OTHER_LDFLAGS="-L$(pwd)/dng_sdk/xmp_lib" \
             LIBRARY_SEARCH_PATHS="$(pwd)/dng_sdk/xmp_lib" \
-            VALID_ARCHS="x86_64"
+            VALID_ARCHS="x86_64" \
+            ARCHS="x86_64" \
+            ONLY_ACTIVE_ARCH=NO \
+            GCC_OPTIMIZATION_LEVEL=0 \
+            DEBUG_INFORMATION_FORMAT=dwarf \
+            SWIFT_OPTIMIZATION_LEVEL="-Onone" \
+            | tee build.log || { echo "::error::Build failed"; cat build.log; exit 1; }
+          set +x  # Disable command echo
             
           BUILD_END_TIME=$(date +%s)
           BUILD_TIME=$((BUILD_END_TIME - START_TIME))
@@ -96,6 +109,7 @@ jobs:
           
           echo "::group::Running Tests"
           # Run tests with correct library paths
+          set -x  # Enable command echo for debugging
           xcodebuild test-without-building \
             -project burstphoto.xcodeproj \
             -scheme gui \
@@ -104,7 +118,10 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             OTHER_LDFLAGS="-L$(pwd)/dng_sdk/xmp_lib" \
             LIBRARY_SEARCH_PATHS="$(pwd)/dng_sdk/xmp_lib" \
-            -resultBundlePath TestResults.xcresult
+            ARCHS="x86_64" \
+            -resultBundlePath TestResults.xcresult \
+            | tee test.log || { echo "::error::Tests failed"; cat test.log; exit 1; }
+          set +x  # Disable command echo
             
           TEST_END_TIME=$(date +%s)
           TEST_TIME=$((TEST_END_TIME - BUILD_END_TIME))
@@ -165,6 +182,12 @@ jobs:
       - name: Build for Release
         run: |
           echo "Building for release..."
+          # Print environment details
+          echo "Current directory: $(pwd)"
+          echo "Available DNG libraries:"
+          ls -la dng_sdk/xmp_lib/
+          
+          set -x  # Enable command echo for debugging
           xcodebuild build \
             -project burstphoto.xcodeproj \
             -scheme gui \
@@ -175,7 +198,10 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             OTHER_LDFLAGS="-L$(pwd)/dng_sdk/xmp_lib" \
             LIBRARY_SEARCH_PATHS="$(pwd)/dng_sdk/xmp_lib" \
-            VALID_ARCHS="x86_64"
+            VALID_ARCHS="x86_64" \
+            ARCHS="x86_64" \
+            | tee release_build.log || { echo "::error::Release build failed"; cat release_build.log; exit 1; }
+          set +x  # Disable command echo
             
       - name: Package Application
         run: |
