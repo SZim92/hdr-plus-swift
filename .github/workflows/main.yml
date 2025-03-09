@@ -3,6 +3,11 @@ name: CI
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'burstphoto/**'       # Only run on code changes
+      - '**/*.xcodeproj/**'   # Or Xcode project changes
+      - 'Package.swift'       # Or package dependency changes
+      - '.github/workflows/main.yml' # Or changes to this workflow
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -60,12 +65,15 @@ jobs:
         uses: ./.github/actions/optimized-swift-setup
         with:
           cache-name: 'test-${{ matrix.os }}'
+          disable-code-signing: 'true'
+          use-retry: 'true'
           
       - name: Report Setup Metrics
         run: |
           echo "::group::Environment Info"
           echo "Swift setup completed in ${{ steps.swift-setup.outputs.setup-time }} seconds"
           echo "Using Swift version: ${{ steps.swift-setup.outputs.swift-version }}"
+          echo "Using Xcode version: ${{ steps.swift-setup.outputs.xcode-version }}"
           echo "Cache hit: ${{ steps.swift-setup.outputs.cache-hit }}"
           echo "::endgroup::"
           

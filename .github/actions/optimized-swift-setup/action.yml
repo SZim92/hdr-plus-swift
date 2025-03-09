@@ -1,9 +1,9 @@
 name: 'Optimized Swift Setup'
-description: 'Sets up Swift environment with optimized caching and timing measurements'
+description: 'Sets up Swift environment with optimized caching, error handling, and performance metrics'
 
 inputs:
   cache-name:
-    description: 'Unique name for the cache'
+    description: 'Unique name for the cache (e.g., workflow name, job name)'
     required: false
     default: 'default'
   swift-version:
@@ -18,6 +18,18 @@ inputs:
     description: 'Whether to disable code signing'
     required: false
     default: 'true'
+  xcode-path:
+    description: 'Path to Xcode.app if custom location is needed'
+    required: false
+    default: ''
+  use-retry:
+    description: 'Whether to retry failed installations'
+    required: false
+    default: 'true'
+  configure-simulator:
+    description: 'Whether to configure iOS simulator'
+    required: false
+    default: 'false'
 
 outputs:
   setup-time:
@@ -29,6 +41,9 @@ outputs:
   cache-hit:
     description: 'Whether there was a cache hit'
     value: ${{ steps.cache.outputs.cache-hit }}
+  xcode-version:
+    description: 'Xcode version that was used'
+    value: ${{ steps.swift-info.outputs.xcode_version }}
 
 runs:
   using: 'composite'
@@ -49,7 +64,8 @@ runs:
           ~/Library/Caches/Homebrew
           ~/Library/Developer/Xcode/DerivedData
           ~/.swiftpm
-        key: ${{ runner.os }}-swift-${{ inputs.cache-name }}-${{ hashFiles('**/Package.resolved') }}
+          ~/Library/Developer/Xcode/UserData
+        key: ${{ runner.os }}-swift-${{ inputs.cache-name }}-${{ hashFiles('**/Package.resolved', '**/*.xcodeproj/project.pbxproj') }}
         restore-keys: |
           ${{ runner.os }}-swift-${{ inputs.cache-name }}-
           ${{ runner.os }}-swift-
@@ -59,8 +75,68 @@ runs:
       shell: bash
       run: |
         echo "Using specific Swift version: ${{ inputs.swift-version }}"
-        # Add version-specific setup if needed
-        # This is a placeholder for swiftenv or similar tools
+        # Check if we need to install a specific Swift version
+        if ! swift --version | grep -q "${{ inputs.swift-version }}"; then
+          echo "Swift version ${{ inputs.swift-version }} not found, attempting to install..."
+          if [[ "${{ inputs.use-retry }}" == "true" ]]; then
+            MAX_RETRIES=3
+            RETRY_COUNT=0
+            SUCCESS=false
+            
+            while [[ $RETRY_COUNT -lt $MAX_RETRIES && $SUCCESS == false ]]; do
+              RETRY_COUNT=$((RETRY_COUNT+1))
+              echo "Installation attempt $RETRY_COUNT of $MAX_RETRIES"
+              
+              # Platform-specific installation
+              if [[ "$(uname)" == "Darwin" ]]; then
+                # macOS - use Swift toolchain
+                brew install swift@${{ inputs.swift-version }} 2>/dev/null && SUCCESS=true
+              else
+                # Linux - use swiftenv
+                git clone https://github.com/kylef/swiftenv.git ~/.swiftenv
+                export SWIFTENV_ROOT="$HOME/.swiftenv"
+                export PATH="$SWIFTENV_ROOT/bin:$PATH"
+                eval "$(swiftenv init -)"
+                swiftenv install ${{ inputs.swift-version }} && SUCCESS=true
+              fi
+              
+              if [[ $SUCCESS == false && $RETRY_COUNT -lt $MAX_RETRIES ]]; then
+                echo "Installation failed, waiting 5 seconds before retry..."
+                sleep 5
+              fi
+            done
+            
+            if [[ $SUCCESS == false ]]; then
+              echo "::warning::Failed to install Swift ${{ inputs.swift-version }} after $MAX_RETRIES attempts"
+            else
+              echo "Successfully installed Swift ${{ inputs.swift-version }} on attempt $RETRY_COUNT"
+            fi
+          else
+            # Without retry logic
+            if [[ "$(uname)" == "Darwin" ]]; then
+              brew install swift@${{ inputs.swift-version }} 2>/dev/null || echo "::warning::Failed to install Swift ${{ inputs.swift-version }}"
+            else
+              git clone https://github.com/kylef/swiftenv.git ~/.swiftenv
+              export SWIFTENV_ROOT="$HOME/.swiftenv"
+              export PATH="$SWIFTENV_ROOT/bin:$PATH"
+              eval "$(swiftenv init -)"
+              swiftenv install ${{ inputs.swift-version }} || echo "::warning::Failed to install Swift ${{ inputs.swift-version }}"
+            fi
+          fi
+        fi
+    
+    - name: Set custom Xcode path
+      if: inputs.xcode-path != ''
+      shell: bash
+      run: |
+        echo "Setting custom Xcode path: ${{ inputs.xcode-path }}"
+        if [[ -d "${{ inputs.xcode-path }}" ]]; then
+          sudo xcode-select -s "${{ inputs.xcode-path }}"
+          echo "DEVELOPER_DIR=${{ inputs.xcode-path }}" >> $GITHUB_ENV
+        else
+          echo "::error::Custom Xcode path not found: ${{ inputs.xcode-path }}"
+          exit 1
+        fi
     
     - name: Get Swift info
       id: swift-info
@@ -69,6 +145,39 @@ runs:
         SWIFT_VERSION=$(swift --version | head -n 1 | sed 's/.*Swift version \([0-9.]*\).*/\1/')
         echo "swift_version=$SWIFT_VERSION" >> $GITHUB_OUTPUT
         echo "Using Swift version: $SWIFT_VERSION"
+        
+        # Get Xcode version if on macOS
+        if [[ "$(uname)" == "Darwin" ]]; then
+          XCODE_VERSION=$(xcodebuild -version | head -n 1 | sed 's/Xcode \(.*\)/\1/')
+          echo "xcode_version=$XCODE_VERSION" >> $GITHUB_OUTPUT
+          echo "Using Xcode version: $XCODE_VERSION"
+        else
+          echo "xcode_version=N/A" >> $GITHUB_OUTPUT
+        fi
+        
+        # Print more debugging info
+        echo "::group::Swift Environment Details"
+        swift --version
+        xcrun --find swift 2>/dev/null || echo "xcrun not available"
+        echo "::endgroup::"
+    
+    - name: Configure iOS Simulator
+      if: inputs.configure-simulator == 'true' && runner.os == 'macOS'
+      shell: bash
+      run: |
+        echo "Configuring iOS Simulator..."
+        # List available devices
+        xcrun simctl list devices
+        
+        # Boot a simulator if needed for testing
+        SIMULATOR_UDID=$(xcrun simctl list devices | grep "iPhone" | grep "Booted" | head -1 | awk -F'[()]' '{print $2}')
+        if [[ -z "$SIMULATOR_UDID" ]]; then
+          echo "No booted simulator found, booting one..."
+          SIMULATOR_UDID=$(xcrun simctl list devices | grep "iPhone" | head -1 | awk -F'[()]' '{print $2}')
+          xcrun simctl boot "$SIMULATOR_UDID" || echo "::warning::Failed to boot simulator"
+        else
+          echo "Found booted simulator: $SIMULATOR_UDID"
+        fi
     
     - name: Install SwiftLint
       if: inputs.install-swiftlint == 'true'
@@ -77,9 +186,34 @@ runs:
         if ! command -v swiftlint &> /dev/null; then
           echo "Installing SwiftLint..."
           # Try with arm64 architecture first, then fall back to default
-          arch -arm64 brew install swiftlint 2>/dev/null || brew install swiftlint || echo "Could not install SwiftLint, continuing without it"
+          if [[ "${{ inputs.use-retry }}" == "true" ]]; then
+            MAX_RETRIES=3
+            RETRY_COUNT=0
+            SUCCESS=false
+            
+            while [[ $RETRY_COUNT -lt $MAX_RETRIES && $SUCCESS == false ]]; do
+              RETRY_COUNT=$((RETRY_COUNT+1))
+              echo "SwiftLint installation attempt $RETRY_COUNT of $MAX_RETRIES"
+              
+              arch -arm64 brew install swiftlint 2>/dev/null && SUCCESS=true || brew install swiftlint && SUCCESS=true
+              
+              if [[ $SUCCESS == false && $RETRY_COUNT -lt $MAX_RETRIES ]]; then
+                echo "Installation failed, waiting 5 seconds before retry..."
+                sleep 5
+              fi
+            done
+            
+            if [[ $SUCCESS == false ]]; then
+              echo "::warning::Failed to install SwiftLint after $MAX_RETRIES attempts"
+            else
+              echo "Successfully installed SwiftLint on attempt $RETRY_COUNT"
+            fi
+          else
+            # Without retry logic
+            arch -arm64 brew install swiftlint 2>/dev/null || brew install swiftlint || echo "::warning::Could not install SwiftLint, continuing without it"
+          fi
         else
-          echo "SwiftLint already installed"
+          echo "SwiftLint already installed: $(swiftlint version)"
         fi
     
     - name: Disable code signing
@@ -87,13 +221,17 @@ runs:
       shell: bash
       run: |
         echo "Disabling code signing..."
-        defaults write com.apple.dt.Xcode IDESkipCodeSigningVerification -bool YES
-        
-        # Set environment variables for xcodebuild
-        echo "EXPANDED_CODE_SIGN_IDENTITY=-" >> $GITHUB_ENV
-        echo "EXPANDED_CODE_SIGN_IDENTITY_NAME=-" >> $GITHUB_ENV
-        echo "CODE_SIGNING_REQUIRED=NO" >> $GITHUB_ENV
-        echo "CODE_SIGNING_ALLOWED=NO" >> $GITHUB_ENV
+        if [[ "$(uname)" == "Darwin" ]]; then
+          defaults write com.apple.dt.Xcode IDESkipCodeSigningVerification -bool YES
+          
+          # Set environment variables for xcodebuild
+          echo "EXPANDED_CODE_SIGN_IDENTITY=-" >> $GITHUB_ENV
+          echo "EXPANDED_CODE_SIGN_IDENTITY_NAME=-" >> $GITHUB_ENV
+          echo "CODE_SIGNING_REQUIRED=NO" >> $GITHUB_ENV
+          echo "CODE_SIGNING_ALLOWED=NO" >> $GITHUB_ENV
+        else
+          echo "Code signing is only relevant on macOS, skipping on this platform"
+        fi
     
     - name: Capture timing
       id: timing
