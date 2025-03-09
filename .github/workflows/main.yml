@@ -75,13 +75,19 @@ jobs:
           echo "::group::Building HDR+ Project"
           START_TIME=$(date +%s)
           
-          # Build the project
+          # Ensure correct library paths
+          mkdir -p ~/Library/Developer/Xcode/DerivedData/burstphoto-*/Build/Products/Debug
+          
+          # Build the project with correct library paths
           xcodebuild clean build-for-testing \
             -project burstphoto.xcodeproj \
             -scheme gui \
             -destination "platform=macOS" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+            CODE_SIGN_IDENTITY="" \
+            OTHER_LDFLAGS="-L$(pwd)/dng_sdk/xmp_lib" \
+            LIBRARY_SEARCH_PATHS="$(pwd)/dng_sdk/xmp_lib" \
+            VALID_ARCHS="x86_64"
             
           BUILD_END_TIME=$(date +%s)
           BUILD_TIME=$((BUILD_END_TIME - START_TIME))
@@ -89,13 +95,15 @@ jobs:
           echo "::endgroup::"
           
           echo "::group::Running Tests"
-          # Run tests
+          # Run tests with correct library paths
           xcodebuild test-without-building \
             -project burstphoto.xcodeproj \
             -scheme gui \
             -destination "platform=macOS" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            OTHER_LDFLAGS="-L$(pwd)/dng_sdk/xmp_lib" \
+            LIBRARY_SEARCH_PATHS="$(pwd)/dng_sdk/xmp_lib" \
             -resultBundlePath TestResults.xcresult
             
           TEST_END_TIME=$(date +%s)
@@ -162,7 +170,12 @@ jobs:
             -scheme gui \
             -configuration Release \
             -destination "platform=macOS" \
-            ONLY_ACTIVE_ARCH=NO
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            OTHER_LDFLAGS="-L$(pwd)/dng_sdk/xmp_lib" \
+            LIBRARY_SEARCH_PATHS="$(pwd)/dng_sdk/xmp_lib" \
+            VALID_ARCHS="x86_64"
             
       - name: Package Application
         run: |
