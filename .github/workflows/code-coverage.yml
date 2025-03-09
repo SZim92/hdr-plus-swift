@@ -233,6 +233,14 @@ jobs:
     name: Publish Coverage Report
     needs: [config, generate-coverage]
     runs-on: ubuntu-latest
+    # Add required permissions for GitHub Pages
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: 'github-pages'
+      url: ${{ steps.deployment.outputs.page_url }}
     if: success() && (github.ref == format('refs/heads/{0}', needs.config.outputs.main-branch) || github.event.inputs.baseline == 'true')
     
     steps:

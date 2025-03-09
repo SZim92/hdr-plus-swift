@@ -39,9 +39,33 @@ runs:
         if [[ "${{ inputs.results-path }}" == *.xcresult ]]; then
           echo "results_type=xcresult" >> $GITHUB_OUTPUT
           echo "Processing Xcode test results bundle: ${{ inputs.results-path }}"
+          
+          # Check if the xcresult bundle actually exists
+          if [ ! -d "${{ inputs.results-path }}" ]; then
+            echo "::warning::xcresult bundle not found at ${{ inputs.results-path }}"
+            echo "Creating a placeholder report since test results are missing"
+            mkdir -p test-reports
+            echo "<h1>Test Results Not Available</h1><p>The test run did not complete successfully.</p>" > test-reports/${{ inputs.report-name }}.html
+            echo "report_path=test-reports/${{ inputs.report-name }}.html" >> $GITHUB_OUTPUT
+            echo "success_rate=0" >> $GITHUB_OUTPUT
+            echo "total_tests=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
         else
           echo "results_type=directory" >> $GITHUB_OUTPUT
           echo "Processing test results directory: ${{ inputs.results-path }}"
+          
+          # Check if the directory exists
+          if [ ! -d "${{ inputs.results-path }}" ]; then
+            echo "::warning::Test results directory not found at ${{ inputs.results-path }}"
+            echo "Creating a placeholder report since test results are missing"
+            mkdir -p test-reports
+            echo "<h1>Test Results Not Available</h1><p>The test run did not complete successfully.</p>" > test-reports/${{ inputs.report-name }}.html
+            echo "report_path=test-reports/${{ inputs.report-name }}.html" >> $GITHUB_OUTPUT
+            echo "success_rate=0" >> $GITHUB_OUTPUT
+            echo "total_tests=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
         fi
     
     - name: Setup Python
