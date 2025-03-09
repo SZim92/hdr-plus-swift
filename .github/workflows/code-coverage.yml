@@ -89,14 +89,16 @@ jobs:
       - name: Generate Xcode coverage
         if: steps.project-type.outputs.type == 'xcode'
         run: |
-          project_name=$(echo "${{ needs.config.outputs.project }}" | cut -d. -f1)
+          # Set the correct project name and scheme
+          project_name="burstphoto"
+          scheme_name="gui"
           
           # Create Slather configuration if it doesn't exist
           if [ ! -f ".slather.yml" ]; then
             cat > .slather.yml << EOF
             coverage_service: html
-            xcodeproj: ${{ needs.config.outputs.project }}
-            scheme: ${project_name}
+            xcodeproj: ${project_name}.xcodeproj
+            scheme: ${scheme_name}
             output_directory: coverage
             ignore:
               - Tests/**/*
@@ -105,8 +107,8 @@ jobs:
           fi
           
           # Run tests with coverage
-          xcodebuild -project "${{ needs.config.outputs.project }}" \
-            -scheme "${project_name}" \
+          xcodebuild -project "${project_name}.xcodeproj" \
+            -scheme "${scheme_name}" \
             -derivedDataPath Build/ \
             -enableCodeCoverage YES \
             clean test | xcpretty
@@ -243,7 +245,7 @@ jobs:
         uses: actions/configure-pages@v4
       
       - name: Upload coverage report to GitHub Pages
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v2
         with:
           path: coverage/
       

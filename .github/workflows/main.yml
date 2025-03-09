@@ -77,7 +77,8 @@ jobs:
           
           # Build the project
           xcodebuild clean build-for-testing \
-            -scheme HDRPlus \
+            -project burstphoto.xcodeproj \
+            -scheme gui \
             -destination "platform=macOS" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
@@ -90,7 +91,8 @@ jobs:
           echo "::group::Running Tests"
           # Run tests
           xcodebuild test-without-building \
-            -scheme HDRPlus \
+            -project burstphoto.xcodeproj \
+            -scheme gui \
             -destination "platform=macOS" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -156,7 +158,8 @@ jobs:
         run: |
           echo "Building for release..."
           xcodebuild build \
-            -scheme HDRPlus \
+            -project burstphoto.xcodeproj \
+            -scheme gui \
             -configuration Release \
             -destination "platform=macOS" \
             ONLY_ACTIVE_ARCH=NO

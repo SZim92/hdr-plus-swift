@@ -12,10 +12,13 @@ $totalUpdated = 0
 $patterns = @(
     'actions/upload-artifact@v3'
     'actions/download-artifact@v3'
+    'actions/upload-pages-artifact@v3'
     'uses:[ ]*actions/upload-artifact@v3'
     'uses:[ ]*actions/download-artifact@v3'
+    'uses:[ ]*actions/upload-pages-artifact@v3'
     'actions\/upload-artifact@v3'
     'actions\/download-artifact@v3'
+    'actions\/upload-pages-artifact@v3'
 )
 
 foreach ($file in $yamlFiles) {
@@ -34,6 +37,8 @@ foreach ($file in $yamlFiles) {
     # Replace deprecated actions with v4
     $updatedContent = $content -replace 'actions/upload-artifact@v3', 'actions/upload-artifact@v4'
     $updatedContent = $updatedContent -replace 'actions/download-artifact@v3', 'actions/download-artifact@v4'
+    # IMPORTANT: Upload-pages-artifact should be updated to v2 (not v4)
+    $updatedContent = $updatedContent -replace 'actions/upload-pages-artifact@v3', 'actions/upload-pages-artifact@v2'
     
     # If content was modified, write it back to the file
     if ($originalContent -ne $updatedContent) {
