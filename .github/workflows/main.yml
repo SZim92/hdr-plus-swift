@@ -26,6 +26,7 @@ jobs:
       fail-fast: false  # Continue with other matrix jobs if one fails
     
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20  # Add timeout to prevent hung jobs
     outputs:
       gui_success: ${{ steps.combined_results.outputs.gui_success }}
       cli_success: ${{ steps.combined_results.outputs.cli_success }}

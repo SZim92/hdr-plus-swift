@@ -1,0 +1,55 @@
+name: 'Install Homebrew Package Safely'
+description: 'Installs a Homebrew package with retries and architecture detection'
+
+inputs:
+  package-name:
+    description: 'Name of the Homebrew package to install'
+    required: true
+  max-attempts:
+    description: 'Maximum number of installation attempts'
+    required: false
+    default: '3'
+  retry-delay:
+    description: 'Delay in seconds between retries'
+    required: false
+    default: '5'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install package
+      shell: bash
+      run: |
+        echo "Installing ${{ inputs.package-name }} with retry logic"
+        
+        # Check if already installed
+        if command -v ${{ inputs.package-name }} &> /dev/null; then
+          echo "${{ inputs.package-name }} is already installed"
+          exit 0
+        fi
+        
+        # Retry installation logic
+        max_attempts=${{ inputs.max-attempts }}
+        attempt=1
+        retry_delay=${{ inputs.retry-delay }}
+        
+        while [ $attempt -le $max_attempts ]; do
+          echo "Installation attempt $attempt of $max_attempts"
+          
+          # Try with arm64 architecture first, then fall back to default
+          if arch -arm64 brew install ${{ inputs.package-name }} 2>/dev/null || brew install ${{ inputs.package-name }}; then
+            echo "${{ inputs.package-name }} installed successfully"
+            exit 0
+          else
+            echo "Installation failed"
+            if [ $attempt -lt $max_attempts ]; then
+              echo "Retrying in $retry_delay seconds..."
+              sleep $retry_delay
+            else
+              echo "Failed to install ${{ inputs.package-name }} after $max_attempts attempts"
+              # Don't fail the workflow, just warn
+              echo "::warning::Failed to install ${{ inputs.package-name }} after $max_attempts attempts"
+            fi
+            attempt=$((attempt+1))
+          fi
+        done 

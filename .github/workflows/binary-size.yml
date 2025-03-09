@@ -77,7 +77,7 @@ jobs:
           echo "    " >> size_estimate.swift
           echo "    // Add entries based on file count to simulate complexity" >> size_estimate.swift
           echo "    for i in 0..<$SWIFT_COUNT_NO_SPACES {" >> size_estimate.swift
-          echo "        data[\"key_\\(i)\"] = \"This is simulating source file \\(i) impact on binary size\"" >> size_estimate.swift
+          echo "        data[\"key_\\\\(i)\"] = \"This is simulating source file \\\\(i) impact on binary size\"" >> size_estimate.swift
           echo "    }" >> size_estimate.swift
           echo "    " >> size_estimate.swift
           echo "    // Create some structures to simulate app models" >> size_estimate.swift
@@ -90,17 +90,37 @@ jobs:
           echo "    // Create array of models" >> size_estimate.swift
           echo "    var models: [Model] = []" >> size_estimate.swift
           echo "    for i in 0..<min($SWIFT_COUNT_NO_SPACES, 100) {" >> size_estimate.swift
-          echo "        models.append(Model(id: i, name: \"Item \\(i)\", value: Double(i) * 1.5))" >> size_estimate.swift
+          echo "        models.append(Model(id: i, name: \"Item \\\\(i)\", value: Double(i) * 1.5))" >> size_estimate.swift
           echo "    }" >> size_estimate.swift
           echo "    " >> size_estimate.swift
           echo "    // Print something to avoid optimization removing everything" >> size_estimate.swift
-          echo "    print(\"Generated model with \\(models.count) items and \\(data.count) dictionary entries\")" >> size_estimate.swift
+          echo "    print(\"Generated model with \\\\(models.count) items and \\\\(data.count) dictionary entries\")" >> size_estimate.swift
           echo "}" >> size_estimate.swift
           echo "" >> size_estimate.swift
           echo "main()" >> size_estimate.swift
           
           # Compile the simple file
-          swiftc -O size_estimate.swift -o "$TEMP_BUILD_DIR/DummyApp.app/Contents/MacOS/DummyApp"
+          echo "Compiling size estimate file..."
+          # Retry compilation up to 3 times
+          max_attempts=3
+          attempt=1
+          while [ $attempt -le $max_attempts ]; do
+            echo "Compilation attempt $attempt of $max_attempts"
+            if swiftc -O size_estimate.swift -o "$TEMP_BUILD_DIR/DummyApp.app/Contents/MacOS/DummyApp"; then
+              echo "Compilation successful"
+              break
+            else
+              echo "Compilation failed"
+              if [ $attempt -lt $max_attempts ]; then
+                echo "Retrying in 3 seconds..."
+                sleep 3
+              else
+                echo "Could not compile after $max_attempts attempts"
+                exit 1
+              fi
+              attempt=$((attempt+1))
+            fi
+          done
           
           # Create basic Info.plist
           echo '<?xml version="1.0" encoding="UTF-8"?>' > "$TEMP_BUILD_DIR/DummyApp.app/Contents/Info.plist"

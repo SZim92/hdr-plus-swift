@@ -26,11 +26,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
+            ~/Library/Caches/SwiftLint
+            ~/Library/Caches/Homebrew
             ~/Library/Developer/Xcode/DerivedData
             ~/.swiftpm
-          key: ${{ runner.os }}-spm-deriveddata-${{ hashFiles('**/Package.resolved') }}
+          key: ${{ runner.os }}-macos-perf-${{ hashFiles('**/Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-deriveddata-
+            ${{ runner.os }}-macos-perf-
+            ${{ runner.os }}-macos-
       
       - name: Run performance benchmarks (simulation)
         id: benchmarks
