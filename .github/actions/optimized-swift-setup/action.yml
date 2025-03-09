@@ -1,0 +1,113 @@
+name: 'Optimized Swift Setup'
+description: 'Sets up Swift environment with optimized caching and timing measurements'
+
+inputs:
+  cache-name:
+    description: 'Unique name for the cache'
+    required: false
+    default: 'default'
+  swift-version:
+    description: 'Swift version to use (leave empty for default)'
+    required: false
+    default: ''
+  install-swiftlint:
+    description: 'Whether to install SwiftLint'
+    required: false
+    default: 'true'
+  disable-code-signing:
+    description: 'Whether to disable code signing'
+    required: false
+    default: 'true'
+
+outputs:
+  setup-time:
+    description: 'Time taken for setup in seconds'
+    value: ${{ steps.timing.outputs.setup_time }}
+  swift-version:
+    description: 'Swift version that was installed'
+    value: ${{ steps.swift-info.outputs.swift_version }}
+  cache-hit:
+    description: 'Whether there was a cache hit'
+    value: ${{ steps.cache.outputs.cache-hit }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Start timing
+      id: timing-start
+      shell: bash
+      run: |
+        echo "start_time=$(date +%s)" >> $GITHUB_OUTPUT
+        echo "Setting up Swift environment..."
+    
+    - name: Setup Swift cache
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/Library/Caches/SwiftLint
+          ~/Library/Caches/Homebrew
+          ~/Library/Developer/Xcode/DerivedData
+          ~/.swiftpm
+        key: ${{ runner.os }}-swift-${{ inputs.cache-name }}-${{ hashFiles('**/Package.resolved') }}
+        restore-keys: |
+          ${{ runner.os }}-swift-${{ inputs.cache-name }}-
+          ${{ runner.os }}-swift-
+    
+    - name: Setup specific Swift version
+      if: inputs.swift-version != ''
+      shell: bash
+      run: |
+        echo "Using specific Swift version: ${{ inputs.swift-version }}"
+        # Add version-specific setup if needed
+        # This is a placeholder for swiftenv or similar tools
+    
+    - name: Get Swift info
+      id: swift-info
+      shell: bash
+      run: |
+        SWIFT_VERSION=$(swift --version | head -n 1 | sed 's/.*Swift version \([0-9.]*\).*/\1/')
+        echo "swift_version=$SWIFT_VERSION" >> $GITHUB_OUTPUT
+        echo "Using Swift version: $SWIFT_VERSION"
+    
+    - name: Install SwiftLint
+      if: inputs.install-swiftlint == 'true'
+      shell: bash
+      run: |
+        if ! command -v swiftlint &> /dev/null; then
+          echo "Installing SwiftLint..."
+          # Try with arm64 architecture first, then fall back to default
+          arch -arm64 brew install swiftlint 2>/dev/null || brew install swiftlint || echo "Could not install SwiftLint, continuing without it"
+        else
+          echo "SwiftLint already installed"
+        fi
+    
+    - name: Disable code signing
+      if: inputs.disable-code-signing == 'true'
+      shell: bash
+      run: |
+        echo "Disabling code signing..."
+        defaults write com.apple.dt.Xcode IDESkipCodeSigningVerification -bool YES
+        
+        # Set environment variables for xcodebuild
+        echo "EXPANDED_CODE_SIGN_IDENTITY=-" >> $GITHUB_ENV
+        echo "EXPANDED_CODE_SIGN_IDENTITY_NAME=-" >> $GITHUB_ENV
+        echo "CODE_SIGNING_REQUIRED=NO" >> $GITHUB_ENV
+        echo "CODE_SIGNING_ALLOWED=NO" >> $GITHUB_ENV
+    
+    - name: Capture timing
+      id: timing
+      shell: bash
+      run: |
+        END_TIME=$(date +%s)
+        START_TIME=${{ steps.timing-start.outputs.start_time }}
+        SETUP_TIME=$((END_TIME - START_TIME))
+        echo "setup_time=$SETUP_TIME" >> $GITHUB_OUTPUT
+        echo "Swift environment setup completed in $SETUP_TIME seconds"
+        
+        # If cache was hit
+        if [[ "${{ steps.cache.outputs.cache-hit }}" == "true" ]]; then
+          echo "Cache hit! Setup was faster."
+        else 
+          echo "Cache miss. First setup may be slower."
+        fi 

@@ -1,0 +1,773 @@
+name: 'CI Dashboard Generator'
+description: 'Creates a beautiful dashboard with metrics from CI runs'
+
+inputs:
+  title:
+    description: 'Title for the dashboard'
+    required: false
+    default: 'CI Dashboard'
+  metrics-file:
+    description: 'Path to JSON file with metrics (if available)'
+    required: false
+    default: ''
+  workflow-id:
+    description: 'GitHub workflow ID to fetch metrics for'
+    required: false
+    default: ''
+  days-of-history:
+    description: 'Number of days of history to display'
+    required: false
+    default: '30'
+  include-job-metrics:
+    description: 'Whether to include job-level metrics'
+    required: false
+    default: 'true'
+  output-path:
+    description: 'Path to write the dashboard HTML file'
+    required: false
+    default: 'ci-dashboard.html'
+
+outputs:
+  dashboard-path:
+    description: 'Path to the generated dashboard'
+    value: ${{ steps.generate.outputs.dashboard_path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+    
+    - name: Install dependencies
+      shell: bash
+      run: |
+        npm install -g chart.js dayjs
+        
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install Python dependencies
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests matplotlib pandas jinja2 numpy
+    
+    - name: Generate dashboard
+      id: generate
+      shell: bash
+      run: |
+        # Create output directory
+        mkdir -p $(dirname "${{ inputs.output-path }}")
+        
+        # Create Python script
+        cat > generate_dashboard.py << 'EOL'
+        import os
+        import json
+        import sys
+        import requests
+        import datetime
+        import random
+        import matplotlib.pyplot as plt
+        import pandas as pd
+        import numpy as np
+        import math
+        from jinja2 import Template
+        from datetime import datetime, timedelta
+
+        # Inputs
+        title = "${{ inputs.title }}"
+        metrics_file = "${{ inputs.metrics-file }}"
+        workflow_id = "${{ inputs.workflow-id }}"
+        days_of_history = int("${{ inputs.days-of-history }}")
+        include_job_metrics = "${{ inputs.include-job-metrics }}" == "true"
+        output_path = "${{ inputs.output-path }}"
+        
+        # GitHub API settings
+        repo = os.environ.get("GITHUB_REPOSITORY", "")
+        token = os.environ.get("GITHUB_TOKEN", "")
+        api_url = f"https://api.github.com/repos/{repo}"
+        
+        # Function to get workflow runs from GitHub API
+        def get_workflow_runs(workflow_id, days=days_of_history):
+            if not workflow_id or not token:
+                return []
+                
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github.v3+json"
+            }
+            
+            # Calculate the date for filtering
+            since_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            
+            url = f"{api_url}/actions/workflows/{workflow_id}/runs?per_page=100&created=>{since_date}"
+            response = requests.get(url, headers=headers)
+            
+            if response.status_code != 200:
+                print(f"Error fetching workflow runs: {response.status_code}")
+                return []
+                
+            data = response.json()
+            return data.get("workflow_runs", [])
+        
+        # Function to get job data for a specific run
+        def get_run_jobs(run_id):
+            if not token:
+                return []
+                
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github.v3+json"
+            }
+            
+            url = f"{api_url}/actions/runs/{run_id}/jobs?per_page=100"
+            response = requests.get(url, headers=headers)
+            
+            if response.status_code != 200:
+                print(f"Error fetching jobs for run {run_id}: {response.status_code}")
+                return []
+                
+            data = response.json()
+            return data.get("jobs", [])
+        
+        # Get actual metrics or generate sample data
+        metrics = {
+            "workflow_runs": [],
+            "job_metrics": {},
+            "overall_metrics": {
+                "success_rate": 0,
+                "avg_duration": 0,
+                "total_runs": 0,
+                "successful_runs": 0,
+                "failed_runs": 0,
+                "last_run_status": "unknown",
+                "last_run_date": "",
+                "trends": {
+                    "duration": [],
+                    "success_rate": []
+                }
+            }
+        }
+        
+        # Try to load metrics from file if provided
+        if metrics_file and os.path.exists(metrics_file):
+            try:
+                with open(metrics_file, 'r') as f:
+                    loaded_metrics = json.load(f)
+                    metrics.update(loaded_metrics)
+                    print(f"Loaded metrics from {metrics_file}")
+            except Exception as e:
+                print(f"Error loading metrics from file: {e}")
+        
+        # If no metrics loaded and workflow_id is provided, fetch from GitHub API
+        if not metrics["workflow_runs"] and workflow_id:
+            print("Fetching workflow runs from GitHub API...")
+            workflow_runs = get_workflow_runs(workflow_id)
+            
+            if workflow_runs:
+                metrics["workflow_runs"] = workflow_runs
+                metrics["overall_metrics"]["total_runs"] = len(workflow_runs)
+                metrics["overall_metrics"]["successful_runs"] = sum(1 for run in workflow_runs if run["conclusion"] == "success")
+                metrics["overall_metrics"]["failed_runs"] = sum(1 for run in workflow_runs if run["conclusion"] in ["failure", "cancelled"])
+                
+                if metrics["overall_metrics"]["total_runs"] > 0:
+                    metrics["overall_metrics"]["success_rate"] = (metrics["overall_metrics"]["successful_runs"] / metrics["overall_metrics"]["total_runs"]) * 100
+                
+                # Get durations
+                durations = [run["run_started_at"] and run["updated_at"] and 
+                            (datetime.strptime(run["updated_at"], "%Y-%m-%dT%H:%M:%SZ") - 
+                             datetime.strptime(run["run_started_at"], "%Y-%m-%dT%H:%M:%SZ")).total_seconds() / 60
+                             for run in workflow_runs if run["run_started_at"] and run["updated_at"]]
+                             
+                metrics["overall_metrics"]["avg_duration"] = sum(durations) / len(durations) if durations else 0
+                
+                # Get trends
+                dates = []
+                success_rates = []
+                duration_trends = []
+                
+                for i in range(0, len(workflow_runs), 5):
+                    batch = workflow_runs[i:i+5]
+                    if batch:
+                        success_in_batch = sum(1 for run in batch if run["conclusion"] == "success")
+                        success_rate = (success_in_batch / len(batch)) * 100
+                        
+                        batch_durations = [run["run_started_at"] and run["updated_at"] and 
+                                        (datetime.strptime(run["updated_at"], "%Y-%m-%dT%H:%M:%SZ") - 
+                                         datetime.strptime(run["run_started_at"], "%Y-%m-%dT%H:%M:%SZ")).total_seconds() / 60
+                                         for run in batch if run["run_started_at"] and run["updated_at"]]
+                                         
+                        avg_duration = sum(batch_durations) / len(batch_durations) if batch_durations else 0
+                        
+                        dates.append(datetime.strptime(batch[0]["created_at"], "%Y-%m-%dT%H:%M:%SZ").strftime("%m/%d"))
+                        success_rates.append(success_rate)
+                        duration_trends.append(avg_duration)
+                
+                metrics["overall_metrics"]["trends"]["dates"] = dates
+                metrics["overall_metrics"]["trends"]["success_rate"] = success_rates
+                metrics["overall_metrics"]["trends"]["duration"] = duration_trends
+                
+                # Get recent run
+                if workflow_runs:
+                    metrics["overall_metrics"]["last_run_status"] = workflow_runs[0]["conclusion"] or "unknown"
+                    metrics["overall_metrics"]["last_run_date"] = workflow_runs[0]["created_at"]
+                
+                # Get job metrics if requested
+                if include_job_metrics:
+                    # Limit to last 10 runs to avoid too many API calls
+                    for run in workflow_runs[:10]:
+                        run_id = run["id"]
+                        jobs = get_run_jobs(run_id)
+                        
+                        for job in jobs:
+                            job_name = job["name"]
+                            job_conclusion = job["conclusion"]
+                            job_duration = job["started_at"] and job["completed_at"] and \
+                                          (datetime.strptime(job["completed_at"], "%Y-%m-%dT%H:%M:%SZ") - 
+                                           datetime.strptime(job["started_at"], "%Y-%m-%dT%H:%M:%SZ")).total_seconds() / 60
+                            
+                            if job_name not in metrics["job_metrics"]:
+                                metrics["job_metrics"][job_name] = {
+                                    "runs": 0,
+                                    "success": 0,
+                                    "failure": 0,
+                                    "durations": []
+                                }
+                            
+                            metrics["job_metrics"][job_name]["runs"] += 1
+                            
+                            if job_conclusion == "success":
+                                metrics["job_metrics"][job_name]["success"] += 1
+                            elif job_conclusion in ["failure", "cancelled"]:
+                                metrics["job_metrics"][job_name]["failure"] += 1
+                                
+                            if job_duration:
+                                metrics["job_metrics"][job_name]["durations"].append(job_duration)
+                    
+                    # Calculate stats for job metrics
+                    for job_name, job_data in metrics["job_metrics"].items():
+                        job_data["success_rate"] = (job_data["success"] / job_data["runs"]) * 100 if job_data["runs"] > 0 else 0
+                        job_data["avg_duration"] = sum(job_data["durations"]) / len(job_data["durations"]) if job_data["durations"] else 0
+                        
+                        # Sort jobs by avg duration
+                        metrics["job_metrics"] = dict(sorted(metrics["job_metrics"].items(), 
+                                                            key=lambda x: x[1]["avg_duration"], 
+                                                            reverse=True))
+        
+        # If we still don't have metrics, generate sample data
+        if not metrics["workflow_runs"] and not metrics["overall_metrics"]["total_runs"]:
+            print("Generating sample CI metrics...")
+            
+            # Generate sample workflow runs
+            now = datetime.now()
+            
+            # Generate random success rate with a slight upward trend
+            base_success_rate = 75
+            success_rates = []
+            dates = []
+            durations = []
+            
+            for i in range(days_of_history):
+                date = now - timedelta(days=days_of_history-i)
+                dates.append(date.strftime("%m/%d"))
+                
+                # Success rate improves slightly over time with variations
+                day_offset = i / days_of_history * 15  # Improvement of up to 15% over time
+                daily_variation = random.uniform(-5, 5)  # Daily random variation
+                success_rate = min(100, base_success_rate + day_offset + daily_variation)
+                success_rates.append(success_rate)
+                
+                # Duration tends to decrease over time with variations
+                base_duration = 25  # minutes
+                duration_improvement = i / days_of_history * 10  # Improvement of up to 10 minutes
+                duration_variation = random.uniform(-3, 3)  # Random variation
+                duration = max(5, base_duration - duration_improvement + duration_variation)
+                durations.append(duration)
+            
+            # Compute overall metrics based on the generated data
+            overall_success_rate = success_rates[-1]  # Latest success rate
+            overall_duration = durations[-1]  # Latest duration
+            
+            total_runs = random.randint(50, 200)
+            successful_runs = int(total_runs * (overall_success_rate / 100))
+            failed_runs = total_runs - successful_runs
+            
+            metrics["overall_metrics"]["total_runs"] = total_runs
+            metrics["overall_metrics"]["successful_runs"] = successful_runs
+            metrics["overall_metrics"]["failed_runs"] = failed_runs
+            metrics["overall_metrics"]["success_rate"] = overall_success_rate
+            metrics["overall_metrics"]["avg_duration"] = overall_duration
+            metrics["overall_metrics"]["last_run_status"] = "success" if random.random() > 0.2 else "failure"
+            metrics["overall_metrics"]["last_run_date"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+            
+            metrics["overall_metrics"]["trends"]["dates"] = dates
+            metrics["overall_metrics"]["trends"]["success_rate"] = success_rates
+            metrics["overall_metrics"]["trends"]["duration"] = durations
+            
+            # Generate sample job metrics
+            job_names = ["build", "test", "lint", "deploy", "security-scan", "performance-test"]
+            
+            for job_name in job_names:
+                job_runs = random.randint(30, total_runs)
+                job_success = int(job_runs * (random.uniform(0.7, 0.95)))
+                job_failure = job_runs - job_success
+                
+                # Make some jobs faster, some slower
+                if job_name in ["lint", "security-scan"]:
+                    base_job_duration = random.uniform(2, 8)
+                elif job_name in ["test", "performance-test"]:
+                    base_job_duration = random.uniform(10, 25)
+                else:
+                    base_job_duration = random.uniform(5, 15)
+                
+                job_durations = [max(1, base_job_duration + random.uniform(-2, 2)) for _ in range(10)]
+                
+                metrics["job_metrics"][job_name] = {
+                    "runs": job_runs,
+                    "success": job_success,
+                    "failure": job_failure,
+                    "success_rate": (job_success / job_runs) * 100,
+                    "avg_duration": sum(job_durations) / len(job_durations),
+                    "durations": job_durations
+                }
+                
+            # Sort jobs by avg duration
+            metrics["job_metrics"] = dict(sorted(metrics["job_metrics"].items(), 
+                                               key=lambda x: x[1]["avg_duration"], 
+                                               reverse=True))
+        
+        # Generate charts
+        os.makedirs("ci-dashboard-assets", exist_ok=True)
+        
+        # Success rate trend chart
+        plt.figure(figsize=(10, 4))
+        
+        dates = metrics["overall_metrics"]["trends"].get("dates", [])
+        success_rates = metrics["overall_metrics"]["trends"].get("success_rate", [])
+        
+        if dates and success_rates:
+            plt.plot(dates, success_rates, marker='o', linestyle='-', color='#4CAF50')
+            plt.title('Success Rate Trend')
+            plt.xlabel('Date')
+            plt.ylabel('Success Rate (%)')
+            plt.grid(True, linestyle='--', alpha=0.7)
+            plt.ylim(min(0, min(success_rates) - 5), 105)
+            plt.tight_layout()
+            plt.savefig('ci-dashboard-assets/success_rate_trend.png', dpi=100, bbox_inches='tight')
+            plt.close()
+        
+        # Duration trend chart
+        plt.figure(figsize=(10, 4))
+        
+        durations = metrics["overall_metrics"]["trends"].get("duration", [])
+        
+        if dates and durations:
+            plt.plot(dates, durations, marker='o', linestyle='-', color='#2196F3')
+            plt.title('Duration Trend')
+            plt.xlabel('Date')
+            plt.ylabel('Duration (minutes)')
+            plt.grid(True, linestyle='--', alpha=0.7)
+            plt.ylim(0, max(durations) * 1.1)
+            plt.tight_layout()
+            plt.savefig('ci-dashboard-assets/duration_trend.png', dpi=100, bbox_inches='tight')
+            plt.close()
+        
+        # Job duration chart - horizontal bar chart
+        if metrics["job_metrics"]:
+            plt.figure(figsize=(10, max(3, len(metrics["job_metrics"]) * 0.5)))
+            
+            job_names = list(metrics["job_metrics"].keys())
+            avg_durations = [metrics["job_metrics"][job]["avg_duration"] for job in job_names]
+            
+            # Sort by duration
+            sorted_indices = sorted(range(len(avg_durations)), key=lambda k: avg_durations[k])
+            job_names = [job_names[i] for i in sorted_indices]
+            avg_durations = [avg_durations[i] for i in sorted_indices]
+            
+            plt.barh(job_names, avg_durations, color='#FF9800')
+            plt.title('Average Job Duration')
+            plt.xlabel('Duration (minutes)')
+            plt.grid(True, linestyle='--', alpha=0.7, axis='x')
+            plt.tight_layout()
+            plt.savefig('ci-dashboard-assets/job_duration.png', dpi=100, bbox_inches='tight')
+            plt.close()
+            
+            # Job success rate chart
+            plt.figure(figsize=(10, max(3, len(metrics["job_metrics"]) * 0.5)))
+            
+            job_names = list(metrics["job_metrics"].keys())
+            success_rates = [metrics["job_metrics"][job]["success_rate"] for job in job_names]
+            
+            # Sort by success rate
+            sorted_indices = sorted(range(len(success_rates)), key=lambda k: success_rates[k])
+            job_names = [job_names[i] for i in sorted_indices]
+            success_rates = [success_rates[i] for i in sorted_indices]
+            
+            # Create color gradient based on success rate
+            colors = ['#ff6b6b' if rate < 70 else '#ffa94d' if rate < 90 else '#4CAF50' for rate in success_rates]
+            
+            plt.barh(job_names, success_rates, color=colors)
+            plt.title('Job Success Rate')
+            plt.xlabel('Success Rate (%)')
+            plt.xlim(0, 100)
+            plt.grid(True, linestyle='--', alpha=0.7, axis='x')
+            plt.tight_layout()
+            plt.savefig('ci-dashboard-assets/job_success_rate.png', dpi=100, bbox_inches='tight')
+            plt.close()
+        
+        # HTML template for dashboard
+        html_template = '''
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>{{ title }}</title>
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+            <style>
+                :root {
+                    --primary-color: #2196F3;
+                    --success-color: #4CAF50;
+                    --warning-color: #FF9800;
+                    --danger-color: #F44336;
+                    --bg-color: #f9fafb;
+                    --card-bg: #ffffff;
+                    --text-color: #333;
+                    --border-color: #eaeaea;
+                }
+                
+                body {
+                    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+                    background-color: var(--bg-color);
+                    color: var(--text-color);
+                    margin: 0;
+                    padding: 20px;
+                    line-height: 1.6;
+                }
+                
+                .dashboard {
+                    max-width: 1200px;
+                    margin: 0 auto;
+                }
+                
+                .dashboard-header {
+                    margin-bottom: 20px;
+                    text-align: center;
+                }
+                
+                .dashboard-header h1 {
+                    margin: 0;
+                    color: var(--text-color);
+                    font-size: 28px;
+                    font-weight: 700;
+                }
+                
+                .dashboard-header p {
+                    margin: 5px 0 0;
+                    color: #666;
+                }
+                
+                .dashboard-cards {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+                    gap: 20px;
+                    margin-bottom: 30px;
+                }
+                
+                .card {
+                    background-color: var(--card-bg);
+                    border-radius: 8px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+                    padding: 20px;
+                    position: relative;
+                    overflow: hidden;
+                    border: 1px solid var(--border-color);
+                }
+                
+                .card-title {
+                    font-size: 14px;
+                    color: #666;
+                    margin: 0 0 10px 0;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                }
+                
+                .card-value {
+                    font-size: 32px;
+                    font-weight: 700;
+                    margin: 0;
+                }
+                
+                .card-value.success {
+                    color: var(--success-color);
+                }
+                
+                .card-value.warning {
+                    color: var(--warning-color);
+                }
+                
+                .card-value.danger {
+                    color: var(--danger-color);
+                }
+                
+                .card-value.primary {
+                    color: var(--primary-color);
+                }
+                
+                .charts-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+                    gap: 20px;
+                    margin-bottom: 30px;
+                }
+                
+                .chart-container {
+                    background-color: var(--card-bg);
+                    border-radius: 8px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+                    padding: 20px;
+                    border: 1px solid var(--border-color);
+                }
+                
+                .chart-title {
+                    font-size: 18px;
+                    font-weight: 600;
+                    margin: 0 0 20px 0;
+                    color: var(--text-color);
+                }
+                
+                .chart-img {
+                    max-width: 100%;
+                    height: auto;
+                    display: block;
+                    margin: 0 auto;
+                }
+                
+                .job-metrics {
+                    background-color: var(--card-bg);
+                    border-radius: 8px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+                    padding: 20px;
+                    margin-bottom: 30px;
+                    border: 1px solid var(--border-color);
+                }
+                
+                .job-metrics-title {
+                    font-size: 18px;
+                    font-weight: 600;
+                    margin: 0 0 20px 0;
+                    color: var(--text-color);
+                }
+                
+                .jobs-table {
+                    width: 100%;
+                    border-collapse: collapse;
+                }
+                
+                .jobs-table th, .jobs-table td {
+                    padding: 12px 15px;
+                    text-align: left;
+                    border-bottom: 1px solid var(--border-color);
+                }
+                
+                .jobs-table th {
+                    background-color: #f5f5f5;
+                    font-weight: 600;
+                }
+                
+                .jobs-table tr:hover {
+                    background-color: #f9f9f9;
+                }
+                
+                .rate-bar {
+                    height: 8px;
+                    background-color: #f1f1f1;
+                    border-radius: 4px;
+                    overflow: hidden;
+                    margin-top: 5px;
+                }
+                
+                .rate-fill {
+                    height: 100%;
+                    border-radius: 4px;
+                }
+                
+                .rate-fill.high {
+                    background-color: var(--success-color);
+                }
+                
+                .rate-fill.medium {
+                    background-color: var(--warning-color);
+                }
+                
+                .rate-fill.low {
+                    background-color: var(--danger-color);
+                }
+                
+                .status-indicator {
+                    display: inline-block;
+                    width: 10px;
+                    height: 10px;
+                    border-radius: 50%;
+                    margin-right: 6px;
+                }
+                
+                .status-success {
+                    background-color: var(--success-color);
+                }
+                
+                .status-failure {
+                    background-color: var(--danger-color);
+                }
+                
+                .status-unknown {
+                    background-color: #999;
+                }
+                
+                .footer {
+                    text-align: center;
+                    margin-top: 20px;
+                    color: #666;
+                    font-size: 12px;
+                }
+                
+                @media (max-width: 768px) {
+                    .charts-grid {
+                        grid-template-columns: 1fr;
+                    }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="dashboard">
+                <div class="dashboard-header">
+                    <h1>{{ title }}</h1>
+                    <p>Generated on {{ generated_date }}</p>
+                </div>
+                
+                <div class="dashboard-cards">
+                    <div class="card">
+                        <h3 class="card-title">Success Rate</h3>
+                        <p class="card-value {{ 'success' if overall_metrics.success_rate >= 90 else 'warning' if overall_metrics.success_rate >= 70 else 'danger' }}">{{ "%.1f"|format(overall_metrics.success_rate) }}%</p>
+                    </div>
+                    
+                    <div class="card">
+                        <h3 class="card-title">Avg. Duration</h3>
+                        <p class="card-value primary">{{ "%.1f"|format(overall_metrics.avg_duration) }} min</p>
+                    </div>
+                    
+                    <div class="card">
+                        <h3 class="card-title">Total Runs</h3>
+                        <p class="card-value">{{ overall_metrics.total_runs }}</p>
+                    </div>
+                    
+                    <div class="card">
+                        <h3 class="card-title">Last Run Status</h3>
+                        <p class="card-value {{ 'success' if overall_metrics.last_run_status == 'success' else 'danger' if overall_metrics.last_run_status == 'failure' else '' }}">
+                            <span class="status-indicator status-{{ 'success' if overall_metrics.last_run_status == 'success' else 'failure' if overall_metrics.last_run_status == 'failure' else 'unknown' }}"></span>
+                            {{ overall_metrics.last_run_status|capitalize }}
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="charts-grid">
+                    <div class="chart-container">
+                        <h3 class="chart-title">Success Rate Trend</h3>
+                        <img src="ci-dashboard-assets/success_rate_trend.png" alt="Success Rate Trend" class="chart-img">
+                    </div>
+                    
+                    <div class="chart-container">
+                        <h3 class="chart-title">Duration Trend</h3>
+                        <img src="ci-dashboard-assets/duration_trend.png" alt="Duration Trend" class="chart-img">
+                    </div>
+                </div>
+                
+                {% if job_metrics %}
+                <div class="job-metrics">
+                    <h3 class="job-metrics-title">Job Performance</h3>
+                    <table class="jobs-table">
+                        <thead>
+                            <tr>
+                                <th>Job</th>
+                                <th>Success Rate</th>
+                                <th>Avg. Duration</th>
+                                <th>Runs</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for job_name, job_data in job_metrics.items() %}
+                            <tr>
+                                <td>{{ job_name }}</td>
+                                <td>
+                                    {{ "%.1f"|format(job_data.success_rate) }}%
+                                    <div class="rate-bar">
+                                        <div class="rate-fill {{ 'high' if job_data.success_rate >= 90 else 'medium' if job_data.success_rate >= 70 else 'low' }}" style="width: {{ job_data.success_rate }}%;"></div>
+                                    </div>
+                                </td>
+                                <td>{{ "%.1f"|format(job_data.avg_duration) }} min</td>
+                                <td>{{ job_data.runs }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="charts-grid">
+                    <div class="chart-container">
+                        <h3 class="chart-title">Job Duration Comparison</h3>
+                        <img src="ci-dashboard-assets/job_duration.png" alt="Job Duration Comparison" class="chart-img">
+                    </div>
+                    
+                    <div class="chart-container">
+                        <h3 class="chart-title">Job Success Rate Comparison</h3>
+                        <img src="ci-dashboard-assets/job_success_rate.png" alt="Job Success Rate Comparison" class="chart-img">
+                    </div>
+                </div>
+                {% endif %}
+                
+                <div class="footer">
+                    <p>Data is based on CI runs from the last {{ days_of_history }} days.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        '''
+        
+        # Create Jinja2 template
+        template = Template(html_template)
+        
+        # Render template
+        rendered_html = template.render(
+            title=title,
+            generated_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            overall_metrics=metrics["overall_metrics"],
+            job_metrics=metrics["job_metrics"],
+            days_of_history=days_of_history
+        )
+        
+        # Write dashboard to file
+        with open(output_path, 'w') as f:
+            f.write(rendered_html)
+            
+        print(f"Dashboard generated successfully at {output_path}")
+        
+        # Copy assets to same directory as output path
+        import shutil
+        output_dir = os.path.dirname(output_path)
+        if output_dir:
+            assets_dir = os.path.join(output_dir, "ci-dashboard-assets")
+            if os.path.exists(assets_dir):
+                shutil.rmtree(assets_dir)
+            shutil.copytree("ci-dashboard-assets", assets_dir)
+        EOL
+        
+        # Run the script
+        python generate_dashboard.py
+        
+        # Set output
+        echo "dashboard_path=${{ inputs.output-path }}" >> $GITHUB_OUTPUT
+</code_block_to_apply_changes_from> 

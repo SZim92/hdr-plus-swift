@@ -1,0 +1,250 @@
+name: 'Changelog Generator'
+description: 'Generates a formatted changelog from Git commits'
+
+inputs:
+  since-tag:
+    description: 'Starting tag or commit for changelog generation'
+    required: false
+    default: ''
+  to-tag:
+    description: 'Ending tag or commit for changelog generation'
+    required: false
+    default: 'HEAD'
+  output-file:
+    description: 'Path to output the changelog'
+    required: false
+    default: 'CHANGELOG.md'
+  categories:
+    description: 'Comma-separated list of categories to group commits by'
+    required: false
+    default: 'feat,fix,perf,refactor,test,docs,ci,chore,style,build'
+  exclude-types:
+    description: 'Comma-separated list of commit types to exclude'
+    required: false
+    default: ''
+  include-commit-body:
+    description: 'Whether to include commit message bodies'
+    required: false
+    default: 'false'
+  skip-empty-categories:
+    description: 'Skip categories with no entries'
+    required: false
+    default: 'true'
+
+outputs:
+  changelog:
+    description: 'Generated changelog as markdown'
+    value: ${{ steps.generate.outputs.changelog }}
+  has-changes:
+    description: 'Boolean indicating if there are any changes'
+    value: ${{ steps.generate.outputs.has_changes }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check for git
+      shell: bash
+      run: |
+        if ! command -v git &> /dev/null; then
+          echo "Git is required but not installed"
+          exit 1
+        fi
+    
+    - name: Generate changelog
+      id: generate
+      shell: bash
+      run: |
+        # Convert comma-separated lists to arrays
+        IFS=',' read -r -a CATEGORIES <<< "${{ inputs.categories }}"
+        IFS=',' read -r -a EXCLUDE_TYPES <<< "${{ inputs.exclude-types }}"
+        SKIP_EMPTY="${{ inputs.skip-empty-categories }}"
+        INCLUDE_BODY="${{ inputs.include-commit-body }}"
+        
+        # Determine the range to generate changelog for
+        if [[ -z "${{ inputs.since-tag }}" ]]; then
+          # Get the latest tag if none specified
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          
+          if [[ -z "$LATEST_TAG" ]]; then
+            # If no tags exist, use the first commit
+            RANGE="$(git rev-list --max-parents=0 HEAD)...${{ inputs.to-tag }}"
+            echo "No tags found, using range: $RANGE"
+          else
+            RANGE="$LATEST_TAG...${{ inputs.to-tag }}"
+            echo "Using latest tag for range: $RANGE"
+          fi
+        else
+          RANGE="${{ inputs.since-tag }}...${{ inputs.to-tag }}"
+          echo "Using specified range: $RANGE"
+        fi
+        
+        # Function to format a Markdown link
+        function format_link() {
+          local text=$1
+          local url=$2
+          echo "[$text]($url)"
+        }
+        
+        # Function to get repository URL
+        function get_repo_url() {
+          local origin_url=$(git config --get remote.origin.url)
+          # Remove .git suffix if present
+          origin_url=${origin_url%.git}
+          # Replace SSH URL with HTTPS URL if needed
+          if [[ $origin_url == git@* ]]; then
+            # Convert SSH URL to HTTPS URL
+            origin_url=${origin_url/:/\/}
+            origin_url=${origin_url/git@/https:\/\/}
+          fi
+          echo $origin_url
+        }
+        
+        # Get repository URL
+        REPO_URL=$(get_repo_url)
+        
+        # Check if we need to match against PR numbers
+        PR_PATTERN='(#[0-9]+)'
+        
+        # Get the commits
+        echo "Fetching commits for range: $RANGE"
+        git_log_format="%h %s"
+        [[ "$INCLUDE_BODY" == "true" ]] && git_log_format="$git_log_format%n%n%b"
+        
+        # Build changelog
+        CHANGELOG=""
+        HAS_CHANGES="false"
+        
+        # Add header
+        CHANGELOG+="# Changelog\n\n"
+        
+        # Get the date range
+        START_DATE=$(git log -1 --format=%ai "${{ inputs.since-tag }}" 2>/dev/null || git log -1 --format=%ai "$(git rev-list --max-parents=0 HEAD)")
+        END_DATE=$(git log -1 --format=%ai "${{ inputs.to-tag }}")
+        START_DATE_FORMATTED=$(date -d "${START_DATE}" "+%B %d, %Y")
+        END_DATE_FORMATTED=$(date -d "${END_DATE}" "+%B %d, %Y")
+        CHANGELOG+="Generated changelog from **${START_DATE_FORMATTED}** to **${END_DATE_FORMATTED}**.\n\n"
+        
+        # Process each category
+        for category in "${CATEGORIES[@]}"; do
+          # Skip excluded categories
+          if [[ " ${EXCLUDE_TYPES[*]} " == *" $category "* ]]; then
+            continue
+          fi
+          
+          # Get commits for this category
+          commits=$(git log "$RANGE" --format="${git_log_format}" --grep="^${category}:" --no-merges)
+          
+          # Skip empty categories if configured
+          if [[ -z "$commits" && "$SKIP_EMPTY" == "true" ]]; then
+            continue
+          fi
+          
+          # Map category to readable name
+          case "$category" in
+            feat)
+              category_title="Features"
+              ;;
+            fix)
+              category_title="Bug Fixes"
+              ;;
+            perf)
+              category_title="Performance Improvements"
+              ;;
+            refactor)
+              category_title="Code Refactoring"
+              ;;
+            test)
+              category_title="Tests"
+              ;;
+            docs)
+              category_title="Documentation"
+              ;;
+            ci)
+              category_title="Continuous Integration"
+              ;;
+            chore)
+              category_title="Chores"
+              ;;
+            style)
+              category_title="Code Style"
+              ;;
+            build)
+              category_title="Build System"
+              ;;
+            *)
+              category_title="${category^}" # Capitalize first letter
+              ;;
+          esac
+          
+          # Add category header
+          CHANGELOG+="## ${category_title}\n\n"
+          
+          # Add entries if we have any
+          if [[ -n "$commits" ]]; then
+            HAS_CHANGES="true"
+            
+            # Process each commit
+            while IFS= read -r commit || [[ -n "$commit" ]]; do
+              # Skip empty lines
+              [[ -z "$commit" ]] && continue
+              
+              # Extract commit hash
+              commit_hash=$(echo "$commit" | awk '{print $1}')
+              
+              # Extract commit message (remove hash and type prefix)
+              commit_msg=$(echo "$commit" | cut -d' ' -f2- | sed "s/^${category}: //")
+              
+              # Extract PR number if present
+              pr_number=""
+              if [[ $commit_msg =~ $PR_PATTERN ]]; then
+                pr_number=${BASH_REMATCH[1]}
+                commit_msg=${commit_msg//$pr_number/}
+              fi
+              
+              # Clean up message
+              commit_msg=$(echo "$commit_msg" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+              
+              # Add commit to changelog
+              commit_link=$(format_link "$commit_hash" "${REPO_URL}/commit/${commit_hash}")
+              changelog_entry="- ${commit_msg} (${commit_link})"
+              
+              # Add PR link if available
+              if [[ -n "$pr_number" ]]; then
+                pr_link=$(format_link "$pr_number" "${REPO_URL}/pull/${pr_number#\#}")
+                changelog_entry+=" ${pr_link}"
+              fi
+              
+              CHANGELOG+="${changelog_entry}\n"
+              
+              # Add commit body if requested
+              if [[ "$INCLUDE_BODY" == "true" ]]; then
+                # Extract body (skip first line)
+                body=$(echo "$commit" | tail -n +2)
+                if [[ -n "$body" ]]; then
+                  # Indent body lines
+                  body=$(echo "$body" | sed 's/^/  /')
+                  CHANGELOG+="${body}\n"
+                fi
+              fi
+            done <<< "$commits"
+          else
+            CHANGELOG+="No changes in this category.\n"
+          fi
+          
+          CHANGELOG+="\n"
+        done
+        
+        # Write changelog to file if specified
+        if [[ -n "${{ inputs.output-file }}" ]]; then
+          echo -e "$CHANGELOG" > "${{ inputs.output-file }}"
+          echo "Changelog written to ${{ inputs.output-file }}"
+        fi
+        
+        # Set outputs
+        # Escape newlines for GitHub Actions
+        CHANGELOG_ESCAPED="${CHANGELOG//'%'/'%25'}"
+        CHANGELOG_ESCAPED="${CHANGELOG_ESCAPED//$'\n'/'%0A'}"
+        CHANGELOG_ESCAPED="${CHANGELOG_ESCAPED//$'\r'/'%0D'}"
+        
+        echo "changelog=$CHANGELOG_ESCAPED" >> $GITHUB_OUTPUT
+        echo "has_changes=$HAS_CHANGES" >> $GITHUB_OUTPUT 

@@ -1,141 +1,206 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 1.2.3)'
+        required: true
+      pre-release:
+        description: 'Mark as pre-release'
+        type: boolean
+        default: false
+      draft:
+        description: 'Create as draft release'
+        type: boolean
+        default: true
 
 jobs:
-  # Job to gather all the build artifacts and create release
-  release:
+  create-release:
+    name: Create Release
     runs-on: macos-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetch all history and tags for release notes generation
-      
-      - name: Set up Swift environment
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/Library/Developer/Xcode/DerivedData
-            ~/.swiftpm
-          key: ${{ runner.os }}-spm-deriveddata-${{ hashFiles('**/Package.resolved') }}
-          restore-keys: |
-            ${{ runner.os }}-spm-deriveddata-
-      
-      - name: Build for Release
+          fetch-depth: 0
+          
+      - name: Validate version format
+        id: validate-version
         run: |
-          # Set up environment variables
-          export XCODE_SCHEME_GUI=gui
-          export XCODE_SCHEME_CLI=cli
-          export XCODE_PROJECT=burstphoto.xcodeproj
-          
-          # Build GUI
-          echo "Building GUI for release..."
-          xcodebuild -project $XCODE_PROJECT -scheme $XCODE_SCHEME_GUI -configuration Release build
-          
-          # Build CLI
-          echo "Building CLI for release..."
-          xcodebuild -project $XCODE_PROJECT -scheme $XCODE_SCHEME_CLI -configuration Release build
-          
-          # Find and list built products
-          echo "Built release products:"
-          find ~/Library/Developer/Xcode/DerivedData -path "*/Build/Products/Release/*.app" -o -path "*/Build/Products/Release/*.framework"
-
-      - name: Generate release notes
-        id: release_notes
-        run: |
-          # Get the previous tag
-          previous_tag=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          
-          if [ -z "$previous_tag" ]; then
-            echo "No previous tag found, including all changes"
-            git log --pretty=format:"- %s (%h)" > RELEASE_NOTES.md
-          else
-            echo "Previous tag: $previous_tag"
-            echo "Changes since $previous_tag:" > RELEASE_NOTES.md
-            git log --pretty=format:"- %s (%h)" $previous_tag..HEAD >> RELEASE_NOTES.md
+          VERSION="${{ github.event.inputs.version }}"
+          # Check if version matches semantic versioning format
+          if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Invalid version format. Please use semantic versioning (e.g. 1.2.3 or 1.2.3-beta.1)"
+            exit 1
           fi
           
-          # Add a header
-          echo "# Release ${{ github.ref_name }}" > FULL_RELEASE_NOTES.md
-          echo "" >> FULL_RELEASE_NOTES.md
-          echo "Automated release by GitHub Actions." >> FULL_RELEASE_NOTES.md
-          echo "" >> FULL_RELEASE_NOTES.md
+          # Extract version components
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f2)
+          PATCH=$(echo $VERSION | cut -d. -f3 | cut -d- -f1)
           
-          echo "## Included Builds" >> FULL_RELEASE_NOTES.md
-          echo "- macOS Release build" >> FULL_RELEASE_NOTES.md
-          echo "" >> FULL_RELEASE_NOTES.md
+          # If pre-release tag exists, extract it
+          if [[ $VERSION == *-* ]]; then
+            PRERELEASE_TAG=$(echo $VERSION | cut -d- -f2-)
+            echo "PRERELEASE_TAG=$PRERELEASE_TAG" >> $GITHUB_ENV
+          fi
           
-          echo "## How to Install" >> FULL_RELEASE_NOTES.md
-          echo "Download the package for your macOS version and unzip it to install." >> FULL_RELEASE_NOTES.md
-          echo "" >> FULL_RELEASE_NOTES.md
-          
-          echo "## Changes in this release" >> FULL_RELEASE_NOTES.md
-          cat RELEASE_NOTES.md >> FULL_RELEASE_NOTES.md
-          
-          # Save the contents to the output
-          notes="$(cat FULL_RELEASE_NOTES.md)"
-          notes="${notes//'%'/'%25'}"
-          notes="${notes//$'\n'/'%0A'}"
-          notes="${notes//$'\r'/'%0D'}"
-          echo "notes=$notes" >> $GITHUB_OUTPUT
+          # Output version components
+          echo "MAJOR=$MAJOR" >> $GITHUB_ENV
+          echo "MINOR=$MINOR" >> $GITHUB_ENV
+          echo "PATCH=$PATCH" >> $GITHUB_ENV
+          echo "Version components: $MAJOR.$MINOR.$PATCH"
       
-      - name: Create Release Packages
+      - name: Check for existing tag
+        id: check-tag
         run: |
-          mkdir -p release-packages
-          
-          # Create package for GUI app
-          echo "Creating GUI package..."
-          find ~/Library/Developer/Xcode/DerivedData -path "*/Build/Products/Release/*.app" | \
-            xargs -I {} zip -r "release-packages/burstphoto-gui-${{ github.ref_name }}.zip" {}
-          
-          # Create package for CLI
-          echo "Creating CLI package..."
-          find ~/Library/Developer/Xcode/DerivedData -path "*/Build/Products/Release/*" -name "*cli*" | \
-            xargs -I {} zip -r "release-packages/burstphoto-cli-${{ github.ref_name }}.zip" {}
-          
-          # List packages
-          echo "Created packages:"
-          ls -la release-packages/
+          VERSION="${{ github.event.inputs.version }}"
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "::error::Tag v$VERSION already exists. Please choose a different version."
+            exit 1
+          fi
       
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
+      - name: Set up Swift environment
+        uses: ./.github/actions/optimized-swift-setup
+        with:
+          cache-name: 'release'
+          
+      - name: Generate changelog
+        id: changelog
+        uses: ./.github/actions/changelog-generator
+        with:
+          output-file: 'CHANGELOG.md'
+          include-commit-body: 'true'
+          
+      - name: Build release artifacts
+        id: build
+        run: |
+          echo "Building release artifacts for v${{ github.event.inputs.version }}"
+          
+          # Create temp directory for artifacts
+          mkdir -p artifacts
+          
+          # Build for release
+          xcodebuild build \
+            -scheme HDRPlus \
+            -configuration Release \
+            -destination "platform=macOS" \
+            MARKETING_VERSION="${{ github.event.inputs.version }}" \
+            CURRENT_PROJECT_VERSION="${{ env.MAJOR }}${{ env.MINOR }}${{ env.PATCH }}" \
+            CODE_SIGNING_REQUIRED=NO
+            
+          # Package the application
+          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "*.app" -not -path "*/Archive/*" | head -1)
+          
+          if [[ -z "$APP_PATH" ]]; then
+            echo "::error::Could not find built application"
+            exit 1
+          fi
+          
+          # Create ZIP archive
+          cd "$(dirname "$APP_PATH")"
+          APP_NAME=$(basename "$APP_PATH")
+          ZIP_NAME="HDRPlus-${{ github.event.inputs.version }}.zip"
+          
+          echo "Creating ZIP archive of $APP_NAME as $ZIP_NAME"
+          ditto -c -k --keepParent "$APP_NAME" "$GITHUB_WORKSPACE/artifacts/$ZIP_NAME"
+          
+          cd "$GITHUB_WORKSPACE"
+          echo "zip_path=artifacts/$ZIP_NAME" >> $GITHUB_OUTPUT
+          
+          # Create SHA256 checksums
+          cd artifacts
+          shasum -a 256 "$ZIP_NAME" > "$ZIP_NAME.sha256"
+          
+          echo "Artifacts created successfully:"
+          ls -la "$GITHUB_WORKSPACE/artifacts/"
+      
+      - name: Create release tag
+        id: create-tag
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          git config --local user.name "GitHub Actions"
+          git config --local user.email "actions@github.com"
+          
+          echo "Creating tag v$VERSION"
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          
+          # Don't push the tag yet - we'll do that after release creation
+      
+      - name: Create GitHub Release
+        id: create-release
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            
+            // Read changelog
+            let changelogContent;
+            try {
+              changelogContent = fs.readFileSync('CHANGELOG.md', 'utf8');
+            } catch (error) {
+              console.log('Error reading changelog:', error);
+              changelogContent = 'No changelog available';
+            }
+            
+            const version = '${{ github.event.inputs.version }}';
+            const isDraft = ${{ github.event.inputs.draft }};
+            const isPrerelease = ${{ github.event.inputs.pre-release }};
+            
+            // Create release
+            console.log(`Creating ${isDraft ? 'draft ' : ''}${isPrerelease ? 'pre-release' : 'release'} v${version}`);
+            
+            const release = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: `v${version}`,
+              name: `v${version}`,
+              body: changelogContent,
+              draft: isDraft,
+              prerelease: isPrerelease,
+              generate_release_notes: false
+            });
+            
+            console.log(`Release created: ${release.data.html_url}`);
+            return release.data;
+              
+      - name: Upload Release Assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name }}
-          release_name: Release ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          body: ${{ steps.release_notes.outputs.notes }}
-      
-      - name: Upload Release Assets
+          RELEASE_ID: ${{ fromJSON(steps.create-release.outputs.result).id }}
         run: |
-          for asset_path in release-packages/*.zip; do
-            asset_name=$(basename "$asset_path")
-            
-            echo "Uploading $asset_name to release..."
-            
-            curl \
-              -X POST \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Content-Type: application/zip" \
-              --data-binary @"$asset_path" \
-              "${{ steps.create_release.outputs.upload_url }}?name=$asset_name"
-          done
+          echo "Uploading assets to release $RELEASE_ID"
           
-      - name: Notify on Release
-        uses: rtCamp/action-slack-notify@v2
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-          SLACK_CHANNEL: releases
-          SLACK_COLOR: good
-          SLACK_ICON: https://github.com/rtCamp.png?size=48
-          SLACK_TITLE: "🚀 New Release: ${{ github.ref_name }}"
-          SLACK_MESSAGE: "Version ${{ github.ref_name }} has been released. [View release notes](https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }})"
-          SLACK_FOOTER: "Released by GitHub Actions"
-          MSG_MINIMAL: false 
+          # Upload the zip file
+          ZIP_PATH="${{ steps.build.outputs.zip_path }}"
+          ZIP_NAME=$(basename "$ZIP_PATH")
+          
+          echo "Uploading $ZIP_PATH"
+          gh release upload "v${{ github.event.inputs.version }}" "$ZIP_PATH" --clobber
+          
+          # Upload checksum file
+          CHECKSUM_PATH="${{ steps.build.outputs.zip_path }}.sha256"
+          if [ -f "$CHECKSUM_PATH" ]; then
+            echo "Uploading $CHECKSUM_PATH"
+            gh release upload "v${{ github.event.inputs.version }}" "$CHECKSUM_PATH" --clobber
+          fi
+      
+      - name: Push Tag
+        if: ${{ !github.event.inputs.draft }}
+        run: |
+          echo "Pushing tag to repository"
+          git push origin "v${{ github.event.inputs.version }}"
+      
+      - name: Update CHANGELOG.md
+        if: ${{ !github.event.inputs.draft }}
+        run: |
+          echo "Updating CHANGELOG.md in repository"
+          
+          # Check if file exists
+          if [ -f "CHANGELOG.md" ]; then
+            git add CHANGELOG.md
+            git commit -m "docs: update CHANGELOG.md for v${{ github.event.inputs.version }}"
+            git push origin HEAD:main
+          fi 
