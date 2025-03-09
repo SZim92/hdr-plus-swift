@@ -1,0 +1,28 @@
+name: 'Generate Files Safely'
+description: 'Creates files with content from inputs without using heredocs'
+
+inputs:
+  file-path:
+    description: 'Path to the file to create'
+    required: true
+  file-content:
+    description: 'Content to write to the file (multi-line)'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Create file
+      shell: bash
+      run: |
+        # Create directory if it doesn't exist
+        mkdir -p "$(dirname "${{ inputs.file-path }}")"
+        
+        # Write content to file line by line using printf
+        # This avoids issues with heredocs and maintains exact line formatting
+        # The \n needs to be processed by printf to get actual newlines
+        echo '${{ inputs.file-content }}' | while IFS= read -r line || [ -n "$line" ]; do
+          printf "%s\n" "$line" >> "${{ inputs.file-path }}"
+        done
+        
+        echo "Created file at ${{ inputs.file-path }}" 
