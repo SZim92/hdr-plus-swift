@@ -1,298 +1,227 @@
-name: Main Build
+name: CI
 
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:  # Allow manual triggering
-
-# Ensure we don't run multiple workflows on the same branch at the same time
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  XCODE_SCHEME_GUI: gui
-  XCODE_SCHEME_CLI: cli
-  XCODE_PROJECT: burstphoto.xcodeproj
-  DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+  workflow_dispatch:
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        os: [macos-14, macos-13]  # Test on both macOS 14 (Sonoma) and macOS 13 (Ventura)
-      fail-fast: false  # Continue with other matrix jobs if one fails
-    
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20  # Add timeout to prevent hung jobs
-    outputs:
-      gui_success: ${{ steps.combined_results.outputs.gui_success }}
-      cli_success: ${{ steps.combined_results.outputs.cli_success }}
-      build_duration: ${{ steps.combined_results.outputs.build_duration }}
-    
+  # Core linting job to run quickly in parallel
+  lint:
+    name: Lint Swift Code
+    runs-on: macos-latest
+    timeout-minutes: 5
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetch all history for versioning
-      
+          fetch-depth: 1
+          
       - name: Set up Swift environment
-        uses: actions/cache@v4
-        id: cache
+        uses: ./.github/actions/optimized-swift-setup
         with:
-          path: |
-            ~/Library/Developer/Xcode/DerivedData
-            ~/.swiftpm
-          key: ${{ runner.os }}-${{ matrix.os }}-spm-deriveddata-${{ hashFiles('**/Package.resolved') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.os }}-spm-deriveddata-
-      
-      - name: Setup version info
-        id: version
-        run: |
-          # Extract version info from the most recent git tag
-          # If no tag exists, use v0.0.0 as a base
-          git_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          echo "Current git tag: $git_tag"
+          cache-name: 'lint'
+          install-swiftlint: 'true'
           
-          # Extract version components
-          version=${git_tag#v}  # Remove 'v' prefix if present
-          major=$(echo $version | cut -d. -f1)
-          minor=$(echo $version | cut -d. -f2)
-          patch=$(echo $version | cut -d. -f3)
-          
-          # Count commits since tag
-          commits_since_tag=$(git rev-list $git_tag..HEAD --count 2>/dev/null || echo "0")
-          
-          # Create build number (MAJOR.MINOR.PATCH.COMMITS)
-          build_number="$major.$minor.$patch.$commits_since_tag"
-          
-          # Get short hash
-          git_hash=$(git rev-parse --short HEAD)
-          
-          # Set outputs
-          echo "tag=$git_tag" >> $GITHUB_OUTPUT
-          echo "major=$major" >> $GITHUB_OUTPUT
-          echo "minor=$minor" >> $GITHUB_OUTPUT
-          echo "patch=$patch" >> $GITHUB_OUTPUT
-          echo "commits_since_tag=$commits_since_tag" >> $GITHUB_OUTPUT
-          echo "build_number=$build_number" >> $GITHUB_OUTPUT
-          echo "git_hash=$git_hash" >> $GITHUB_OUTPUT
-          
-          # Display versioning information
-          echo "Version Information:"
-          echo "  Git Tag: $git_tag"
-          echo "  Major: $major"
-          echo "  Minor: $minor"
-          echo "  Patch: $patch"
-          echo "  Commits Since Tag: $commits_since_tag"
-          echo "  Build Number: $build_number"
-          echo "  Git Hash: $git_hash"
-      
-      - name: Report cache status
-        run: |
-          echo "Cache hit: ${{ steps.cache.outputs.cache-hit == 'true' }}"
-      
-      - name: Install SwiftLint
-        run: |
-          brew install swiftlint || echo "SwiftLint already installed"
-      
       - name: Run SwiftLint
         run: |
-          echo "Running SwiftLint..."
-          if command -v swiftlint &> /dev/null; then
-            # Create a report file for SwiftLint results
-            mkdir -p reports
-            # Only lint Swift files under burstphoto directory and ignore tests
-            find burstphoto -name "*.swift" -not -path "*/Tests/*" | xargs -I {} swiftlint lint --path {} --reporter json > reports/swiftlint.json || true
-            echo "SwiftLint completed with warnings/errors (exit code ignored)"
-            # Print a summary of the issues
-            if [ -s reports/swiftlint.json ]; then
-              echo "SwiftLint found issues:"
-              cat reports/swiftlint.json | grep -c "{" | xargs -I {} echo "Total issues: {}"
-            else
-              echo "No SwiftLint issues found"
-            fi
-          else
-            echo "SwiftLint not found, skipping lint step"
-          fi
-      
-      - name: Start build timing
-        id: build_start
-        run: echo "start_time=$(date +%s)" >> $GITHUB_OUTPUT
-      
-      - name: Debug Project Structure
-        run: |
-          # List all files in the root directory to confirm project location
-          echo "Files in repository root:"
-          ls -la
+          echo "Running linting checks..."
+          swiftlint --strict --reporter github-actions-logging burstphoto || true
+          mkdir -p test-results
+          swiftlint burstphoto --reporter json > test-results/swiftlint-results.json || true
+          echo "::group::Lint Summary"
+          echo "Linting completed. See detailed results in the artifacts."
+          echo "::endgroup::"
           
-          # Show Xcode version
-          xcodebuild -version
-          
-          # Check if the Xcode project file exists
-          if [ -d "${{ env.XCODE_PROJECT }}" ]; then
-            echo "${{ env.XCODE_PROJECT }} exists"
-          else
-            echo "${{ env.XCODE_PROJECT }} does not exist"
-            # Look for other .xcodeproj files
-            find . -name "*.xcodeproj" -maxdepth 2
-          fi
-          
-          # Try to list schemes in the project
-          echo "Available schemes:"
-          xcodebuild -project ${{ env.XCODE_PROJECT }} -list || echo "Could not list schemes"
-      
-      - name: Build GUI Target (basic)
-        id: build_gui
-        run: |
-          # Build only with simplified arguments, continuing on errors
-          set +e  # Continue on error
-          xcodebuild -project ${{ env.XCODE_PROJECT }} -scheme ${{ env.XCODE_SCHEME_GUI }} -configuration Debug build
-          build_result=$?
-          echo "GUI build result: $build_result"
-          if [ $build_result -eq 0 ]; then
-            echo "GUI build succeeded!"
-            echo "gui_success=true" >> $GITHUB_OUTPUT
-          else
-            echo "GUI build completed with issues"
-            echo "gui_success=false" >> $GITHUB_OUTPUT
-          fi
-          # Consider this step successful regardless of build result
-          exit 0
-      
-      - name: Build CLI Target (basic)
-        id: build_cli
-        run: |
-          # Build only with simplified arguments, continuing on errors
-          set +e  # Continue on error
-          xcodebuild -project ${{ env.XCODE_PROJECT }} -scheme ${{ env.XCODE_SCHEME_CLI }} -configuration Debug build
-          build_result=$?
-          echo "CLI build result: $build_result"
-          if [ $build_result -eq 0 ]; then
-            echo "CLI build succeeded!"
-            echo "cli_success=true" >> $GITHUB_OUTPUT
-          else
-            echo "CLI build completed with issues"
-            echo "cli_success=false" >> $GITHUB_OUTPUT
-          fi
-          # Consider this step successful regardless of build result
-          exit 0
-      
-      - name: Generate Code Coverage (simulation)
-        id: coverage
-        if: steps.build_gui.outputs.gui_success == 'true' || steps.build_cli.outputs.cli_success == 'true'
-        run: |
-          # This is a simulation of code coverage analysis
-          # In a real implementation, you would use tools like slather or xcov 
-          # to generate coverage reports from your Xcode project
-          
-          mkdir -p reports/coverage
-          
-          # Create a sample coverage report
-          echo "Code Coverage Report" > reports/coverage/coverage.txt
-          echo "Date: $(date)" >> reports/coverage/coverage.txt
-          echo "Build: ${{ steps.version.outputs.build_number }}" >> reports/coverage/coverage.txt
-          echo "" >> reports/coverage/coverage.txt
-          echo "Overall coverage: 83.5%" >> reports/coverage/coverage.txt
-          echo "Files analyzed: 42" >> reports/coverage/coverage.txt
-          echo "Lines of code: 5280" >> reports/coverage/coverage.txt
-          
-          # Set output
-          echo "coverage_percentage=83.5" >> $GITHUB_OUTPUT
-      
-      - name: End build timing
-        id: build_end
-        run: |
-          end_time=$(date +%s)
-          start_time=${{ steps.build_start.outputs.start_time }}
-          echo "end_time=$end_time" >> $GITHUB_OUTPUT
-          echo "duration=$((end_time - start_time))" >> $GITHUB_OUTPUT
-      
-      - name: Combine results across steps
-        id: combined_results
-        run: |
-          # Combine results from different steps for job outputs
-          echo "gui_success=${{ steps.build_gui.outputs.gui_success }}" >> $GITHUB_OUTPUT
-          echo "cli_success=${{ steps.build_cli.outputs.cli_success }}" >> $GITHUB_OUTPUT
-          echo "build_duration=${{ steps.build_end.outputs.duration }}" >> $GITHUB_OUTPUT
-      
-      - name: Find Build Artifacts
-        id: find_artifacts
-        run: |
-          echo "Looking for build artifacts..."
-          find ~/Library/Developer/Xcode/DerivedData -name "*.app" -o -name "*.framework" | grep -v "SourcePackages"
-          echo "Checking specific build directories..."
-          ls -la ~/Library/Developer/Xcode/DerivedData/*/Build/Products/Debug/ || echo "No build products directory found"
-      
-      - name: Upload Build Artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Upload lint results
+        uses: actions/upload-artifact@v3
         with:
-          name: build-artifacts-${{ matrix.os }}
-          path: |
-            ~/Library/Developer/Xcode/DerivedData/*/Build/Products/Debug/*.app
-            ~/Library/Developer/Xcode/DerivedData/*/Build/Products/Debug/*.framework
-          retention-days: 7
-      
-      - name: Upload Reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: reports-${{ matrix.os }}
-          path: reports/
-          retention-days: 7
-      
-      - name: Build Summary
-        if: always()
-        run: |
-          echo "## Build Summary for ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
-          echo "- GUI Build: ${{ steps.build_gui.outputs.gui_success == 'true' && '✅ Success' || '❌ Issues' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- CLI Build: ${{ steps.build_cli.outputs.cli_success == 'true' && '✅ Success' || '❌ Issues' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Build Number: ${{ steps.version.outputs.build_number }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Git Hash: ${{ steps.version.outputs.git_hash }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Build Duration: ${{ steps.build_end.outputs.duration }} seconds" >> $GITHUB_STEP_SUMMARY
-          echo "- Cache Hit: ${{ steps.cache.outputs.cache-hit == 'true' && '✅ Yes' || '❌ No' }}" >> $GITHUB_STEP_SUMMARY
-          
-          if [ "${{ steps.coverage.outputs.coverage_percentage }}" != "" ]; then
-            echo "- Code Coverage: ${{ steps.coverage.outputs.coverage_percentage }}%" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
-          echo "Download the artifacts to examine the build output in detail." >> $GITHUB_STEP_SUMMARY
-      
-      - name: Notify on Failure
-        if: failure()
-        uses: rtCamp/action-slack-notify@v2
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-          SLACK_CHANNEL: ci-alerts
-          SLACK_COLOR: danger
-          SLACK_ICON: https://github.com/rtCamp.png?size=48
-          SLACK_TITLE: "❌ CI build failed"
-          SLACK_MESSAGE: "Build failed for ${{ github.repository }} on ${{ matrix.os }}. Check the logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          SLACK_FOOTER: "Action triggered by ${{ github.actor }}"
-          MSG_MINIMAL: false
+          name: lint-results
+          path: test-results/
+          retention-days: 3
 
-  # Generate summary report from all builds
-  summary:
-    needs: build
-    runs-on: ubuntu-latest
-    if: always()
+  # Matrix-based testing across macOS versions
+  test:
+    name: Test on ${{ matrix.os }}
+    needs: lint
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-13, macos-14]
+        
     steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Swift environment
+        id: swift-setup
+        uses: ./.github/actions/optimized-swift-setup
+        with:
+          cache-name: 'test-${{ matrix.os }}'
+          
+      - name: Report Setup Metrics
+        run: |
+          echo "::group::Environment Info"
+          echo "Swift setup completed in ${{ steps.swift-setup.outputs.setup-time }} seconds"
+          echo "Using Swift version: ${{ steps.swift-setup.outputs.swift-version }}"
+          echo "Cache hit: ${{ steps.swift-setup.outputs.cache-hit }}"
+          echo "::endgroup::"
+          
+      - name: Build and Test
+        id: build-test
+        run: |
+          echo "::group::Building HDR+ Project"
+          START_TIME=$(date +%s)
+          
+          # Build the project
+          xcodebuild clean build-for-testing \
+            -scheme HDRPlus \
+            -destination "platform=macOS" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+            
+          BUILD_END_TIME=$(date +%s)
+          BUILD_TIME=$((BUILD_END_TIME - START_TIME))
+          echo "Build completed in ${BUILD_TIME} seconds"
+          echo "::endgroup::"
+          
+          echo "::group::Running Tests"
+          # Run tests
+          xcodebuild test-without-building \
+            -scheme HDRPlus \
+            -destination "platform=macOS" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            -resultBundlePath TestResults.xcresult
+            
+          TEST_END_TIME=$(date +%s)
+          TEST_TIME=$((TEST_END_TIME - BUILD_END_TIME))
+          TOTAL_TIME=$((TEST_END_TIME - START_TIME))
+          
+          echo "Tests completed in ${TEST_TIME} seconds"
+          echo "Total execution time: ${TOTAL_TIME} seconds"
+          echo "::endgroup::"
+          
+      - name: Visualize Test Results
+        id: test-visualizer
+        uses: ./.github/actions/test-results-visualizer
+        with:
+          results-path: 'TestResults.xcresult'
+          report-name: 'HDR+ Tests on ${{ matrix.os }}'
+          include-coverage: 'true'
+          
+      - name: Report Test Metrics
+        run: |
+          echo "::group::Test Result Metrics"
+          echo "Total tests: ${{ steps.test-visualizer.outputs.total-tests }}"
+          echo "Success rate: ${{ steps.test-visualizer.outputs.success-rate }}%"
+          echo "Report available at: ${{ steps.test-visualizer.outputs.report-path }}"
+          echo "::endgroup::"
+          
+      - name: Archive test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results-${{ matrix.os }}
+          path: |
+            TestResults.xcresult
+            test-reports/
+          retention-days: 5
+
+  # Main build for release
+  build:
+    name: Build Release
+    needs: [lint, test]
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Swift environment
+        uses: ./.github/actions/optimized-swift-setup
+        with:
+          cache-name: 'release-build'
+          disable-code-signing: 'false'
+          
+      - name: Configure Keychain
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          echo "Setting up keychain for signed builds on main branch"
+          # This is a placeholder for actual keychain setup
+          # In a real scenario, you would use secrets to set up code signing
+          
+      - name: Build for Release
+        run: |
+          echo "Building for release..."
+          xcodebuild build \
+            -scheme HDRPlus \
+            -configuration Release \
+            -destination "platform=macOS" \
+            ONLY_ACTIVE_ARCH=NO
+            
+      - name: Package Application
+        run: |
+          echo "Packaging application..."
+          mkdir -p artifacts
+          # Example command to package the app
+          # ditto -c -k --keepParent "build/Release/HDRPlus.app" "artifacts/HDRPlus.zip"
+          
+          # For now, just create a placeholder
+          touch artifacts/build-completed.txt
+          echo "Build completed at $(date)" > artifacts/build-completed.txt
+          
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-artifacts
+          path: artifacts/
+          retention-days: 7
+          
+  # Summarize results
+  summarize:
+    name: Summarize Results
+    if: always()
+    needs: [lint, test, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        
       - name: Generate Summary
         run: |
-          echo "# Build Summary Report" >> $GITHUB_STEP_SUMMARY
+          echo "## CI Results Summary" > $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## macOS 14 (Sonoma)" >> $GITHUB_STEP_SUMMARY
-          echo "- GUI: ${{ needs.build.outputs.gui_success == 'true' && '✅ Success' || '❌ Issues' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- CLI: ${{ needs.build.outputs.cli_success == 'true' && '✅ Success' || '❌ Issues' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Build Time: ${{ needs.build.outputs.build_duration }} seconds" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Linting Status" >> $GITHUB_STEP_SUMMARY
+          if [ -d "lint-results" ]; then
+            echo "✅ Linting completed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Linting failed or did not complete" >> $GITHUB_STEP_SUMMARY
+          fi
+          
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## macOS 13 (Ventura)" >> $GITHUB_STEP_SUMMARY
-          echo "- GUI: ${{ needs.build.outputs.gui_success == 'true' && '✅ Success' || '❌ Issues' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- CLI: ${{ needs.build.outputs.cli_success == 'true' && '✅ Success' || '❌ Issues' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Build Time: ${{ needs.build.outputs.build_duration }} seconds" >> $GITHUB_STEP_SUMMARY 
+          echo "### Testing Status" >> $GITHUB_STEP_SUMMARY
+          for os in "macos-13" "macos-14"; do
+            if [ -d "test-results-$os" ]; then
+              echo "✅ Tests on $os completed" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ Tests on $os failed or did not complete" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Build Status" >> $GITHUB_STEP_SUMMARY
+          if [ -d "build-artifacts" ]; then
+            echo "✅ Build completed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Build failed or did not complete" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Performance Summary" >> $GITHUB_STEP_SUMMARY
+          echo "This workflow used a new optimized CI setup with:" >> $GITHUB_STEP_SUMMARY
+          echo "- Parallel testing across macOS versions" >> $GITHUB_STEP_SUMMARY
+          echo "- Intelligent caching for faster builds" >> $GITHUB_STEP_SUMMARY
+          echo "- Separate lint job for faster feedback" >> $GITHUB_STEP_SUMMARY 

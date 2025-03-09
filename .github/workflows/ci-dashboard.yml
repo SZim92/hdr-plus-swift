@@ -1,0 +1,79 @@
+name: CI Dashboard
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'  # Every Sunday at midnight
+
+jobs:
+  generate-dashboard:
+    name: Generate CI Dashboard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Generate CI dashboard
+        id: dashboard
+        uses: ./.github/actions/ci-dashboard
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          title: 'HDR+ Swift CI Dashboard'
+          workflow-id: 'main.yml'
+          days-of-history: '30'
+          output-path: 'ci-dashboard/index.html'
+      
+      - name: Deploy dashboard to GitHub Pages
+        run: |
+          # Create .nojekyll file to prevent Jekyll processing
+          touch ci-dashboard/.nojekyll
+          
+          # Set up Git user
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          # Create a new branch for the dashboard
+          git checkout -b ci-dashboard-updates
+          
+          # Add all changes
+          git add ci-dashboard/
+          
+          # Commit changes
+          git commit -m "ci: update CI dashboard"
+          
+          # Push to the repository
+          git push origin ci-dashboard-updates
+          
+          # Create or update PR
+          PR_EXISTS=$(gh pr list --state open --head ci-dashboard-updates --json number | jq 'length')
+          
+          if [ "$PR_EXISTS" -eq "0" ]; then
+            # Create a new PR
+            gh pr create --title "CI Dashboard Update" \
+                         --body "This PR updates the CI Dashboard with the latest metrics. This is an automated PR created by the CI Dashboard workflow." \
+                         --base main \
+                         --head ci-dashboard-updates \
+                         --label "area/ci" \
+                         --label "automated"
+          else
+            # Update existing PR
+            echo "PR already exists, pushing updates only."
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Create summary with dashboard link
+        run: |
+          echo "## CI Dashboard Generated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The CI dashboard has been updated with the latest metrics." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Actions" >> $GITHUB_STEP_SUMMARY
+          echo "- A PR has been created/updated with the new dashboard" >> $GITHUB_STEP_SUMMARY
+          echo "- View the dashboard by checking out the PR branch" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Once merged, the dashboard will be available in the repository under `/ci-dashboard/`." >> $GITHUB_STEP_SUMMARY 
