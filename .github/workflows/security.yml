@@ -141,33 +141,24 @@ jobs:
           echo "- Maintain regular dependency updates" >> security-reports/dependency-scan.md
           echo "- Monitor security bulletins for Swift packages" >> security-reports/dependency-scan.md
       
+      - name: Check if SwiftLint is installed
+        id: check-swiftlint
+        run: |
+          if command -v swiftlint &> /dev/null; then
+            echo "swiftlint-installed=true" >> $GITHUB_OUTPUT
+          else
+            echo "swiftlint-installed=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Install SwiftLint
+        if: steps.check-swiftlint.outputs.swiftlint-installed != 'true'
+        uses: ./.github/actions/install-brew-package
+        with:
+          package-name: 'swiftlint'
+      
       - name: Run Swift security linting
         run: |
           echo "Running Swift security linting..."
-          
-          # Install SwiftLint using the correct architecture flag
-          if ! command -v swiftlint &> /dev/null; then
-            echo "Installing SwiftLint"
-            # Retry SwiftLint installation up to 3 times
-            max_attempts=3
-            attempt=1
-            while [ $attempt -le $max_attempts ]; do
-              echo "Attempt $attempt of $max_attempts"
-              if arch -arm64 brew install swiftlint || brew install swiftlint; then
-                echo "SwiftLint installed successfully"
-                break
-              else
-                echo "SwiftLint installation failed"
-                if [ $attempt -lt $max_attempts ]; then
-                  echo "Retrying in 5 seconds..."
-                  sleep 5
-                else
-                  echo "Could not install SwiftLint after $max_attempts attempts, skipping lint step"
-                fi
-                attempt=$((attempt+1))
-              fi
-            done
-          fi
           
           # Create security report directory
           mkdir -p security-reports
