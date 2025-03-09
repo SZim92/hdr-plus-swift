@@ -1,0 +1,213 @@
+name: Swift Warning Tracker
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  track-warnings:
+    name: Track Swift Compiler Warnings
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Swift environment
+        uses: ./.github/actions/optimized-swift-setup
+        with:
+          cache-name: 'warning-tracker'
+          
+      - name: Check for cached warning data
+        id: cache-warnings
+        uses: actions/cache@v3
+        with:
+          path: |
+            warning-history
+            previous-warnings.txt
+          key: swift-warnings-${{ github.repository }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            swift-warnings-${{ github.repository }}-${{ github.ref_name }}-
+            swift-warnings-${{ github.repository }}-main-
+          
+      - name: Track Swift compiler warnings
+        run: |
+          echo "Tracking Swift compiler warnings..."
+          
+          # Create directories
+          mkdir -p warning-reports
+          mkdir -p warning-history
+          
+          # Run build with warnings output
+          xcodebuild build \
+            -project burstphoto.xcodeproj \
+            -scheme gui \
+            -destination "platform=macOS" \
+            OTHER_SWIFT_FLAGS="-warnings-as-errors" \
+            2>&1 | tee build.log || true
+          
+          # Extract warnings and store them
+          grep -n "warning:" build.log > warning-reports/all-warnings.txt || true
+          
+          # Count total warnings
+          TOTAL_WARNINGS=$(grep -c "warning:" build.log || echo "0")
+          echo "Total warnings: $TOTAL_WARNINGS"
+          
+          # Generate detailed report
+          echo "# Swift Compiler Warning Report" > warning-reports/report.md
+          echo "" >> warning-reports/report.md
+          echo "Generated on $(date)" >> warning-reports/report.md
+          echo "" >> warning-reports/report.md
+          echo "## Summary" >> warning-reports/report.md
+          echo "" >> warning-reports/report.md
+          echo "Total warnings: **$TOTAL_WARNINGS**" >> warning-reports/report.md
+          
+          # Add warning counts by file
+          echo "" >> warning-reports/report.md
+          echo "## Warnings by File" >> warning-reports/report.md
+          echo "" >> warning-reports/report.md
+          
+          grep "warning:" build.log | grep -o '[^/]*\.swift:[0-9]*:[0-9]*' | sort | uniq -c | sort -nr > warning-reports/by-file.txt
+          
+          if [ -s warning-reports/by-file.txt ]; then
+            echo "| Count | File |" >> warning-reports/report.md
+            echo "|-------|------|" >> warning-reports/report.md
+            while read -r line; do
+              COUNT=$(echo "$line" | awk '{print $1}')
+              FILE=$(echo "$line" | awk '{$1=""; print $0}' | xargs)
+              echo "| $COUNT | \`$FILE\` |" >> warning-reports/report.md
+            done < warning-reports/by-file.txt
+          else
+            echo "No warnings detected by file." >> warning-reports/report.md
+          fi
+          
+          # Add warning counts by type
+          echo "" >> warning-reports/report.md
+          echo "## Warnings by Type" >> warning-reports/report.md
+          echo "" >> warning-reports/report.md
+          
+          grep "warning:" build.log | sed 's/.*warning: \(.*\)/\1/' | sort | uniq -c | sort -nr > warning-reports/by-type.txt
+          
+          if [ -s warning-reports/by-type.txt ]; then
+            echo "| Count | Warning Type |" >> warning-reports/report.md
+            echo "|-------|-------------|" >> warning-reports/report.md
+            while read -r line; do
+              COUNT=$(echo "$line" | awk '{print $1}')
+              TYPE=$(echo "$line" | awk '{$1=""; print $0}' | xargs)
+              echo "| $COUNT | $TYPE |" >> warning-reports/report.md
+            done < warning-reports/by-type.txt
+          else
+            echo "No warnings detected by type." >> warning-reports/report.md
+          fi
+          
+          # Compare with previous run
+          if [ -s "previous-warnings.txt" ]; then
+            echo "" >> warning-reports/report.md
+            echo "## Changes from Previous Build" >> warning-reports/report.md
+            echo "" >> warning-reports/report.md
+            
+            PREV_COUNT=$(wc -l < previous-warnings.txt)
+            NEW_COUNT=$(grep -vf previous-warnings.txt warning-reports/all-warnings.txt | wc -l || echo "0")
+            FIXED_COUNT=$(grep -vf warning-reports/all-warnings.txt previous-warnings.txt | wc -l || echo "0")
+            
+            echo "- Previous warning count: $PREV_COUNT" >> warning-reports/report.md
+            echo "- New warnings: $NEW_COUNT" >> warning-reports/report.md
+            echo "- Fixed warnings: $FIXED_COUNT" >> warning-reports/report.md
+            
+            # Track new warnings
+            if [ "$NEW_COUNT" -gt 0 ]; then
+              echo "" >> warning-reports/report.md
+              echo "### New Warnings" >> warning-reports/report.md
+              echo "" >> warning-reports/report.md
+              
+              grep -vf previous-warnings.txt warning-reports/all-warnings.txt > warning-reports/new-warnings.txt || true
+              
+              if [ -s warning-reports/new-warnings.txt ]; then
+                echo "\`\`\`" >> warning-reports/report.md
+                cat warning-reports/new-warnings.txt >> warning-reports/report.md
+                echo "\`\`\`" >> warning-reports/report.md
+              fi
+            fi
+            
+            # Track fixed warnings
+            if [ "$FIXED_COUNT" -gt 0 ]; then
+              echo "" >> warning-reports/report.md
+              echo "### Fixed Warnings" >> warning-reports/report.md
+              echo "" >> warning-reports/report.md
+              
+              grep -vf warning-reports/all-warnings.txt previous-warnings.txt > warning-reports/fixed-warnings.txt || true
+              
+              if [ -s warning-reports/fixed-warnings.txt ]; then
+                echo "\`\`\`" >> warning-reports/report.md
+                cat warning-reports/fixed-warnings.txt >> warning-reports/report.md
+                echo "\`\`\`" >> warning-reports/report.md
+              fi
+            fi
+          fi
+          
+          # Add warning history trend (if we have history data)
+          if [ -d "warning-history" ]; then
+            # Save current count to history
+            echo "$(date +%Y-%m-%d),$TOTAL_WARNINGS" >> warning-history/data.csv
+            
+            # Create trend section
+            echo "" >> warning-reports/report.md
+            echo "## Warning Trend" >> warning-reports/report.md
+            echo "" >> warning-reports/report.md
+            echo "Date | Count" >> warning-reports/report.md
+            echo "-----|------" >> warning-reports/report.md
+            
+            # Add last 5 entries (most recent first)
+            sort -r warning-history/data.csv | head -5 | while read -r line; do
+              DATE=$(echo "$line" | cut -d ',' -f1)
+              COUNT=$(echo "$line" | cut -d ',' -f2)
+              echo "$DATE | $COUNT" >> warning-reports/report.md
+            done
+          else
+            # First run, initialize history
+            echo "date,count" > warning-history/data.csv
+            echo "$(date +%Y-%m-%d),$TOTAL_WARNINGS" >> warning-history/data.csv
+          fi
+          
+          # Save for next comparison
+          cp warning-reports/all-warnings.txt previous-warnings.txt
+          
+          # Output to GitHub step summary
+          cat warning-reports/report.md >> $GITHUB_STEP_SUMMARY
+          
+      - name: Add PR comment for warnings
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            
+            try {
+              const reportContent = fs.readFileSync('warning-reports/report.md', 'utf8');
+              const newWarnings = fs.existsSync('warning-reports/new-warnings.txt');
+              
+              // Only comment if there are new warnings or more than 10 total warnings
+              const totalWarnings = reportContent.match(/Total warnings: \*\*(\d+)\*\*/);
+              const warningCount = totalWarnings ? parseInt(totalWarnings[1]) : 0;
+              
+              if (newWarnings || warningCount > 10) {
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: reportContent
+                });
+              }
+            } catch (error) {
+              console.error('Error adding PR comment:', error);
+            }
+      
+      - name: Upload warning report
+        uses: actions/upload-artifact@v4
+        with:
+          name: warning-report
+          path: warning-reports/
+          retention-days: 7 

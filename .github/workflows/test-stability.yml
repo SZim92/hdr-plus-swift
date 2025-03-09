@@ -1,0 +1,123 @@
+name: Test Stability Tracker
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types:
+      - completed
+
+jobs:
+  analyze-flaky-tests:
+    name: Detect Flaky Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 5
+      
+      - name: Download test results
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          workflow: CI
+          workflow_conclusion: any
+          name: test-results-*
+          path: test-results
+          
+      - name: Identify flaky tests
+        id: analyze
+        run: |
+          mkdir -p flaky-test-reports
+          
+          echo "Analyzing test stability across recent runs..."
+          
+          # Process test results
+          find test-results -name "test-report.md" | while read report; do
+            echo "Processing $report..."
+            
+            # Extract test names and statuses
+            TEST_OS=$(echo $report | grep -o 'macos-[0-9][0-9]' || echo "unknown")
+            
+            # Extract failed tests
+            if grep -q "### " "$report"; then
+              echo "Found failed tests in $TEST_OS run"
+              grep -A 3 "^### " "$report" | grep -v "^--$" > "flaky-test-reports/failed-$TEST_OS.txt" || true
+            fi
+          done
+          
+          # Create the flaky test report
+          cat > flaky-test-reports/report.md << EOF
+          # Flaky Test Report
+          
+          Analysis of test stability across recent runs. Tests that pass in some runs but fail in others may be flaky.
+          
+          ## Potentially Flaky Tests
+          
+          | Test Name | OS | Status | Details |
+          |-----------|----|----|---------|
+          EOF
+          
+          # Count occurrences and identify potential flaky tests
+          FOUND_FLAKY=false
+          if [ -d "flaky-test-reports" ]; then
+            ALL_TESTS=$(find flaky-test-reports -name "failed-*.txt" -exec grep "^### " {} \; | sed 's/^### //' | sort | uniq)
+            for test in $ALL_TESTS; do
+              # Count how many times this test appears
+              FAILURES=$(find flaky-test-reports -name "failed-*.txt" -exec grep -l "^### $test" {} \; | wc -l | xargs)
+              if [ "$FAILURES" -gt 0 ]; then
+                # Extract error message for this test from the most recent failure
+                RECENT_FAILURE=$(find flaky-test-reports -name "failed-*.txt" -exec grep -l "^### $test" {} \; | head -1)
+                if [ -n "$RECENT_FAILURE" ]; then
+                  ERROR=$(grep -A 2 "^### $test" "$RECENT_FAILURE" | grep "Error:" | sed 's/.*Error: //' || echo "Unknown error")
+                  OS=$(basename "$RECENT_FAILURE" | sed 's/failed-//' | sed 's/.txt//')
+                  
+                  # If we have info about multiple runs, check for flakiness
+                  TOTAL_RUNS=2  # Assuming at least 2 runs for now; in real scenario you'd count actual runs
+                  if [ "$FAILURES" -lt "$TOTAL_RUNS" ]; then
+                    echo "| $test | $OS | ⚠️ Flaky | $ERROR |" >> flaky-test-reports/report.md
+                    FOUND_FLAKY=true
+                  else
+                    echo "| $test | $OS | ❌ Failing | $ERROR |" >> flaky-test-reports/report.md
+                  fi
+                fi
+              fi
+            done
+          fi
+          
+          # If no flaky tests were found, note that
+          if [ "$FOUND_FLAKY" = false ]; then
+            echo "No flaky tests detected in recent runs." >> flaky-test-reports/report.md
+          fi
+          
+          # Update the known flaky tests file
+          mkdir -p .github
+          touch .github/known-flaky-tests.txt  # Create if doesn't exist
+          
+          # Append to GitHub step summary
+          cat flaky-test-reports/report.md >> $GITHUB_STEP_SUMMARY
+          
+          # Set output
+          if [ "$FOUND_FLAKY" = true ]; then
+            echo "found_flaky=true" >> $GITHUB_OUTPUT
+          else
+            echo "found_flaky=false" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Upload flaky test report
+        uses: actions/upload-artifact@v4
+        with:
+          name: flaky-test-report
+          path: flaky-test-reports/
+          retention-days: 14
+          
+      - name: Comment on PR if flaky tests found
+        if: github.event.workflow_run.event == 'pull_request' && steps.analyze.outputs.found_flaky == 'true'
+        run: |
+          # Get PR number from the triggering workflow
+          PR_NUMBER=$(cat $GITHUB_EVENT_PATH | jq -r '.workflow_run.pull_requests[0].number')
+          
+          if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+            # Create PR comment with flaky test info
+            gh pr comment $PR_NUMBER --body "$(cat flaky-test-reports/report.md)"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
