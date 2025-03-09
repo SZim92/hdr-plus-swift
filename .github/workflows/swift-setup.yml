@@ -1,0 +1,71 @@
+name: Reusable Swift Setup
+
+on:
+  workflow_call:
+    inputs:
+      cache-key:
+        required: false
+        type: string
+        default: 'default'
+        description: 'Additional key to use for caching'
+      use-swiftlint:
+        required: false
+        type: boolean
+        default: true
+        description: 'Whether to set up SwiftLint'
+      skip-code-signing:
+        required: false
+        type: boolean
+        default: true
+        description: 'Whether to disable code signing'
+
+jobs:
+  setup-swift:
+    runs-on: macos-latest
+    steps:
+      - name: Cache Swift dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/SwiftLint
+            ~/Library/Caches/Homebrew
+            ~/Library/Developer/Xcode/DerivedData
+            ~/.swiftpm
+          key: ${{ runner.os }}-macos-swift-${{ inputs.cache-key }}-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-macos-swift-${{ inputs.cache-key }}-
+            ${{ runner.os }}-macos-swift-
+      
+      - name: Verify Swift installation
+        id: swift-check
+        run: |
+          echo "Verifying Swift installation..."
+          swift --version
+          echo "swift_version=$(swift --version | head -n 1 | awk '{print $4}')" >> $GITHUB_OUTPUT
+      
+      - name: Install SwiftLint if needed
+        if: inputs.use-swiftlint
+        run: |
+          if ! command -v swiftlint &> /dev/null; then
+            echo "Installing SwiftLint"
+            arch -arm64 brew install swiftlint || brew install swiftlint || echo "Could not install SwiftLint, continuing without it"
+          else
+            echo "SwiftLint already installed"
+          fi
+      
+      - name: Disable code signing if requested
+        if: inputs.skip-code-signing
+        run: |
+          echo "Disabling code signing..."
+          defaults write com.apple.dt.Xcode IDESkipCodeSigningVerification -bool YES
+          if [ -f ~/.lldbinit ]; then
+            echo "settings set target.load-cwd-lldbinit false" >> ~/.lldbinit
+          else
+            echo "settings set target.load-cwd-lldbinit false" > ~/.lldbinit
+          fi
+          
+          # Also create environment variables for use with xcodebuild
+          echo "EXPANDED_CODE_SIGN_IDENTITY=-" >> $GITHUB_ENV
+          echo "EXPANDED_CODE_SIGN_IDENTITY_NAME=-" >> $GITHUB_ENV
+          echo "CODE_SIGNING_REQUIRED=NO" >> $GITHUB_ENV
+          echo "CODE_SIGNING_ALLOWED=NO" >> $GITHUB_ENV 
