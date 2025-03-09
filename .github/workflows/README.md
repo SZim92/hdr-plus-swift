@@ -1,247 +1,168 @@
-# HDR+ Swift CI/CD Workflows
+# HDR+ Swift CI/CD System
 
-This directory contains GitHub Actions workflows for the HDR+ Swift project.
+This document provides an overview of the CI/CD system for HDR+ Swift, including descriptions of all workflows, best practices, and troubleshooting information.
 
-## Workflow Structure
+## Workflow Categories
 
-The CI/CD system is organized into multiple specialized workflows:
+### Core Workflows
 
-| Workflow | Description | Triggers |
-|----------|-------------|----------|
-| [main.yml](main.yml) | Primary build and test pipeline | Push to main, PRs, manual |
-| [pr-validation.yml](pr-validation.yml) | PR quality checks and validation | PRs only |
-| [release.yml](release.yml) | Release automation | Tags starting with 'v' |
-| [security.yml](security.yml) | Security scanning | Push to main, PRs, weekly schedule, manual |
-| [performance.yml](performance.yml) | Performance tracking | Push to main, weekly schedule, manual |
-| [documentation.yml](documentation.yml) | API documentation generation | Push to main, manual |
-| [maintenance.yml](maintenance.yml) | Repository maintenance | Push to main, manual |
-| [scheduled.yml](scheduled.yml) | Scheduled cleanup tasks | Weekly schedule, manual |
-| [code-coverage.yml](code-coverage.yml) | Code coverage reporting | Push to main, PRs, weekly schedule, manual |
-| [cross-platform.yml](cross-platform.yml) | Cross-platform compatibility testing | Push to main, PRs, weekly schedule, manual |
-| [dependency-scan.yml](dependency-scan.yml) | Dependency vulnerability scanning | Push to main, weekly schedule, manual |
-| [dashboard.yml](dashboard.yml) | CI/CD dashboard generation | Daily schedule, manual |
-| [orchestrator.yml](orchestrator.yml) | Centralized workflow orchestrator | Manual only |
-| [dependency-updates.yml](dependency-updates.yml) | Automated dependency updates | Weekly schedule, manual |
-| [stale-management.yml](stale-management.yml) | Manage stale issues and PRs | Daily schedule, manual |
-| [release-candidate.yml](release-candidate.yml) | Release candidate testing | Manual only |
-| [performance-benchmarks.yml](performance-benchmarks.yml) | Performance regression detection | Push to main, PRs, weekly schedule, manual |
-| [cleanup-artifacts.yml](cleanup-artifacts.yml) | Clean up old workflow artifacts | Weekly schedule, manual |
-| [binary-size.yml](binary-size.yml) | Binary size analysis and tracking | Push to main, PRs, manual |
+These workflows handle the primary build, test, and release processes:
 
-## Reusable Components
+- **[main.yml](./main.yml)**: Main CI workflow for building and testing on push/PR
+- **[release.yml](./release.yml)**: Release workflow for creating and publishing releases
+- **[release-candidate.yml](./release-candidate.yml)**: Release candidate validation workflow
 
-The CI system uses several reusable components:
+### Code Quality Workflows
 
-### Configuration Files
-- [versions.env](../.github/versions.env) - Shared environment variables for version info and configuration
-- [workflow-config.yml](../.github/workflow-config.yml) - Shared YAML configuration for workflows
+These workflows focus on code quality, linting, and style enforcement:
 
-### Composite Actions
-- [setup-swift](../.github/actions/setup-swift) - Sets up Swift environment with caching
-- [extract-version](../.github/actions/extract-version) - Extracts version information from git tags
-- [notify-slack](../.github/actions/notify-slack) - Sends notifications to Slack
-- [generate-changelog](../.github/actions/generate-changelog) - Generates formatted changelog from commits
-- [load-config](../.github/actions/load-config) - Loads shared configuration values from YAML
-- [build-cache](../.github/actions/build-cache) - Advanced caching strategy for Swift/Xcode builds
-- [run-benchmarks](../.github/actions/run-benchmarks) - Runs and analyzes performance benchmarks
-- [setup-macos-build](../.github/actions/setup-macos-build) - Configures macOS build environment with code signing settings
-- [security-scan-macos](../.github/actions/security-scan-macos) - Runs security checks specifically for macOS Swift code
+- **[warning-tracker.yml](./warning-tracker.yml)**: Tracks Swift compiler warnings over time
+- **[test-stability.yml](./test-stability.yml)**: Identifies flaky tests that pass/fail inconsistently
+- **[build-time-analyzer.yml](./build-time-analyzer.yml)**: Analyzes build times and suggests optimizations
+- **[code-coverage.yml](./code-coverage.yml)**: Generates and tracks code coverage metrics
 
-### Local Development Tools
-- [local-validate.sh](../.github/scripts/local-validate.sh) - Script for validating changes locally
-- [setup-hooks.sh](../.github/scripts/setup-hooks.sh) - Script for setting up git hooks
-- [branch-protection.sh](../.github/branch-protection.sh) - Script for configuring branch protection rules
+### Performance & Size Workflows
 
-### Project Templates
-- [PULL_REQUEST_TEMPLATE.md](../.github/PULL_REQUEST_TEMPLATE.md) - Template for pull requests
-- [ISSUE_TEMPLATE](../.github/ISSUE_TEMPLATE) - Templates for bug reports, feature requests, and documentation updates
+These workflows monitor performance and binary size:
 
-## Advanced Features
+- **[performance.yml](./performance.yml)**: Runs and tracks performance benchmarks
+- **[performance-benchmarks.yml](./performance-benchmarks.yml)**: Detailed performance benchmarks
+- **[binary-size.yml](./binary-size.yml)**: Tracks binary size changes over time
 
-### Workflow Orchestration
-Use the orchestrator workflow to trigger multiple workflows in sequence with consistent parameters:
-```
-gh workflow run orchestrator.yml -f workflows=main,security,performance,code-coverage
-```
+### Security Workflows
 
-### Code Coverage Reporting
-Tracks code coverage metrics over time and compares coverage changes in PRs:
-```
-gh workflow run code-coverage.yml
-```
+These workflows focus on security scanning and dependency analysis:
 
-### Cross-Platform Testing
-Tests the codebase on multiple platforms and Swift/Xcode versions:
-```
-gh workflow run cross-platform.yml -f platform_filter=macos-14,ubuntu-latest
-```
+- **[security.yml](./security.yml)**: Main security scanning workflow
+- **[dependency-scan.yml](./dependency-scan.yml)**: Scans dependencies for vulnerabilities
+- **[dependency-updates.yml](./dependency-updates.yml)**: Checks for available dependency updates
 
-### CI/CD Dashboard
-Generates a visual dashboard of all CI/CD activity, deployed to GitHub Pages:
-```
-gh workflow run dashboard.yml
-```
+### Documentation & Visualization
 
-### Automated Dependency Updates
-Checks for dependency updates and creates PRs for Swift packages and CocoaPods:
-```
-gh workflow run dependency-updates.yml -f create_pull_request=true
-```
+These workflows focus on documentation and dashboards:
 
-### Release Candidate Testing
-Creates and tests a release candidate with expiration date:
-```
-gh workflow run release-candidate.yml -f version=1.2.0-rc.1 -f expire_days=7
-```
+- **[documentation.yml](./documentation.yml)**: Builds and verifies documentation
+- **[dashboard.yml](./dashboard.yml)**: Builds the CI dashboard
+- **[ci-dashboard.yml](./ci-dashboard.yml)**: Updates the CI metrics dashboard
 
-### Repository Management
-Manages stale issues and PRs, automatically closing inactive ones:
-```
-gh workflow run stale-management.yml
-```
+### Maintenance Workflows
 
-### Branch Protection
-Set up comprehensive branch protection rules:
-```
-.github/branch-protection.sh YOUR_GITHUB_TOKEN owner repo
-```
+These workflows handle repository and workflow maintenance:
 
-### Performance Benchmarking
-Track and analyze performance metrics, detecting regressions automatically:
-```
-gh workflow run performance-benchmarks.yml
-```
+- **[maintenance.yml](./maintenance.yml)**: General repository maintenance tasks
+- **[cleanup-artifacts.yml](./cleanup-artifacts.yml)**: Cleans up old workflow artifacts
+- **[stale-management.yml](./stale-management.yml)**: Manages stale issues and PRs
+- **[pr-labeler.yml](./pr-labeler.yml)**: Automatically labels PRs based on content
 
-### Artifact Cleanup
-Clean up old workflow artifacts to save storage space:
-```
-gh workflow run cleanup-artifacts.yml -f days_old=30 -f dry_run=true
-```
+### Specialized Workflows
 
-### Binary Size Analysis
+These workflows handle specific scenarios:
 
-Track and analyze binary size of your app builds:
+- **[cross-platform.yml](./cross-platform.yml)**: Tests on multiple platforms
+- **[orchestrator.yml](./orchestrator.yml)**: Coordinates multiple workflows
+- **[scheduled.yml](./scheduled.yml)**: Scheduled maintenance tasks
+- **[swift-setup.yml](./swift-setup.yml)**: Reusable workflow for Swift setup
+- **[config.yml](./config.yml)**: Configuration management workflow
 
-```
-gh workflow run binary-size.yml
-```
+## Shared Components (Actions)
 
-This will:
-- Build your app in Release configuration
-- Calculate app bundle and executable sizes
-- Check against defined thresholds
-- Report detailed size information
+We use several reusable composite actions to share functionality across workflows:
 
-### Enhanced Security Scanning
+- **[optimized-swift-setup](../.github/actions/optimized-swift-setup)**: Sets up Swift with optimized caching
+- **[test-results-visualizer](../.github/actions/test-results-visualizer)**: Visualizes test results
+- **[install-brew-package](../.github/actions/install-brew-package)**: Installs and caches Homebrew packages
 
-The security workflow now includes:
-- CodeQL analysis with Swift support
-- macOS-specific security checks using SwiftLint
-- Detection of insecure API usage
-- Scanning for hardcoded credentials
+## Workflow Triggers
 
-```
-gh workflow run security.yml
-```
+| Workflow | Push | PR | Schedule | Manual | Other |
+|----------|------|----|---------:|-------:|-------|
+| main.yml | ✅ | ✅ | ❌ | ✅ | ❌ |
+| release.yml | ❌ | ❌ | ❌ | ✅ | Tags |
+| warning-tracker.yml | ✅ | ✅ | ❌ | ✅ | ❌ |
+| test-stability.yml | ❌ | ❌ | ❌ | ❌ | After CI |
+| security.yml | ✅ | ✅ | ✅ | ✅ | ❌ |
+| performance.yml | ✅ | ✅ | ❌ | ✅ | ❌ |
+| documentation.yml | ✅ | ✅ | ❌ | ✅ | ❌ |
+| build-time-analyzer.yml | ❌ | ✅* | ✅ | ✅ | ❌ |
+| cleanup-artifacts.yml | ❌ | ❌ | ✅ | ✅ | ❌ |
 
-## Build Optimization
+*Only on specific file changes
 
-The CI system includes several optimizations to improve build performance:
+## Path-Based Filtering
 
-### Advanced Caching
-The `build-cache` action provides smart caching for:
-- Swift Package Manager dependencies
-- Xcode derived data
-- CocoaPods dependencies
+Many workflows use path-based filtering to optimize when they run:
 
-### Parallel Execution
-Jobs run in parallel where possible, with dependencies declared where needed.
+- Code-only changes: `burstphoto/**`
+- Documentation changes: `docs/**`, `**/*.md`
+- Dependency changes: `Package.swift`, `**/*.xcodeproj`
+- CI changes: `.github/workflows/**`, `.github/actions/**`
 
-### Conditional Execution
-Many jobs only run when certain conditions are met, avoiding unnecessary work.
+## Best Practices
 
-### Code Signing in CI
-The `setup-macos-build` action handles code signing configuration:
-- Disables code signing for CI builds by default
-- Supports actual code signing with team ID when needed
-- Creates custom xcconfig settings for disabling code signing
+### When to Use Each Workflow
 
-## How to Use
+1. **Main Build & Test** (`main.yml`):
+   - This runs automatically on PRs and pushes to main
+   - Manually trigger when testing general functionality
 
-### Running Workflows Manually
+2. **Code Quality Checks**:
+   - `warning-tracker.yml`: Runs automatically; check its reports when investigating warning issues
+   - `test-stability.yml`: Automatically runs after the main workflow; check results for flaky tests
+   - `build-time-analyzer.yml`: Manually trigger when investigating slow builds
 
-Most workflows can be triggered manually from the GitHub Actions tab. Look for the "workflow_dispatch" trigger.
+3. **Performance Monitoring**:
+   - `performance.yml` and `binary-size.yml`: Automatically run on PRs to catch regressions
+   - `performance-benchmarks.yml`: Manually trigger for detailed performance analysis
 
-### Adding a New Workflow
+### Debugging Failed Workflows
 
-1. Create a new YAML file in the `.github/workflows` directory
-2. Use existing workflows as templates
-3. Reuse shared components for consistency
-4. Update this README to document the new workflow
+1. Check the workflow logs for specific error messages
+2. For setup issues, try manually triggering the workflow with a clean cache
+3. For test failures, look at the test-results-visualizer output
+4. For inconsistent/flaky failures, check the test-stability reports
 
-### Debugging Workflow Issues
+### Workflow Timeouts
 
-If a workflow is failing:
+Workflows have timeout limits to prevent hanging:
+- Standard workflows: 30 minutes
+- Complex build workflows: 45 minutes
+- Performance tests: 60 minutes
 
-1. Check the workflow run logs for detailed error messages
-2. Verify that environment variables and secrets are properly configured
-3. Try running the workflow manually to isolate issues
-4. For PR validation issues, make sure your PR follows the required conventions
+If a workflow times out:
+1. Check if it's a temporary resource issue
+2. Consider optimizing the workflow for speed
+3. For legitimate long-running tasks, adjust the timeout limit
 
-### Performance Testing
+## Common CI Issues and Solutions
 
-When running performance tests:
+| Issue | Possible Causes | Solutions |
+|-------|----------------|-----------|
+| Cache miss | New branch, modified dependencies | Wait for first run to complete |
+| Swift version mismatch | Xcode update, version conflict | Specify swift-version input |
+| Code signing errors | Certificates not available | Ensure disable-code-signing is enabled |
+| Flaky tests | Timing-dependent tests, resource issues | Check test-stability reports |
+| Slow builds | Large Swift files, type checking | Check build-time-analyzer reports |
 
-1. Use the `run-benchmarks` action in your workflow
-2. Create baselines from stable releases
-3. Check for regressions in PRs automatically
-4. View historical benchmark data to identify long-term trends
+## Extending the CI System
 
-## Continuous Improvement
+When adding new workflows:
 
-We welcome suggestions for improving these workflows. If you have ideas:
+1. **Use existing patterns**: Follow the structure of similar workflows
+2. **Leverage shared actions**: Use optimized-swift-setup and other shared actions
+3. **Add path filters**: Only run when relevant files change
+4. **Add timeouts**: Always include job-level timeout limits
+5. **Document**: Add your workflow to this README
 
-1. Open an issue to discuss the proposed changes
-2. Submit a PR with your improvements
-3. Update documentation to reflect your changes
+## Contributing
 
-## Workflow Visualization
+Improvements to the CI system are welcome! Please consider:
 
-```mermaid
-graph TD
-    A[Code Changes] --> B[PR Created]
-    B --> C[PR Validation]
-    C --> D[Main Build]
-    D --> E{Success?}
-    E -->|Yes| F[Merge to Main]
-    E -->|No| G[Fix Issues]
-    G --> B
-    F --> H[Documentation]
-    F --> I[Performance Analysis]
-    F --> J[Security Scanning]
-    F --> K[Maintenance]
-    F --> L[Code Coverage]
-    F --> M[Cross-Platform Tests]
-    N[Tag Release] --> O[Release Process]
-    P[Weekly Schedule] --> Q[Scheduled Tasks]
-    P --> R[Dependency Scan]
-    P --> S[Dependency Updates]
-    P --> AC[Cleanup Artifacts]
-    T[Daily Schedule] --> U[CI Dashboard]
-    T --> V[Stale Management]
-    W[Manual Trigger] --> X[Orchestrator]
-    X --> Y{Select Workflows}
-    Y --> D
-    Y --> J
-    Y --> I
-    Y --> H
-    Y --> O
-    Z[Manual Release] --> AA[Release Candidate]
-    AA --> AB{Testing Period}
-    AB -->|Success| O
-    AB -->|Issues| G
-    B --> AD[Performance Benchmarks]
-    AD --> AE{Regression?}
-    AE -->|Yes| AF[Report in PR]
-    AE -->|No| AG[Update History]
-``` 
+1. Making workflows faster
+2. Reducing duplication across workflows
+3. Improving error handling and resilience
+4. Adding useful metrics and visualizations
+
+When submitting CI changes, ensure:
+- Changes don't break existing workflows
+- New features are documented
+- Timeouts and retry strategies are appropriate 
