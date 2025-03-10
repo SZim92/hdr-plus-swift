@@ -35,11 +35,12 @@ jobs:
       # Add Swift version verification step
       - name: Verify Swift installation
         id: swift-verify
+        continue-on-error: true  # Don't fail the workflow if this step fails
         run: |
           echo "Verifying Swift installation..."
           
           # Simple test of Swift environment
-          if ! swift --version &> swift-version.log; then
+          if ! swift --version > swift-version.log 2>&1; then
             echo "::warning::Swift installation check failed. See logs for details."
             cat swift-version.log || echo "No log available"
             echo "swift_working=false" >> $GITHUB_OUTPUT
@@ -50,7 +51,7 @@ jobs:
           fi
           
           # Check Xcode availability
-          if ! xcodebuild -version &> xcode-version.log; then
+          if ! /usr/bin/xcrun xcodebuild -version > xcode-version.log 2>&1; then
             echo "::warning::Xcode check failed. See logs for details."
             cat xcode-version.log || echo "No log available"
             echo "xcode_working=false" >> $GITHUB_OUTPUT
@@ -75,20 +76,20 @@ jobs:
       # Add a pre-build verification step
       - name: Pre-build verification
         id: pre-build
+        continue-on-error: true  # Don't fail the workflow if this step fails
         run: |
           echo "Performing pre-build verification..."
           
           # Check for xcodebuild command
           if command -v xcodebuild >/dev/null 2>&1; then
             # Test xcodebuild with minimal options to see if it's working correctly
-            xcodebuild -version > xcodebuild-version.log 2>&1 || true
+            /usr/bin/xcrun xcodebuild -list > xcodebuild-list.log 2>&1 || true
             
-            if [ -s "xcodebuild-version.log" ]; then
-              echo "xcodebuild verification successful:"
-              cat xcodebuild-version.log
+            if [ -s "xcodebuild-list.log" ] && ! grep -q "error:" xcodebuild-list.log; then
+              echo "xcodebuild verification successful"
               echo "xcodebuild_working=true" >> $GITHUB_OUTPUT
             else
-              echo "::warning::xcodebuild verification failed - no output"
+              echo "::warning::xcodebuild verification failed - error in output"
               echo "xcodebuild_working=false" >> $GITHUB_OUTPUT
             fi
           else
@@ -97,8 +98,9 @@ jobs:
           fi
           
       - name: Track Swift compiler warnings
+        id: track-warnings
         env:
-          XCODEBUILD_WORKING: ${{ steps.pre-build.outputs.xcodebuild_working || 'true' }}
+          XCODEBUILD_WORKING: ${{ steps.pre-build.outputs.xcodebuild_working || 'false' }}
         run: |
           echo "Tracking Swift compiler warnings..."
           
@@ -120,8 +122,19 @@ jobs:
           # Add environment information
           echo "## Environment" >> warning-reports/report.md
           echo "" >> warning-reports/report.md
-          echo "Swift version: $(swift --version 2>/dev/null | head -1 || echo 'Not available')" >> warning-reports/report.md
-          echo "Xcode version: $(xcodebuild -version 2>/dev/null | head -1 || echo 'Not available')" >> warning-reports/report.md
+          
+          if [ -f "swift-version.log" ]; then
+            echo "Swift version: $(cat swift-version.log | head -1 || echo 'Not available')" >> warning-reports/report.md
+          else
+            echo "Swift version: Not available" >> warning-reports/report.md
+          fi
+          
+          if [ -f "xcode-version.log" ]; then
+            echo "Xcode version: $(cat xcode-version.log | head -1 || echo 'Not available')" >> warning-reports/report.md
+          else
+            echo "Xcode version: Not available" >> warning-reports/report.md
+          fi
+          
           echo "" >> warning-reports/report.md
           
           # Run build with warnings output and protect against failures
@@ -129,7 +142,7 @@ jobs:
             echo "Building project to analyze warnings..."
             
             # Skip build if xcodebuild is not working properly
-            if [ "$XCODEBUILD_WORKING" = "false" ]; then
+            if [ "$XCODEBUILD_WORKING" != "true" ]; then
               echo "::warning::Skipping build due to xcodebuild verification failure"
               BUILD_SUCCESS=false
               
@@ -137,8 +150,9 @@ jobs:
               echo "N/A:0:0: warning: Build skipped due to xcodebuild issues" > warning-reports/all-warnings.txt
               TOTAL_WARNINGS=0
             else
-              # Write directly to log file instead of using tee to avoid broken pipe errors
-              xcodebuild build \
+              # Run xcodebuild directly to a file to avoid pipe issues
+              echo "Running xcodebuild..."
+              /usr/bin/xcrun xcodebuild build \
                 -project burstphoto.xcodeproj \
                 -scheme gui \
                 -destination "platform=macOS" \
@@ -146,26 +160,31 @@ jobs:
                 > build.log 2>&1 || echo "Build exited with non-zero status (expected with -warnings-as-errors)"
               
               echo "Build command completed"
-              BUILD_SUCCESS=true
               
-              # Extract warnings only if we have a build log
+              # Check if we have a build log with useful content
               if [ -s "build.log" ]; then
                 echo "Processing build log for warnings..."
-                grep -n "warning:" build.log > warning-reports/all-warnings.txt || true
+                BUILD_SUCCESS=true
+                
+                # Extract warnings
+                grep "warning:" build.log > warning-reports/all-warnings.txt || true
                 
                 # Count total warnings
                 TOTAL_WARNINGS=$(grep -c "warning:" build.log || echo "0")
                 echo "Total warnings: $TOTAL_WARNINGS"
               else
-                echo "::warning::No build log was generated"
-                TOTAL_WARNINGS=0
-                touch warning-reports/all-warnings.txt
+                echo "::warning::No build log was generated or it's empty"
+                # Create a synthetic warning report
+                echo "N/A:0:0: warning: Unable to generate build log" > warning-reports/all-warnings.txt
+                TOTAL_WARNINGS=1
+                BUILD_SUCCESS=false
               fi
             fi
           else
             echo "::warning::Xcode project not found at expected location"
-            TOTAL_WARNINGS=0
-            touch warning-reports/all-warnings.txt
+            # Create a synthetic warning report
+            echo "N/A:0:0: warning: Xcode project not found" > warning-reports/all-warnings.txt
+            TOTAL_WARNINGS=1
             BUILD_SUCCESS=false
           fi
           
@@ -176,8 +195,8 @@ jobs:
           if [ "$BUILD_SUCCESS" == "true" ]; then
             echo "Build status: ✅ Completed" >> warning-reports/report.md
           else
-            echo "Build status: ❌ Failed" >> warning-reports/report.md
-            echo "Note: Warning analysis may be incomplete due to build failures." >> warning-reports/report.md
+            echo "Build status: ❌ Failed or skipped" >> warning-reports/report.md
+            echo "Note: Warning analysis may be incomplete." >> warning-reports/report.md
           fi
           
           echo "Total warnings: **$TOTAL_WARNINGS**" >> warning-reports/report.md
@@ -187,18 +206,22 @@ jobs:
           echo "## Warnings by File" >> warning-reports/report.md
           echo "" >> warning-reports/report.md
           
-          grep "warning:" build.log | grep -o '[^/]*\.swift:[0-9]*:[0-9]*' | sort | uniq -c | sort -nr > warning-reports/by-file.txt
-          
-          if [ -s warning-reports/by-file.txt ]; then
-            echo "| Count | File |" >> warning-reports/report.md
-            echo "|-------|------|" >> warning-reports/report.md
-            while read -r line; do
-              COUNT=$(echo "$line" | awk '{print $1}')
-              FILE=$(echo "$line" | awk '{$1=""; print $0}' | xargs)
-              echo "| $COUNT | \`$FILE\` |" >> warning-reports/report.md
-            done < warning-reports/by-file.txt
+          if [ -s "build.log" ]; then
+            grep "warning:" build.log | grep -o '[^/]*\.swift:[0-9]*:[0-9]*' | sort | uniq -c | sort -nr > warning-reports/by-file.txt || true
+            
+            if [ -s warning-reports/by-file.txt ]; then
+              echo "| Count | File |" >> warning-reports/report.md
+              echo "|-------|------|" >> warning-reports/report.md
+              while read -r line; do
+                COUNT=$(echo "$line" | awk '{print $1}')
+                FILE=$(echo "$line" | awk '{$1=""; print $0}' | xargs)
+                echo "| $COUNT | \`$FILE\` |" >> warning-reports/report.md
+              done < warning-reports/by-file.txt
+            else
+              echo "No warnings detected by file." >> warning-reports/report.md
+            fi
           else
-            echo "No warnings detected by file." >> warning-reports/report.md
+            echo "Build log not available for detailed analysis." >> warning-reports/report.md
           fi
           
           # Add warning counts by type
@@ -206,126 +229,40 @@ jobs:
           echo "## Warnings by Type" >> warning-reports/report.md
           echo "" >> warning-reports/report.md
           
-          grep "warning:" build.log | sed 's/.*warning: \(.*\)/\1/' | sort | uniq -c | sort -nr > warning-reports/by-type.txt
-          
-          if [ -s warning-reports/by-type.txt ]; then
-            echo "| Count | Warning Type |" >> warning-reports/report.md
-            echo "|-------|-------------|" >> warning-reports/report.md
-            while read -r line; do
-              COUNT=$(echo "$line" | awk '{print $1}')
-              TYPE=$(echo "$line" | awk '{$1=""; print $0}' | xargs)
-              echo "| $COUNT | $TYPE |" >> warning-reports/report.md
-            done < warning-reports/by-type.txt
-          else
-            echo "No warnings detected by type." >> warning-reports/report.md
-          fi
-          
-          # Compare with previous run
-          if [ -s "previous-warnings.txt" ]; then
-            echo "" >> warning-reports/report.md
-            echo "## Changes from Previous Build" >> warning-reports/report.md
-            echo "" >> warning-reports/report.md
+          if [ -s "build.log" ]; then
+            grep "warning:" build.log | sed 's/.*warning: \(.*\)/\1/' | sort | uniq -c | sort -nr > warning-reports/by-type.txt || true
             
-            PREV_COUNT=$(wc -l < previous-warnings.txt)
-            NEW_COUNT=$(grep -vf previous-warnings.txt warning-reports/all-warnings.txt | wc -l || echo "0")
-            FIXED_COUNT=$(grep -vf warning-reports/all-warnings.txt previous-warnings.txt | wc -l || echo "0")
-            
-            echo "- Previous warning count: $PREV_COUNT" >> warning-reports/report.md
-            echo "- New warnings: $NEW_COUNT" >> warning-reports/report.md
-            echo "- Fixed warnings: $FIXED_COUNT" >> warning-reports/report.md
-            
-            # Track new warnings
-            if [ "$NEW_COUNT" -gt 0 ]; then
-              echo "" >> warning-reports/report.md
-              echo "### New Warnings" >> warning-reports/report.md
-              echo "" >> warning-reports/report.md
-              
-              grep -vf previous-warnings.txt warning-reports/all-warnings.txt > warning-reports/new-warnings.txt || true
-              
-              if [ -s warning-reports/new-warnings.txt ]; then
-                echo "\`\`\`" >> warning-reports/report.md
-                cat warning-reports/new-warnings.txt >> warning-reports/report.md
-                echo "\`\`\`" >> warning-reports/report.md
-              fi
+            if [ -s warning-reports/by-type.txt ]; then
+              echo "| Count | Warning Type |" >> warning-reports/report.md
+              echo "|-------|-------------|" >> warning-reports/report.md
+              while read -r line; do
+                COUNT=$(echo "$line" | awk '{print $1}')
+                TYPE=$(echo "$line" | awk '{$1=""; print $0}' | xargs)
+                echo "| $COUNT | $TYPE |" >> warning-reports/report.md
+              done < warning-reports/by-type.txt
+            else
+              echo "No warnings detected by type." >> warning-reports/report.md
             fi
-            
-            # Track fixed warnings
-            if [ "$FIXED_COUNT" -gt 0 ]; then
-              echo "" >> warning-reports/report.md
-              echo "### Fixed Warnings" >> warning-reports/report.md
-              echo "" >> warning-reports/report.md
-              
-              grep -vf warning-reports/all-warnings.txt previous-warnings.txt > warning-reports/fixed-warnings.txt || true
-              
-              if [ -s warning-reports/fixed-warnings.txt ]; then
-                echo "\`\`\`" >> warning-reports/report.md
-                cat warning-reports/fixed-warnings.txt >> warning-reports/report.md
-                echo "\`\`\`" >> warning-reports/report.md
-              fi
-            fi
-          fi
-          
-          # Add warning history trend (if we have history data)
-          if [ -d "warning-history" ]; then
-            # Save current count to history
-            echo "$(date +%Y-%m-%d),$TOTAL_WARNINGS" >> warning-history/data.csv
-            
-            # Create trend section
-            echo "" >> warning-reports/report.md
-            echo "## Warning Trend" >> warning-reports/report.md
-            echo "" >> warning-reports/report.md
-            echo "Date | Count" >> warning-reports/report.md
-            echo "-----|------" >> warning-reports/report.md
-            
-            # Add last 5 entries (most recent first)
-            sort -r warning-history/data.csv | head -5 | while read -r line; do
-              DATE=$(echo "$line" | cut -d ',' -f1)
-              COUNT=$(echo "$line" | cut -d ',' -f2)
-              echo "$DATE | $COUNT" >> warning-reports/report.md
-            done
           else
-            # First run, initialize history
-            echo "date,count" > warning-history/data.csv
-            echo "$(date +%Y-%m-%d),$TOTAL_WARNINGS" >> warning-history/data.csv
+            echo "Build log not available for detailed analysis." >> warning-reports/report.md
           fi
           
-          # Save for next comparison
+          # Copy current warnings for next time
           cp warning-reports/all-warnings.txt previous-warnings.txt
-          
-          # Output to GitHub step summary
-          cat warning-reports/report.md >> $GITHUB_STEP_SUMMARY
-          
-      - name: Add PR comment for warnings
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            
-            try {
-              const reportContent = fs.readFileSync('warning-reports/report.md', 'utf8');
-              const newWarnings = fs.existsSync('warning-reports/new-warnings.txt');
-              
-              // Only comment if there are new warnings or more than 10 total warnings
-              const totalWarnings = reportContent.match(/Total warnings: \*\*(\d+)\*\*/);
-              const warningCount = totalWarnings ? parseInt(totalWarnings[1]) : 0;
-              
-              if (newWarnings || warningCount > 10) {
-                await github.rest.issues.createComment({
-                  issue_number: context.issue.number,
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  body: reportContent
-                });
-              }
-            } catch (error) {
-              console.error('Error adding PR comment:', error);
-            }
-      
+
       - name: Upload warning report
         uses: actions/upload-artifact@v4
         with:
-          name: warning-report
+          name: swift-warning-report
           path: warning-reports/
-          retention-days: 7 
+          retention-days: 14
+          
+      - name: Add report to GitHub step summary
+        run: |
+          if [ -f "warning-reports/report.md" ]; then
+            cat warning-reports/report.md >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## Warning Report" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Error: Could not generate warning report." >> $GITHUB_STEP_SUMMARY
+          fi 
