@@ -12,6 +12,17 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# Set explicit permissions - principle of least privilege
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+# Prevent concurrent runs of the same workflow on the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Core linting job to run quickly in parallel
   lint:

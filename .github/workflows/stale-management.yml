@@ -9,6 +9,11 @@ permissions:
   issues: write
   pull-requests: write
 
+# Prevent concurrent stale management runs
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false  # Don't cancel stale management in progress
+
 jobs:
   stale:
     name: Manage Stale Items

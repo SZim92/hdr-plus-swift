@@ -5,6 +5,12 @@ on:
     - cron: '0 0 * * 0'  # Run weekly on Sunday at midnight UTC
   workflow_dispatch:  # Allow manual triggering
 
+# Set explicit permissions
+permissions:
+  contents: read
+  actions: read  # Needed to read workflow runs
+  pull-requests: write  # If we want to comment on PRs with results
+
 jobs:
   health-check:
     name: Check CI Health

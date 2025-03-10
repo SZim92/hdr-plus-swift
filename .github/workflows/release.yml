@@ -15,6 +15,17 @@ on:
         type: boolean
         default: true
 
+# Set explicit permissions needed for release creation
+permissions:
+  contents: write  # Needed to create releases and tags
+  discussions: write  # If you use GitHub Discussions for release notes
+  packages: write  # If you publish packages
+
+# Prevent multiple release workflows from running simultaneously
+concurrency:
+  group: "release"
+  cancel-in-progress: false  # Don't cancel releases in progress as they're critical
+
 jobs:
   create-release:
     name: Create Release

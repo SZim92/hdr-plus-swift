@@ -32,10 +32,16 @@ on:
       - 'Podfile.lock'                   # CocoaPods resolved versions
       - '.github/workflows/security.yml' # Workflow file itself
   schedule:
-    - cron: '0 5 * * 1'  # Run at 5 AM UTC every Monday
-  workflow_dispatch:  # Allow manual triggering
+    - cron: '0 2 * * 1'  # Run every Monday at 2 AM UTC
+  workflow_dispatch:
 
-# Ensure we don't run multiple workflows on the same branch at the same time
+# Set explicit permissions for security scanning
+permissions:
+  contents: read
+  security-events: write  # Needed for uploading security results
+  pull-requests: write    # Needed for commenting on PRs
+
+# Prevent concurrent security scans on the same branch
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

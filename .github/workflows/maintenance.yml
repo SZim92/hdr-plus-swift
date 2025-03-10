@@ -5,6 +5,15 @@ on:
     branches: [ main ]
   workflow_dispatch:  # Allow manual triggering
 
+# Set explicit permissions
+permissions:
+  contents: write  # Needed to update README and other files
+
+# Prevent concurrent maintenance runs
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false  # Don't cancel maintenance tasks in progress
+
 jobs:
   # This job manages status badges in the README
   update-badge:

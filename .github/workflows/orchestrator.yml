@@ -23,6 +23,17 @@ on:
         default: true
         type: boolean
 
+# Set explicit permissions
+permissions:
+  contents: read
+  actions: write  # Needed to trigger other workflows
+  pull-requests: read
+
+# Prevent concurrent orchestrator runs
+concurrency:
+  group: "orchestrator"
+  cancel-in-progress: false  # Don't cancel orchestration in progress
+
 jobs:
   prepare:
     name: Prepare Workflow Run

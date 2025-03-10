@@ -6,6 +6,12 @@ on:
     types:
       - completed
 
+# Set explicit permissions
+permissions:
+  contents: read
+  pull-requests: write  # Needed for commenting on PRs
+  actions: read         # Needed to download artifacts from other workflows
+
 jobs:
   analyze-flaky-tests:
     name: Detect Flaky Tests

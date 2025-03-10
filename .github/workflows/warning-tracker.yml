@@ -7,6 +7,17 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# Set explicit permissions
+permissions:
+  contents: read
+  pull-requests: write  # Needed for commenting on PRs
+  checks: write         # Needed for creating check runs
+
+# Prevent concurrent runs on the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   track-warnings:
     name: Track Swift Compiler Warnings

@@ -5,6 +5,15 @@ on:
     - cron: '0 0 * * 0'  # Run at midnight every Sunday
   workflow_dispatch:  # Allow manual triggering
 
+# Set explicit permissions
+permissions:
+  actions: write  # Needed to delete artifacts
+
+# Prevent concurrent cleanup runs
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false  # Don't cancel cleanup in progress
+
 jobs:
   cleanup:
     runs-on: ubuntu-latest
