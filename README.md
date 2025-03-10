@@ -1,6 +1,7 @@
 # HDR+ Swift
 
 ![Build Status](https://github.com/SZim92/hdr-plus-swift/actions/workflows/main.yml/badge.svg)
+
 [![Apple Platform Compatibility](https://github.com/SZim92/hdr-plus-swift/actions/workflows/cross-platform.yml/badge.svg)](https://github.com/SZim92/hdr-plus-swift/actions/workflows/cross-platform.yml)
 
 ## About
