@@ -46,6 +46,7 @@ Brief description of what this action does.
 ```yaml
 
 - name: Use This Action
+
   uses: ./.github/actions/action-name
   with:
     input-name: value

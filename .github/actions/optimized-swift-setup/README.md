@@ -36,6 +36,7 @@ This action sets up a Swift development environment with optimized caching to sp
 ```yaml
 
 - name: Set up Swift environment
+
   uses: ./.github/actions/optimized-swift-setup
 ```
 
@@ -44,6 +45,7 @@ This action sets up a Swift development environment with optimized caching to sp
 ```yaml
 
 - name: Set up Swift environment
+
   uses: ./.github/actions/optimized-swift-setup
   with:
     cache-name: 'my-feature-branch'
@@ -55,6 +57,7 @@ This action sets up a Swift development environment with optimized caching to sp
 ```yaml
 
 - name: Set up Swift environment
+
   uses: ./.github/actions/optimized-swift-setup
   with:
     disable-code-signing: true
@@ -122,15 +125,18 @@ Use this action when:
 steps:
 
   - uses: actions/checkout@v4
+
   
 
   - name: Set up Swift for SPM
+
     uses: ./.github/actions/optimized-swift-setup
     with:
       cache-name: 'spm-build'
       
 
   - name: Build and Test
+
     run: swift test
 ```
 
@@ -140,9 +146,11 @@ steps:
 steps:
 
   - uses: actions/checkout@v4
+
   
 
   - name: Set up Swift for Xcode
+
     uses: ./.github/actions/optimized-swift-setup
     with:
       cache-name: 'xcode-build'
@@ -150,6 +158,7 @@ steps:
       
 
   - name: Build and Test
+
     run: |
       xcodebuild test \
 
@@ -165,9 +174,11 @@ steps:
 steps:
 
   - uses: actions/checkout@v4
+
   
 
   - name: Set up Swift for iOS
+
     uses: ./.github/actions/optimized-swift-setup
     with:
       cache-name: 'ios-build'
@@ -175,6 +186,7 @@ steps:
       
 
   - name: Build and Test
+
     run: |
       xcodebuild test \
 
