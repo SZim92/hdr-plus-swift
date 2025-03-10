@@ -61,13 +61,44 @@ jobs:
             swift-warnings-${{ github.repository }}-${{ github.ref_name }}-
             swift-warnings-${{ github.repository }}-main-
           
+      # Add a pre-build verification step
+      - name: Pre-build verification
+        id: pre-build
+        run: |
+          echo "Performing pre-build verification..."
+          
+          # Check for xcodebuild command
+          if command -v xcodebuild >/dev/null 2>&1; then
+            # Test xcodebuild with minimal options to see if it's working correctly
+            xcodebuild -version > xcodebuild-version.log 2>&1 || true
+            
+            if [ -s "xcodebuild-version.log" ]; then
+              echo "xcodebuild verification successful:"
+              cat xcodebuild-version.log
+              echo "xcodebuild_working=true" >> $GITHUB_OUTPUT
+            else
+              echo "::warning::xcodebuild verification failed - no output"
+              echo "xcodebuild_working=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "::warning::xcodebuild command not found"
+            echo "xcodebuild_working=false" >> $GITHUB_OUTPUT
+          fi
+          
       - name: Track Swift compiler warnings
+        env:
+          XCODEBUILD_WORKING: ${{ steps.pre-build.outputs.xcodebuild_working || 'true' }}
         run: |
           echo "Tracking Swift compiler warnings..."
           
           # Create directories
           mkdir -p warning-reports
           mkdir -p warning-history
+          
+          # Set default values for variables
+          TOTAL_WARNINGS=0
+          BUILD_SUCCESS=false
+          touch warning-reports/all-warnings.txt
           
           # Create an initial report in case the build fails
           echo "# Swift Compiler Warning Report" > warning-reports/report.md
@@ -86,30 +117,39 @@ jobs:
           if [ -d "burstphoto.xcodeproj" ]; then
             echo "Building project to analyze warnings..."
             
-            if xcodebuild build \
-              -project burstphoto.xcodeproj \
-              -scheme gui \
-              -destination "platform=macOS" \
-              OTHER_SWIFT_FLAGS="-warnings-as-errors" \
-              2>&1 | tee build.log; then
-              echo "Build completed successfully with warnings"
-              BUILD_SUCCESS=true
-            else
-              echo "Build failed (expected with -warnings-as-errors flag)"
-              BUILD_SUCCESS=true  # We consider this "successful" for warning analysis
-            fi
-            
-            # Extract warnings only if we have a build log
-            if [ -s "build.log" ]; then
-              grep -n "warning:" build.log > warning-reports/all-warnings.txt || true
+            # Skip build if xcodebuild is not working properly
+            if [ "$XCODEBUILD_WORKING" = "false" ]; then
+              echo "::warning::Skipping build due to xcodebuild verification failure"
+              BUILD_SUCCESS=false
               
-              # Count total warnings
-              TOTAL_WARNINGS=$(grep -c "warning:" build.log || echo "0")
-              echo "Total warnings: $TOTAL_WARNINGS"
-            else
-              echo "::warning::No build log was generated"
+              # Create a minimal warnings file to prevent failures in remaining steps
+              echo "N/A:0:0: warning: Build skipped due to xcodebuild issues" > warning-reports/all-warnings.txt
               TOTAL_WARNINGS=0
-              touch warning-reports/all-warnings.txt
+            else
+              # Write directly to log file instead of using tee to avoid broken pipe errors
+              xcodebuild build \
+                -project burstphoto.xcodeproj \
+                -scheme gui \
+                -destination "platform=macOS" \
+                OTHER_SWIFT_FLAGS="-warnings-as-errors" \
+                > build.log 2>&1 || echo "Build exited with non-zero status (expected with -warnings-as-errors)"
+              
+              echo "Build command completed"
+              BUILD_SUCCESS=true
+              
+              # Extract warnings only if we have a build log
+              if [ -s "build.log" ]; then
+                echo "Processing build log for warnings..."
+                grep -n "warning:" build.log > warning-reports/all-warnings.txt || true
+                
+                # Count total warnings
+                TOTAL_WARNINGS=$(grep -c "warning:" build.log || echo "0")
+                echo "Total warnings: $TOTAL_WARNINGS"
+              else
+                echo "::warning::No build log was generated"
+                TOTAL_WARNINGS=0
+                touch warning-reports/all-warnings.txt
+              fi
             fi
           else
             echo "::warning::Xcode project not found at expected location"
