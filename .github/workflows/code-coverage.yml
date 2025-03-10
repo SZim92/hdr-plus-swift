@@ -45,6 +45,7 @@ jobs:
     name: Generate Coverage Report
     needs: config
     runs-on: macos-latest
+    timeout-minutes: 45  # Set timeout to 45 minutes for coverage generation
     
     steps:
       - name: Check out repository
@@ -53,9 +54,10 @@ jobs:
           fetch-depth: 0  # Full history for better PR comparison
       
       - name: Set up Swift environment
-        uses: ./.github/actions/setup-swift
+        uses: ./.github/actions/optimized-swift-setup
         with:
-          xcode-version: latest
+          cache-name: 'code-coverage'
+          disable-code-signing: 'true'
       
       - name: Install coverage tools
         run: |

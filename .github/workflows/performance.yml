@@ -3,6 +3,16 @@ name: Performance Analysis
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'burstphoto/**/*.swift'          # Core Swift code
+      - 'burstphoto/**/*.h'              # C/C++ interfaces
+      - 'burstphoto/**/*.m'              # Objective-C code
+      - 'burstphoto/**/*.mm'             # Objective-C++ code
+      - 'burstphoto/**/*.c'              # C code
+      - 'burstphoto/**/*.cpp'            # C++ code
+      - '**/*.xcodeproj/**'              # Xcode project changes
+      - 'Package.swift'                  # Swift package dependencies
+      - '.github/workflows/performance.yml' # Workflow file itself
   schedule:
     - cron: '0 5 * * 1'  # Run at 5 AM UTC every Monday
   workflow_dispatch:  # Allow manual triggering
@@ -16,6 +26,7 @@ jobs:
   # Benchmark key functions and track performance over time
   benchmark:
     runs-on: macos-latest
+    timeout-minutes: 60  # Set timeout to 60 minutes for performance tests
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -23,17 +34,11 @@ jobs:
           fetch-depth: 0  # Full history for performance trending
       
       - name: Set up Swift environment
-        uses: actions/cache@v4
+        uses: ./.github/actions/optimized-swift-setup
         with:
-          path: |
-            ~/Library/Caches/SwiftLint
-            ~/Library/Caches/Homebrew
-            ~/Library/Developer/Xcode/DerivedData
-            ~/.swiftpm
-          key: ${{ runner.os }}-macos-perf-${{ hashFiles('**/Package.resolved') }}
-          restore-keys: |
-            ${{ runner.os }}-macos-perf-
-            ${{ runner.os }}-macos-
+          cache-name: 'performance-benchmarks'
+          use-retry: 'true'
+          disable-code-signing: 'true'
       
       - name: Run performance benchmarks (simulation)
         id: benchmarks
