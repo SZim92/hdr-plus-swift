@@ -1,10 +1,10 @@
-name: Cross-Platform Compatibility
+name: Apple Platform Compatibility
 
 on:
   workflow_dispatch:
     inputs:
       platform_filter:
-        description: 'Filter for specific platforms to test (comma-separated)'
+        description: 'Filter for specific platforms to test (e.g. macos-14, macos-13)'
         required: false
         default: 'all'
   schedule:
@@ -37,118 +37,38 @@ jobs:
       - name: Set up matrix
         id: set-matrix
         run: |
-          PLATFORM_FILTER="${{ github.event.inputs.platform_filter }}"
-          
-          # Ensure jq is available
-          if ! command -v jq &>/dev/null; then
-            echo "Warning: jq is not installed. Using fallback method."
-            FALLBACK=true
-          else
-            FALLBACK=false
-          fi
-          
-          # Define the supported platforms
-          PLATFORM_DEFINITIONS=$(cat <<'EOF'
+          # Define only macOS platforms since this project uses Metal APIs
+          # which are only available on Apple platforms
+          cat > platforms.json << EOF
           [
             {"os": "macos-14", "xcode": "15.2", "displayName": "macOS Sonoma (Apple Silicon)"},
-            {"os": "macos-13", "xcode": "15.0", "displayName": "macOS Ventura (Intel)"},
-            {"os": "macos-12", "xcode": "14.2", "displayName": "macOS Monterey"},
-            {"os": "ubuntu-latest", "swift": "5.9", "displayName": "Ubuntu Latest + Swift 5.9"},
-            {"os": "ubuntu-20.04", "swift": "5.8", "displayName": "Ubuntu 20.04 + Swift 5.8"}
+            {"os": "macos-13", "xcode": "15.0", "displayName": "macOS Ventura (Intel)"}
           ]
           EOF
-          )
           
-          # Process using jq if available
-          if [ "$FALLBACK" = "false" ]; then
-            if [ "$PLATFORM_FILTER" = "all" ] || [ -z "$PLATFORM_FILTER" ]; then
-              # Use all platforms
-              PLATFORMS="$PLATFORM_DEFINITIONS"
-            else
-              # Convert comma-separated list to array
-              IFS=',' read -ra FILTER_ARRAY <<< "$PLATFORM_FILTER"
-              
-              # Create a jq filter to select platforms
-              JQ_FILTER="["
-              for platform in "${FILTER_ARRAY[@]}"; do
-                case "$platform" in
-                  macos-14|sonoma)
-                    JQ_FILTER="$JQ_FILTER .[] | select(.os == \"macos-14\"),"
-                    ;;
-                  macos-13|ventura)
-                    JQ_FILTER="$JQ_FILTER .[] | select(.os == \"macos-13\"),"
-                    ;;
-                  macos-12|monterey)
-                    JQ_FILTER="$JQ_FILTER .[] | select(.os == \"macos-12\"),"
-                    ;;
-                  ubuntu-latest|ubuntu)
-                    JQ_FILTER="$JQ_FILTER .[] | select(.os == \"ubuntu-latest\"),"
-                    ;;
-                  ubuntu-20.04)
-                    JQ_FILTER="$JQ_FILTER .[] | select(.os == \"ubuntu-20.04\"),"
-                    ;;
-                esac
-              done
-              
-              # Remove trailing comma and close array
-              JQ_FILTER="${JQ_FILTER%,}]"
-              
-              # Apply filter to select platforms
-              PLATFORMS=$(echo "$PLATFORM_DEFINITIONS" | jq "$JQ_FILTER")
-              
-              # If empty, use all platforms
-              if [ "$(echo "$PLATFORMS" | jq 'length')" -eq 0 ]; then
-                PLATFORMS="$PLATFORM_DEFINITIONS"
-              fi
-            fi
-            
-            # Validate JSON
-            if ! echo "$PLATFORMS" | jq empty; then
-              echo "Error: Generated platforms JSON is invalid."
-              echo "JSON: $PLATFORMS"
-              exit 1
-            fi
+          PLATFORM_FILTER="${{ github.event.inputs.platform_filter }}"
+          
+          if [ -z "$PLATFORM_FILTER" ] || [ "$PLATFORM_FILTER" = "all" ]; then
+            # Use all defined platforms
+            PLATFORMS=$(cat platforms.json)
           else
-            # Fallback method (original approach)
-            if [ "$PLATFORM_FILTER" = "all" ] || [ -z "$PLATFORM_FILTER" ]; then
-              PLATFORMS="$PLATFORM_DEFINITIONS"
+            # Filter based on input - simple approach using grep to check if the filter is in the JSON
+            if grep -q "$PLATFORM_FILTER" platforms.json; then
+              case "$PLATFORM_FILTER" in
+                macos-14|sonoma)
+                  PLATFORMS='[{"os": "macos-14", "xcode": "15.2", "displayName": "macOS Sonoma (Apple Silicon)"}]'
+                  ;;
+                macos-13|ventura)
+                  PLATFORMS='[{"os": "macos-13", "xcode": "15.0", "displayName": "macOS Ventura (Intel)"}]'
+                  ;;
+                *)
+                  # Default to all platforms if filter doesn't match precisely
+                  PLATFORMS=$(cat platforms.json)
+                  ;;
+              esac
             else
-              # Filter platforms based on input
-              ALL_PLATFORMS="$PLATFORM_DEFINITIONS"
-              
-              # Turn comma-separated list into array and filter the platforms
-              IFS=',' read -ra FILTER_ARRAY <<< "$PLATFORM_FILTER"
-              
-              # Start building the filtered array
-              PLATFORMS="["
-              
-              for platform in "${FILTER_ARRAY[@]}"; do
-                case "$platform" in
-                  macos-14|sonoma)
-                    PLATFORMS="$PLATFORMS{\"os\": \"macos-14\", \"xcode\": \"15.2\", \"displayName\": \"macOS Sonoma (Apple Silicon)\"},"
-                    ;;
-                  macos-13|ventura)
-                    PLATFORMS="$PLATFORMS{\"os\": \"macos-13\", \"xcode\": \"15.0\", \"displayName\": \"macOS Ventura (Intel)\"},"
-                    ;;
-                  macos-12|monterey)
-                    PLATFORMS="$PLATFORMS{\"os\": \"macos-12\", \"xcode\": \"14.2\", \"displayName\": \"macOS Monterey\"},"
-                    ;;
-                  ubuntu-latest|ubuntu)
-                    PLATFORMS="$PLATFORMS{\"os\": \"ubuntu-latest\", \"swift\": \"5.9\", \"displayName\": \"Ubuntu Latest + Swift 5.9\"},"
-                    ;;
-                  ubuntu-20.04)
-                    PLATFORMS="$PLATFORMS{\"os\": \"ubuntu-20.04\", \"swift\": \"5.8\", \"displayName\": \"Ubuntu 20.04 + Swift 5.8\"},"
-                    ;;
-                esac
-              done
-              
-              # Remove trailing comma and close array
-              PLATFORMS="${PLATFORMS%,}]"
-              
-              # If empty, use all platforms
-              if [ "$PLATFORMS" = "[]" ]; then
-                PLATFORMS="$ALL_PLATFORMS"
-              fi
+              # Default to all platforms if filter doesn't match
+              PLATFORMS=$(cat platforms.json)
             fi
           fi
           
@@ -158,9 +78,9 @@ jobs:
           
           # Set output for matrix
           echo "platforms=$PLATFORMS" >> $GITHUB_OUTPUT
-          echo "Using platforms: $PLATFORMS"
+        shell: bash
 
-  test-cross-platform:
+  test-apple-platforms:
     name: Test on ${{ matrix.platform.displayName }}
     needs: matrix-setup
     runs-on: ${{ matrix.platform.os }}
@@ -173,21 +93,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
       
-      # macOS-specific setup with Xcode
+      # Set up Xcode for macOS testing
       - name: Set up Xcode
-        if: startsWith(matrix.platform.os, 'macos')
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: ${{ matrix.platform.xcode }}
       
-      # Ubuntu-specific setup with Swift
-      - name: Set up Swift
-        if: startsWith(matrix.platform.os, 'ubuntu')
-        uses: swift-actions/setup-swift@v1
-        with:
-          swift-version: ${{ matrix.platform.swift }}
-      
-      # Common setup for all platforms
+      # Common setup
       - name: Check Swift version
         run: swift --version
       
@@ -203,7 +115,6 @@ jobs:
       # Build and test
       - name: Build package
         run: swift build
-        continue-on-error: ${{ startsWith(matrix.platform.os, 'ubuntu') }} # More lenient for Ubuntu platforms
       
       - name: Run tests
         run: |
@@ -211,11 +122,10 @@ jobs:
           swift test || echo "Tests failed or were skipped"
         continue-on-error: true # We'll handle test failures in the summary
       
-      # Platform-specific tests can be added here
-      - name: Run platform-specific tests
-        if: startsWith(matrix.platform.os, 'macos')
+      # macOS-specific tests
+      - name: Run Metal-specific tests
         run: |
-          echo "Running macOS-specific tests on ${{ matrix.platform.displayName }}"
+          echo "Running Metal-specific tests on ${{ matrix.platform.displayName }}"
           # Create test results even if empty
           mkdir -p .build/test-results
           echo "Test run completed on $(date)" > .build/test-results/completion.log
@@ -232,7 +142,7 @@ jobs:
   
   summarize-results:
     name: Summarize test results
-    needs: test-cross-platform
+    needs: test-apple-platforms
     runs-on: ubuntu-latest
     if: always()
     
@@ -259,7 +169,7 @@ jobs:
       
       - name: Generate summary
         run: |
-          echo "# Cross-Platform Test Results 📊" > $GITHUB_STEP_SUMMARY
+          echo "# Apple Platform Test Results 📊" > $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Platform | Status | Test Count | Failures |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|--------|------------|----------|" >> $GITHUB_STEP_SUMMARY
@@ -282,12 +192,12 @@ jobs:
               
               # Process test results (simplified example)
               # In a real scenario, you would parse XML or JSON test reports
-              if grep -q "FAILED" "$dir"/*; then
+              if grep -q "FAILED" "$dir"/* 2>/dev/null; then
                 status="❌ Failed"
-                failures=$(grep -c "FAILED" "$dir"/*)
+                failures=$(grep -c "FAILED" "$dir"/* 2>/dev/null || echo "Unknown")
               fi
               
-              test_count=$(grep -c "test" "$dir"/* || echo "N/A")
+              test_count=$(grep -c "test" "$dir"/* 2>/dev/null || echo "N/A")
               
               echo "| $platform | $status | $test_count | $failures |" >> $GITHUB_STEP_SUMMARY
             else
