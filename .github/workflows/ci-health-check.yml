@@ -4,6 +4,9 @@ on:
   schedule:
     - cron: '0 0 * * 0'  # Run weekly on Sunday at midnight UTC
   workflow_dispatch:  # Allow manual triggering
+  pull_request:
+    paths:
+      - '.github/workflows/**'  # Run when workflow files change
 
 # Set explicit permissions
 permissions:
@@ -35,6 +38,9 @@ jobs:
           LATEST_VERSIONS["actions/upload-artifact"]="v4"
           LATEST_VERSIONS["actions/download-artifact"]="v4"
           LATEST_VERSIONS["actions/github-script"]="v7"
+          LATEST_VERSIONS["actions/setup-python"]="v5"
+          LATEST_VERSIONS["actions/setup-java"]="v4"
+          LATEST_VERSIONS["actions/stale"]="v9"
           
           # Find all workflow files
           find .github/workflows -name "*.yml" -type f | while read -r workflow; do
@@ -129,6 +135,147 @@ jobs:
           # Output summary to step
           cat deprecated-patterns.md >> $GITHUB_STEP_SUMMARY
       
+      - name: Check for workflow performance
+        id: check-performance
+        run: |
+          echo "## Workflow Performance Analysis" > performance-analysis.md
+          echo "" >> performance-analysis.md
+          
+          # Get recent workflow runs via GitHub API
+          echo "Analyzing recent workflow runs for performance issues..."
+          
+          # Fetch recent workflow runs (limited to avoid rate limits)
+          WORKFLOWS=$(gh api repos/$GITHUB_REPOSITORY/actions/workflows --paginate | jq -r '.workflows[] | select(.state == "active") | .name + "," + .id')
+          
+          echo "| Workflow | Avg Duration | Success Rate | Trend |" >> performance-analysis.md
+          echo "|----------|--------------|-------------|-------|" >> performance-analysis.md
+          
+          # Process each workflow
+          echo "$WORKFLOWS" | while IFS=, read -r name id; do
+            # Skip empty entries
+            [ -z "$name" ] && continue
+            
+            echo "Analyzing workflow: $name"
+            
+            # Get recent runs for this workflow (last 10)
+            RUNS=$(gh api repos/$GITHUB_REPOSITORY/actions/workflows/$id/runs --paginate -q '.workflow_runs[0:10]')
+            
+            # Calculate success rate and average duration
+            TOTAL_RUNS=$(echo "$RUNS" | jq 'length')
+            [ "$TOTAL_RUNS" -eq 0 ] && continue
+            
+            SUCCESS_RUNS=$(echo "$RUNS" | jq '[.[] | select(.conclusion == "success")] | length')
+            SUCCESS_RATE=$((SUCCESS_RUNS * 100 / TOTAL_RUNS))
+            
+            # Extract durations and calculate average
+            DURATIONS=$(echo "$RUNS" | jq -r '.[] | select(.conclusion != null) | (.updated_at | fromdateiso8601) - (.created_at | fromdateiso8601)')
+            
+            if [ -z "$DURATIONS" ]; then
+              AVG_DURATION="N/A"
+              TREND="N/A"
+            else
+              # Calculate average duration in minutes
+              SUM_DURATION=0
+              COUNT=0
+              FIRST_DURATION=0
+              LAST_DURATION=0
+              
+              for duration in $DURATIONS; do
+                if [ $COUNT -eq 0 ]; then
+                  FIRST_DURATION=$duration
+                fi
+                LAST_DURATION=$duration
+                SUM_DURATION=$((SUM_DURATION + duration))
+                COUNT=$((COUNT + 1))
+              done
+              
+              [ $COUNT -eq 0 ] && continue
+              
+              AVG_DURATION=$((SUM_DURATION / COUNT / 60))
+              
+              # Determine trend (first run vs last run)
+              if [ $COUNT -gt 1 ]; then
+                if [ $FIRST_DURATION -gt $LAST_DURATION ]; then
+                  TREND="⬇️ Improving"
+                elif [ $FIRST_DURATION -lt $LAST_DURATION ]; then
+                  TREND="⬆️ Slower"
+                else
+                  TREND="➡️ Stable"
+                fi
+              else
+                TREND="N/A"
+              fi
+            fi
+            
+            # Add to report with success rate color coding
+            if [ $SUCCESS_RATE -ge 90 ]; then
+              echo "| $name | $AVG_DURATION min | ✅ $SUCCESS_RATE% | $TREND |" >> performance-analysis.md
+            elif [ $SUCCESS_RATE -ge 75 ]; then
+              echo "| $name | $AVG_DURATION min | ⚠️ $SUCCESS_RATE% | $TREND |" >> performance-analysis.md
+            else
+              echo "| $name | $AVG_DURATION min | ❌ $SUCCESS_RATE% | $TREND |" >> performance-analysis.md
+            fi
+          done
+          
+          # Output summary to step
+          cat performance-analysis.md >> $GITHUB_STEP_SUMMARY
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Check workflow dependencies
+        id: check-dependencies
+        run: |
+          echo "## Workflow Dependencies Analysis" > dependencies-analysis.md
+          echo "" >> dependencies-analysis.md
+          echo "This section identifies workflows that depend on each other and potential chain failures." >> dependencies-analysis.md
+          echo "" >> dependencies-analysis.md
+          
+          # Find workflow dependencies (workflow_run triggers)
+          echo "### Workflow Run Dependencies" >> dependencies-analysis.md
+          echo "" >> dependencies-analysis.md
+          echo "| Triggered Workflow | Depends On | Trigger Type |" >> dependencies-analysis.md
+          echo "|-------------------|------------|--------------|" >> dependencies-analysis.md
+          
+          # Find all workflow_run triggers
+          grep -A 5 "workflow_run:" --include="*.yml" -r .github/workflows/ | grep -B 5 "workflows:" | while read -r line; do
+            if [[ "$line" == *".github/workflows/"* ]]; then
+              FILE=$(echo "$line" | cut -d: -f1)
+              WORKFLOW_NAME=$(basename "$FILE")
+              
+              # Extract the workflows this depends on
+              DEPENDS_ON=$(grep -A 3 "workflows:" "$FILE" | grep -v "workflows:" | grep -v -- "--" | tr -d '[:space:]' | tr -d '[' | tr -d ']' | tr -d '"' | tr -d "'")
+              
+              # Get the trigger type
+              TRIGGER_TYPE=$(grep -A 5 "types:" "$FILE" | grep -v "types:" | grep -v -- "--" | tr -d '[:space:]' | tr -d '[' | tr -d ']' | tr -d '"' | tr -d "'")
+              
+              if [ -n "$DEPENDS_ON" ]; then
+                echo "| $WORKFLOW_NAME | $DEPENDS_ON | $TRIGGER_TYPE |" >> dependencies-analysis.md
+              fi
+            fi
+          done
+          
+          # Find job dependencies (needs)
+          echo "" >> dependencies-analysis.md
+          echo "### Complex Job Dependencies" >> dependencies-analysis.md
+          echo "" >> dependencies-analysis.md
+          echo "Workflows with complex job dependencies:" >> dependencies-analysis.md
+          echo "" >> dependencies-analysis.md
+          
+          find .github/workflows -name "*.yml" -type f | while read -r workflow; do
+            WORKFLOW_NAME=$(basename "$workflow")
+            # Count jobs and job dependencies
+            JOB_COUNT=$(grep -c "^  [a-zA-Z0-9_-]*:" "$workflow" || echo "0")
+            NEEDS_COUNT=$(grep -c "needs:" "$workflow" || echo "0")
+            
+            # Only report workflows with multiple job dependencies
+            if [ "$NEEDS_COUNT" -gt 1 ]; then
+              echo "- **$WORKFLOW_NAME**: $JOB_COUNT jobs with $NEEDS_COUNT dependencies" >> dependencies-analysis.md
+            fi
+          done
+          
+          # Output summary to step
+          cat dependencies-analysis.md >> $GITHUB_STEP_SUMMARY
+      
       - name: Generate recommendations
         run: |
           echo "## CI Improvement Recommendations" > recommendations.md
@@ -155,22 +302,149 @@ jobs:
               echo "" >> recommendations.md
             fi
             
-            # General recommendations
-            echo "### 🌟 Best Practices" >> recommendations.md
-            echo "" >> recommendations.md
-            echo "1. **Set timeouts** on all jobs to prevent stuck workflows" >> recommendations.md
-            echo "2. **Use caching** to speed up workflows" >> recommendations.md
-            echo "3. **Implement matrix builds** for testing on multiple environments" >> recommendations.md
-            echo "4. **Add workflow concurrency limits** to prevent queue buildup" >> recommendations.md
-            echo "5. **Run this health check regularly** to maintain CI quality" >> recommendations.md
-          else
-            echo "✅ **No critical issues found in your CI configuration**" >> recommendations.md
-            echo "" >> recommendations.md
-            echo "Your workflows appear to be following best practices. Continue to run this health check regularly to catch any future issues." >> recommendations.md
+            # Check for performance issues
+            if [ -f "performance-analysis.md" ] && grep -q "❌" performance-analysis.md; then
+              echo "3. **Address failing workflows** with low success rates" >> recommendations.md
+              grep "❌" performance-analysis.md | sed 's/|/\n  -/g' | grep "❌" >> recommendations.md
+              echo "" >> recommendations.md
+            fi
           fi
+          
+          # General recommendations
+          echo "### 🌟 Best Practices" >> recommendations.md
+          echo "" >> recommendations.md
+          echo "1. **Set timeouts** on all jobs to prevent stuck workflows" >> recommendations.md
+          echo "2. **Use caching** to speed up workflows (particularly Swift dependencies)" >> recommendations.md
+          echo "3. **Implement matrix builds** for testing on multiple environments" >> recommendations.md
+          echo "4. **Add workflow concurrency limits** to prevent queue buildup" >> recommendations.md
+          echo "5. **Apply specific permissions** to each workflow for better security" >> recommendations.md
+          echo "6. **Run this health check regularly** to maintain CI quality" >> recommendations.md
           
           # Output summary to step
           cat recommendations.md >> $GITHUB_STEP_SUMMARY
+      
+      - name: Generate health dashboard
+        run: |
+          # Create the dashboard HTML
+          mkdir -p ci-health-dashboard
+          
+          cat > ci-health-dashboard/index.html << EOF
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>CI Health Dashboard</title>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+              body { 
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; 
+                max-width: 1200px; 
+                margin: 0 auto; 
+                padding: 20px; 
+                line-height: 1.5;
+              }
+              .card { 
+                border: 1px solid #e1e4e8; 
+                border-radius: 6px; 
+                padding: 16px; 
+                margin-bottom: 16px; 
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+              }
+              .success { color: #22863a; }
+              .warning { color: #b08800; }
+              .danger { color: #cb2431; }
+              .header { 
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                border-bottom: 1px solid #e1e4e8;
+                padding-bottom: 10px;
+                margin-bottom: 20px;
+              }
+              table { 
+                width: 100%; 
+                border-collapse: collapse; 
+                margin-bottom: 20px;
+              }
+              th, td { 
+                text-align: left; 
+                padding: 8px; 
+                border-bottom: 1px solid #e1e4e8; 
+              }
+              th { background-color: #f6f8fa; }
+              .summary-box {
+                display: inline-block;
+                padding: 10px;
+                margin: 10px;
+                border-radius: 5px;
+                width: 200px;
+                text-align: center;
+              }
+              .summary-count {
+                font-size: 24px;
+                font-weight: bold;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <h1>CI Health Dashboard</h1>
+              <p>Generated on $(date)</p>
+            </div>
+            
+            <div class="card">
+              <h2>Summary</h2>
+              <div style="display: flex; flex-wrap: wrap; justify-content: space-between;">
+                <div class="summary-box" style="background-color: #f6f8fa;">
+                  <div class="summary-count">$(find .github/workflows -name "*.yml" | wc -l)</div>
+                  <div>Total Workflows</div>
+                </div>
+                <div class="summary-box" style="background-color: #f6ffed;">
+                  <div class="summary-count">$(grep -c "✅ Current" action-versions.md)</div>
+                  <div>Up-to-date Actions</div>
+                </div>
+                <div class="summary-box" style="background-color: #fff7e6;">
+                  <div class="summary-count">$(grep -c "⚠️ Outdated" action-versions.md)</div>
+                  <div>Outdated Actions</div>
+                </div>
+                <div class="summary-box" style="background-color: #fff1f0;">
+                  <div class="summary-count">$(grep -c "[a-zA-Z]" deprecated-patterns.md)</div>
+                  <div>Deprecated Patterns</div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="card">
+              <h2>Action Versions Status</h2>
+              $(grep -A 500 "| Workflow | Action |" action-versions.md | grep -v "Actions with Known" | grep -B 500 "##" || cat action-versions.md)
+            </div>
+            
+            <div class="card">
+              <h2>Deprecated Patterns</h2>
+              $(cat deprecated-patterns.md)
+            </div>
+            
+            <div class="card">
+              <h2>Workflow Performance</h2>
+              $(cat performance-analysis.md)
+            </div>
+            
+            <div class="card">
+              <h2>Workflow Dependencies</h2>
+              $(cat dependencies-analysis.md)
+            </div>
+            
+            <div class="card">
+              <h2>Recommendations</h2>
+              $(cat recommendations.md)
+            </div>
+            
+            <footer style="margin-top: 30px; padding-top: 10px; border-top: 1px solid #e1e4e8; color: #6a737d; text-align: center;">
+              <p>CI Health Dashboard - Generated by GitHub Actions - <a href="https://github.com/${{ github.repository }}/actions/workflows/ci-health-check.yml">View Workflow</a></p>
+            </footer>
+          </body>
+          </html>
+          EOF
       
       - name: Upload health check report
         uses: actions/upload-artifact@v4
@@ -179,5 +453,36 @@ jobs:
           path: |
             action-versions.md
             deprecated-patterns.md
+            performance-analysis.md
+            dependencies-analysis.md
             recommendations.md
-          retention-days: 30 
+            ci-health-dashboard/
+          retention-days: 90
+          
+      - name: Comment on PR if related to workflow changes
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            
+            // Read the recommendations file
+            const recommendations = fs.readFileSync('recommendations.md', 'utf8');
+            
+            // Create a concise summary for the PR comment
+            const comment = `## CI Health Check Results
+
+            I've analyzed the workflow changes in this PR and found the following:
+            
+            ${recommendations}
+            
+            See the [workflow run](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}) for complete details.`;
+            
+            // Post comment on PR
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            }); 
