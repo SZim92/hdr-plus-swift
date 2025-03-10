@@ -13,12 +13,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      - name: Set up Swift environment
-        uses: ./.github/actions/optimized-swift-setup
-        with:
-          cache-name: 'test'
-          disable-code-signing: 'true'
-      
+      # Direct simple setup without composite actions
+      - name: Basic setup
+        run: |
+          echo "Basic environment setup"
+          uname -a
+          
       - name: Create test file
         run: echo "Test file content" > test-file.txt
       
