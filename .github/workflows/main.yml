@@ -360,7 +360,7 @@ jobs:
   # Final job to aggregate results and provide a summary
   summarize:
     name: Summarize Results
-    needs: [test, build]
+    needs: [lint, test, build]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -389,9 +389,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Component | Status | Duration |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|--------|----------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Lint | ${{ needs.lint.result == 'success' && '✅ Passed' || '❌ Failed' }} | n/a |" >> $GITHUB_STEP_SUMMARY
-          echo "| Test | ${{ needs.test.result == 'success' && '✅ Passed' || '❌ Failed' }} | n/a |" >> $GITHUB_STEP_SUMMARY
-          echo "| Build | ${{ needs.build.result == 'success' && '✅ Passed' || '❌ Failed' }} | n/a |" >> $GITHUB_STEP_SUMMARY
+          echo "| Lint | $(if [[ "${{ needs.lint.result }}" == "success" ]]; then echo "✅ Passed"; elif [[ "${{ needs.lint.result }}" == "skipped" ]]; then echo "⏭️ Skipped"; else echo "❌ Failed"; fi) | n/a |" >> $GITHUB_STEP_SUMMARY
+          echo "| Test | $(if [[ "${{ needs.test.result }}" == "success" ]]; then echo "✅ Passed"; elif [[ "${{ needs.test.result }}" == "skipped" ]]; then echo "⏭️ Skipped"; else echo "❌ Failed"; fi) | n/a |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | $(if [[ "${{ needs.build.result }}" == "success" ]]; then echo "✅ Passed"; elif [[ "${{ needs.build.result }}" == "skipped" ]]; then echo "⏭️ Skipped"; else echo "❌ Failed"; fi) | n/a |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Permissions Status" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
