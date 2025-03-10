@@ -52,8 +52,26 @@ runs:
       shell: bash
       run: |
         echo "::group::Xcode Check"
-        XCODE_VERSION=$(xcodebuild -version | head -n 1 | awk '{print $2}')
-        echo "Xcode version: $XCODE_VERSION"
+        # Use a safer approach to get Xcode version
+        echo "Checking Xcode version..."
+        
+        # First attempt with direct redirection to avoid pipes
+        if XCODE_VERSION=$(xcodebuild -version 2>/dev/null | head -n 1 | awk '{print $2}'); then
+          echo "Xcode version: $XCODE_VERSION"
+        else
+          # Fallback using a simpler approach
+          echo "Trying alternate method to get Xcode version"
+          # Use system_profiler which is less likely to have pipe issues
+          if XCODE_VERSION=$(sw_vers -productVersion); then
+            echo "Using system version as fallback: $XCODE_VERSION"
+          else
+            # Final fallback to a hardcoded value
+            XCODE_VERSION="unknown"
+            echo "Could not determine Xcode version, using fallback: $XCODE_VERSION"
+          fi
+        fi
+        
+        # Set the output regardless of how we got it
         echo "xcode-version=$XCODE_VERSION" >> $GITHUB_OUTPUT
         echo "::endgroup::"
         
@@ -62,8 +80,17 @@ runs:
       shell: bash
       run: |
         echo "::group::Swift Check"
-        SWIFT_VERSION=$(swift --version | head -n 1 | awk '{print $4}')
-        echo "Swift version: $SWIFT_VERSION"
+        # Use a safer approach to get Swift version
+        echo "Checking Swift version..."
+        
+        if SWIFT_VERSION=$(swift --version 2>/dev/null | head -n 1 | awk '{print $4}'); then
+          echo "Swift version: $SWIFT_VERSION"
+        else
+          # Fallback
+          SWIFT_VERSION="unknown"
+          echo "Could not determine Swift version, using fallback: $SWIFT_VERSION"
+        fi
+        
         echo "swift-version=$SWIFT_VERSION" >> $GITHUB_OUTPUT
         echo "::endgroup::"
     
