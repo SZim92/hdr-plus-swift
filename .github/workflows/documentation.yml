@@ -3,6 +3,13 @@ name: Documentation
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'docs/**'                        # Documentation directory
+      - '**/*.md'                        # Markdown files
+      - '**/*.rst'                       # ReStructuredText files
+      - '**/*.docc/**'                   # DocC documentation
+      - '**/*jazzy.yaml'                 # Jazzy configuration
+      - '.github/workflows/documentation.yml' # Workflow file itself
   workflow_dispatch:  # Allow manual triggering
 
 # Prevent simultaneous documentation deployments
@@ -14,19 +21,16 @@ jobs:
   # Generate and deploy documentation
   documentation:
     runs-on: macos-latest
+    timeout-minutes: 30  # Set timeout to 30 minutes for documentation generation
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
       
       - name: Set up Swift environment
-        uses: actions/cache@v4
+        uses: ./.github/actions/optimized-swift-setup
         with:
-          path: |
-            ~/Library/Developer/Xcode/DerivedData
-            ~/.swiftpm
-          key: ${{ runner.os }}-spm-deriveddata-${{ hashFiles('**/Package.resolved') }}
-          restore-keys: |
-            ${{ runner.os }}-spm-deriveddata-
+          cache-name: 'documentation'
+          disable-code-signing: 'true'
       
       - name: Install documentation tools
         run: |

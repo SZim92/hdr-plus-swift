@@ -3,8 +3,34 @@ name: Security Scanning
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'burstphoto/**/*.swift'          # Swift code
+      - 'burstphoto/**/*.h'              # C/C++ interfaces
+      - 'burstphoto/**/*.m'              # Objective-C code
+      - 'burstphoto/**/*.mm'             # Objective-C++ code
+      - 'burstphoto/**/*.c'              # C code
+      - 'burstphoto/**/*.cpp'            # C++ code
+      - '**/*.xcodeproj/**'              # Xcode project changes
+      - 'Package.swift'                  # Swift package dependencies
+      - 'Package.resolved'               # Swift package resolved versions
+      - 'Podfile'                        # CocoaPods dependencies
+      - 'Podfile.lock'                   # CocoaPods resolved versions
+      - '.github/workflows/security.yml' # Workflow file itself
   pull_request:
     branches: [ main ]
+    paths:
+      - 'burstphoto/**/*.swift'          # Swift code
+      - 'burstphoto/**/*.h'              # C/C++ interfaces
+      - 'burstphoto/**/*.m'              # Objective-C code
+      - 'burstphoto/**/*.mm'             # Objective-C++ code
+      - 'burstphoto/**/*.c'              # C code
+      - 'burstphoto/**/*.cpp'            # C++ code
+      - '**/*.xcodeproj/**'              # Xcode project changes
+      - 'Package.swift'                  # Swift package dependencies
+      - 'Package.resolved'               # Swift package resolved versions
+      - 'Podfile'                        # CocoaPods dependencies
+      - 'Podfile.lock'                   # CocoaPods resolved versions
+      - '.github/workflows/security.yml' # Workflow file itself
   schedule:
     - cron: '0 5 * * 1'  # Run at 5 AM UTC every Monday
   workflow_dispatch:  # Allow manual triggering
@@ -18,7 +44,7 @@ jobs:
   # Security scanning for vulnerabilities and best practices
   security-scan:
     runs-on: macos-latest  # Changed to macOS for better Swift support
-    timeout-minutes: 15  # Add timeout to prevent hung jobs
+    timeout-minutes: 45  # Set timeout to 45 minutes for security scanning
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -304,18 +330,18 @@ jobs:
   macos-security-scan:
     runs-on: macos-latest
     needs: security-scan
+    timeout-minutes: 30  # Set timeout to 30 minutes for macOS security scan
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
       
       - name: Set up Swift
-        run: |
-          echo "Setting up Swift on macOS..."
-          swift --version
-          
-          # Disable code signing for the security scan
-          defaults write com.apple.dt.Xcode IDESkipCodeSigningVerification -bool YES
+        uses: ./.github/actions/optimized-swift-setup
+        with:
+          cache-name: 'security-scan'
+          use-retry: 'true'
+          disable-code-signing: 'true'
       
       - name: Run static analysis
         run: |
