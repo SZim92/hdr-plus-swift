@@ -1,11 +1,13 @@
 # HDR+ Swift CI Documentation
 
 ## Overview
+
 This document provides documentation for the CI/CD system used in the HDR+ Swift project. The system is designed to build, test, and maintain the codebase with minimal intervention required.
 
 ## Core Workflows
 
 ### Main CI Workflow (main.yml)
+
 The primary workflow that runs tests and validates the codebase.
 
 - **Triggers**: Pull requests, pushes to main branch, and manual triggers
@@ -19,6 +21,7 @@ The primary workflow that runs tests and validates the codebase.
   - Concurrent job execution with dependencies
 
 ### Apple Platform Compatibility (cross-platform.yml)
+
 Verifies the project builds correctly on supported Apple platforms.
 
 - **Triggers**: Pull requests, pushes to main branch, scheduled runs, and manual triggers
@@ -35,6 +38,7 @@ Verifies the project builds correctly on supported Apple platforms.
   - Handles Metal-specific limitations in CI environments
 
 ### Swift Warning Tracker (warning-tracker.yml)
+
 Tracks Swift compiler warnings to help maintain code quality.
 
 - **Triggers**: Scheduled runs, manual triggers, and after PRs
@@ -46,6 +50,7 @@ Tracks Swift compiler warnings to help maintain code quality.
   - Creates GitHub check annotations for warnings
 
 ### Maintenance Workflow (maintenance.yml)
+
 Handles ongoing maintenance like README badge updates.
 
 - **Triggers**: Pushes to main branch and manual triggers
@@ -62,6 +67,7 @@ Handles ongoing maintenance like README badge updates.
 **Problem**: Warning tracker fails with "broken pipe" errors during Xcode version check.
 
 **Solution**: This has been fixed by improving how output is redirected:
+
 1. The workflow now uses file redirection instead of pipes
 2. It implements fallback mechanisms for version detection
 3. It continues execution even when initial checks fail
@@ -75,6 +81,7 @@ Handles ongoing maintenance like README badge updates.
 **Problem**: Multiple build status badges appearing in the README.
 
 **Solution**: The maintenance.yml workflow now:
+
 1. Extracts content properly, skipping empty lines
 2. Reconstructs the README with a clean structure
 3. Uses content comparison to determine if changes are needed
@@ -88,6 +95,7 @@ Handles ongoing maintenance like README badge updates.
 **Problem**: Cache not working, leading to slow builds.
 
 **Solution**:
+
 1. Check cache keys in the workflow files
 2. Verify paths being cached (especially for Xcode/Swift caches)
 3. Look for cache size limits being exceeded
@@ -97,6 +105,7 @@ Handles ongoing maintenance like README badge updates.
 **Problem**: Build failures on specific macOS versions.
 
 **Solution**:
+
 1. Check the build output logs for specific errors
 2. Verify that the correct scheme ("gui") is being targeted
 3. Inspect Metal environment information for GPU/driver issues
@@ -105,6 +114,7 @@ Handles ongoing maintenance like README badge updates.
 **Problem**: "No scheme" or "Cannot find scheme" errors.
 
 **Solution**:
+
 1. Verify the scheme name matches exactly (case-sensitive)
 2. Check if the scheme is shared (schemes should be checked into version control)
 3. Run `xcodebuild -project burstphoto.xcodeproj -list` locally to verify schemes
@@ -115,6 +125,7 @@ Handles ongoing maintenance like README badge updates.
 HDR+ Swift uses a centralized configuration system:
 
 ### workflow-config.yml
+
 Located at `.github/workflow-config.yml`, this file contains shared configuration values:
 
 - **Version Information**: Project version numbers
@@ -143,6 +154,7 @@ The configuration is loaded by the `load-config` action and makes values availab
 The repository includes several custom GitHub Actions:
 
 ### optimized-swift-setup
+
 Sets up the Swift environment with optimized caching.
 
 - **Location**: `.github/actions/optimized-swift-setup`
@@ -152,6 +164,7 @@ Sets up the Swift environment with optimized caching.
   - `install-swiftlint`: Whether to install SwiftLint
 
 ### load-config
+
 Loads shared configuration values.
 
 - **Location**: `.github/actions/load-config`
