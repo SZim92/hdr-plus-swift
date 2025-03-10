@@ -32,10 +32,6 @@ runs:
           exit 1
         fi
         
-        # Read the configuration file and convert to JSON
-        CONFIG=$(yq -o=json '.version' .github/workflow-config.yml)
-        echo "config=$CONFIG" >> $GITHUB_OUTPUT
-        
         # Extract specific values needed by most workflows
         PROJECT=$(yq '.build.project' .github/workflow-config.yml)
         MAIN_BRANCH=$(yq '.repository.main_branch' .github/workflow-config.yml)
@@ -45,12 +41,19 @@ runs:
         MAJOR=$(yq '.version.major' .github/workflow-config.yml)
         MINOR=$(yq '.version.minor' .github/workflow-config.yml)
         PATCH=$(yq '.version.patch' .github/workflow-config.yml)
-        VERSION="$MAJOR.$MINOR.$PATCH"
+        VERSION="${MAJOR}.${MINOR}.${PATCH}"
         
         # Output key values
-        echo "project=$PROJECT" >> $GITHUB_OUTPUT
-        echo "main_branch=$MAIN_BRANCH" >> $GITHUB_OUTPUT
-        echo "docs_branch=$DOCS_BRANCH" >> $GITHUB_OUTPUT
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "project=${PROJECT}" >> $GITHUB_OUTPUT
+        echo "main_branch=${MAIN_BRANCH}" >> $GITHUB_OUTPUT
+        echo "docs_branch=${DOCS_BRANCH}" >> $GITHUB_OUTPUT
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+        
+        # Convert full config to JSON and properly escape for GitHub Actions output
+        CONFIG=$(yq -o=json '.' .github/workflow-config.yml)
+        CONFIG="${CONFIG//'%'/'%25'}"
+        CONFIG="${CONFIG//$'\n'/'%0A'}"
+        CONFIG="${CONFIG//$'\r'/'%0D'}"
+        echo "config=${CONFIG}" >> $GITHUB_OUTPUT
         
         echo "Configuration loaded successfully" 

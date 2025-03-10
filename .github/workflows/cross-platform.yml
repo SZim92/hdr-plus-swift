@@ -180,8 +180,17 @@ jobs:
         with:
           path: test-results
       
+      - name: Ensure test results directory exists
+        run: mkdir -p test-results
+        shell: bash
+      
       - name: Display structure of downloaded files
-        run: ls -R test-results
+        run: |
+          if [ -d "test-results" ] && [ "$(ls -A test-results 2>/dev/null)" ]; then
+            ls -R test-results
+          else
+            echo "No test results found."
+          fi
       
       - name: Generate summary
         run: |
@@ -189,6 +198,13 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Platform | Status | Test Count | Failures |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|--------|------------|----------|" >> $GITHUB_STEP_SUMMARY
+          
+          if [ ! -d "test-results" ] || [ -z "$(ls -A test-results 2>/dev/null)" ]; then
+            echo "| All Platforms | ⚠️ No Results | N/A | N/A |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "No test results were found. This might be because tests were skipped or failed to generate results." >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
           
           for dir in test-results/*; do
             platform=$(basename "$dir")
