@@ -1,0 +1,106 @@
+name: Monthly CI Review Reminder
+
+on:
+  schedule:
+    - cron: '0 9 1 * *'  # 9 AM UTC on the 1st of each month
+  workflow_dispatch:  # Allow manual triggering
+
+# Set explicit permissions
+permissions:
+  issues: write  # Needed to create issues
+
+# Prevent concurrent runs
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false  # Don't cancel in progress as this is infrequent
+
+jobs:
+  create-review-issue:
+    name: Create Monthly Review Issue
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        
+      - name: Create Monthly Review Issue
+        id: create-issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const date = new Date();
+            const monthNames = ["January", "February", "March", "April", "May", "June",
+                               "July", "August", "September", "October", "November", "December"];
+            const month = monthNames[date.getMonth()];
+            const year = date.getFullYear();
+            
+            // Get information about CI workflows
+            const workflows = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+            
+            // Calculate some statistics
+            const totalRuns = workflows.data.total_count;
+            const successfulRuns = workflows.data.workflow_runs.filter(run => run.conclusion === 'success').length;
+            const failedRuns = workflows.data.workflow_runs.filter(run => run.conclusion === 'failure').length;
+            const successRate = totalRuns > 0 ? Math.round((successfulRuns / totalRuns) * 100) : 0;
+            
+            // Create a nicely formatted issue
+            const issueBody = `
+            # ${month} ${year} CI System Review
+            
+            It's time for our monthly CI system review! This automated issue helps ensure we keep our CI workflows healthy and optimized.
+            
+            ## CI System Statistics (Last 100 runs)
+            
+            - Total runs: ${totalRuns}
+            - Successful runs: ${successfulRuns} (${successRate}% success rate)
+            - Failed runs: ${failedRuns}
+            
+            ## Review Checklist
+            
+            - [ ] Run the [CI Health Check workflow](${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/workflows/ci-health-check.yml) and review its output
+            - [ ] Check for any outdated GitHub Actions that need to be updated
+            - [ ] Review workflow performance metrics and identify opportunities for optimization
+            - [ ] Check cache hit rates and build times
+            - [ ] Verify that all workflows have proper permissions and concurrency controls
+            - [ ] Address any deprecated syntax or APIs
+            - [ ] Review error patterns in failed workflows
+            
+            ## Automated Findings
+            
+            The latest automated health check can be found here:
+            - [Latest CI Health Check Run](${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/workflows/ci-health-check.yml)
+            
+            ## Action Items
+            
+            *Add specific action items as they're identified*
+            
+            ## Notes
+            
+            *Add review notes here*
+            
+            When the review is complete and all action items are addressed, please close this issue.
+            `;
+            
+            // Create the issue
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `${month} ${year} CI System Review`,
+              body: issueBody,
+              labels: ['ci', 'maintenance']
+            });
+            
+            console.log(`Created issue #${issue.data.number}: ${issue.data.html_url}`);
+            return { issue_number: issue.data.number, issue_url: issue.data.html_url };
+            
+      - name: Create summary
+        run: |
+          echo "## Monthly CI Review Issue Created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Issue #${{ fromJson(steps.create-issue.outputs.result).issue_number }} has been created for the monthly CI system review." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "View the issue: ${{ fromJson(steps.create-issue.outputs.result).issue_url }}" >> $GITHUB_STEP_SUMMARY 

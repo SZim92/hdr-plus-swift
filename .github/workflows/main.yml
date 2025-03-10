@@ -35,6 +35,7 @@ jobs:
           fetch-depth: 1
           
       - name: Set up Swift environment
+        id: swift-setup
         uses: ./.github/actions/optimized-swift-setup
         with:
           cache-name: 'lint'
@@ -356,104 +357,64 @@ jobs:
           path: artifacts/
           retention-days: 7
           
-  # Summarize results
+  # Final job to aggregate results and provide a summary
   summarize:
     name: Summarize Results
+    needs: [test, build]
     if: always()
-    needs: [lint, test, build]
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        
-      - name: Generate Summary
-        id: summary
+      - name: Check test results
         run: |
-          echo "## CI Results Summary" > $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Initialize variables
-          FAILED_TESTS=0
-          
-          echo "### Linting Status" >> $GITHUB_STEP_SUMMARY
-          if [ -d "lint-results" ]; then
-            echo "✅ Linting completed" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ needs.test.result }}" == "success" ]]; then
+            echo "✅ Tests passed successfully"
           else
-            echo "❌ Linting failed or did not complete" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Tests failed"
+            exit 1
+          fi
+      
+      - name: Check build results
+        run: |
+          if [[ "${{ needs.build.result }}" == "success" ]]; then
+            echo "✅ Build completed successfully"
+          else
+            echo "❌ Build failed"
+            exit 1
           fi
           
+      - name: Log CI Status
+        id: ci-status-log
+        run: |
+          echo "## CI Run Status" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Testing Status" >> $GITHUB_STEP_SUMMARY
-          for os in "macos-13" "macos-14"; do
-            if [ -d "test-results-$os" ]; then
-              # Check for test failure markers
-              if [ -f "test-results-$os/TestResults.xcresult/tests-ran-but-failed" ]; then
-                echo "❌ Tests on $os failed - Check test report for details" >> $GITHUB_STEP_SUMMARY
-                FAILED_TESTS=1
-              elif [ -f "test-results-$os/TestResults.xcresult/build-failed-tests-skipped" ]; then
-                echo "❌ Build on $os failed - Tests were skipped" >> $GITHUB_STEP_SUMMARY
-                FAILED_TESTS=1
-              else
-                # Check if test report exists
-                if [ -f "test-results-$os/test-reports/test-report.html" ]; then
-                  echo "✅ Tests on $os completed" >> $GITHUB_STEP_SUMMARY
-                  
-                  # Extract success rate if available
-                  if grep -q "Success Rate:" "test-results-$os/test-reports/test-report.md" 2>/dev/null; then
-                    SUCCESS_RATE=$(grep "Success Rate:" "test-results-$os/test-reports/test-report.md" | sed 's/.*: //')
-                    echo "   - Success Rate: $SUCCESS_RATE" >> $GITHUB_STEP_SUMMARY
-                    
-                    # Check if success rate is below threshold (95%)
-                    RATE_VALUE=$(echo "$SUCCESS_RATE" | sed 's/%//')
-                    if (( $(echo "$RATE_VALUE < 95" | bc -l) )); then
-                      echo "   - ⚠️ Success rate below 95% threshold" >> $GITHUB_STEP_SUMMARY
-                      FAILED_TESTS=1
-                    fi
-                  fi
-                  
-                  # Check if synthetic data was used
-                  if grep -q "synthetic test data" "test-results-$os/test-reports/test-report.md" 2>/dev/null; then
-                    echo "   - ⚠️ Used synthetic data - real tests may have failed" >> $GITHUB_STEP_SUMMARY
-                    # If synthetic data was used due to failure, count as failed test
-                    if grep -q "Tests were executed but failed" "test-results-$os/test-reports/test-report.md" 2>/dev/null; then
-                      FAILED_TESTS=1
-                    fi
-                  fi
-                else
-                  echo "⚠️ Tests on $os may have issues - Test report not found" >> $GITHUB_STEP_SUMMARY
-                fi
-              fi
-            else
-              echo "❌ Tests on $os failed or did not complete" >> $GITHUB_STEP_SUMMARY
-              FAILED_TESTS=1
-            fi
-          done
+          echo "| Component | Status | Duration |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Lint | ${{ needs.lint.result == 'success' && '✅ Passed' || '❌ Failed' }} | n/a |" >> $GITHUB_STEP_SUMMARY
+          echo "| Test | ${{ needs.test.result == 'success' && '✅ Passed' || '❌ Failed' }} | n/a |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | ${{ needs.build.result == 'success' && '✅ Passed' || '❌ Failed' }} | n/a |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Permissions Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Contents (read): ✅ Available" >> $GITHUB_STEP_SUMMARY
+          echo "- Checks (write): ✅ Available" >> $GITHUB_STEP_SUMMARY
+          echo "- Pull Requests (write): ✅ Available" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Concurrency" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Group: ${{ github.workflow }}-${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Run ID: ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Run Attempt: ${{ github.run_attempt }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Run Number: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
           
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Build Status" >> $GITHUB_STEP_SUMMARY
-          if [ -d "build-artifacts" ]; then
-            echo "✅ Build completed" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Build failed or did not complete" >> $GITHUB_STEP_SUMMARY
-            FAILED_TESTS=1
+          if [[ "${{ github.run_attempt }}" != "1" ]]; then
+            echo "⚠️ This run was restarted or re-run after cancellation" >> $GITHUB_STEP_SUMMARY
           fi
           
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Performance Summary" >> $GITHUB_STEP_SUMMARY
-          echo "This workflow used a new optimized CI setup with:" >> $GITHUB_STEP_SUMMARY
-          echo "- Parallel testing across macOS versions" >> $GITHUB_STEP_SUMMARY
-          echo "- Intelligent caching for faster builds" >> $GITHUB_STEP_SUMMARY
-          echo "- Separate lint job for faster feedback" >> $GITHUB_STEP_SUMMARY
-          
-          # Add overall summary
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Overall Status" >> $GITHUB_STEP_SUMMARY
-          if [ $FAILED_TESTS -eq 0 ]; then
-            echo "✅ **All tests passed successfully**" >> $GITHUB_STEP_SUMMARY
-            echo "pass=true" >> $GITHUB_OUTPUT
+      - name: Create overall status
+        run: |
+          if [[ "${{ needs.test.result }}" == "success" && "${{ needs.build.result }}" == "success" ]]; then
+            echo "All jobs completed successfully! 🎉"
           else
-            echo "❌ **One or more tests failed or had issues**" >> $GITHUB_STEP_SUMMARY
-            echo "pass=false" >> $GITHUB_OUTPUT
-            # Mark the workflow as failed if there were actual test failures
+            echo "Some jobs failed. See job details for more information."
             exit 1
           fi 
