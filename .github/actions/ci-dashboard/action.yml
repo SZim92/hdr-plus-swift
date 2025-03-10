@@ -36,7 +36,7 @@ runs:
   using: 'composite'
   steps:
     - name: Setup Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: '18'
     
@@ -98,7 +98,7 @@ runs:
                 
             headers = {
                 "Authorization": f"Bearer {token}",
-                "Accept": "application/vnd.github.v3+json"
+                "Accept": "application/vnd.github.v4+json"
             }
             
             # Calculate the date for filtering
@@ -121,7 +121,7 @@ runs:
                 
             headers = {
                 "Authorization": f"Bearer {token}",
-                "Accept": "application/vnd.github.v3+json"
+                "Accept": "application/vnd.github.v4+json"
             }
             
             url = f"{api_url}/actions/runs/{run_id}/jobs?per_page=100"
