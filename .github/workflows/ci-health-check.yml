@@ -2,195 +2,176 @@ name: CI Health Check
 
 on:
   schedule:
-    - cron: '0 0 * * 1'  # Run weekly on Mondays
+    - cron: '0 0 * * 0'  # Run weekly on Sunday at midnight UTC
   workflow_dispatch:  # Allow manual triggering
 
 jobs:
-  check-action-versions:
-    name: Check Action Versions
+  health-check:
+    name: Check CI Health
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      - name: Scan for action versions
-        id: scan-actions
+      - name: Check for outdated GitHub Actions
+        id: check-actions
         run: |
-          echo "## GitHub Action Version Report" > $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "This report shows all GitHub Actions used in workflows and their versions." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Workflow | Action | Current Version |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|--------|----------------|" >> $GITHUB_STEP_SUMMARY
+          echo "## GitHub Actions Version Check" > action-versions.md
+          echo "" >> action-versions.md
+          echo "| Workflow | Action | Current Version | Latest Version | Status |" >> action-versions.md
+          echo "|----------|--------|----------------|---------------|--------|" >> action-versions.md
           
-          # Find all workflow files and extract action versions
-          find .github/workflows -name "*.yml" -type f | while read -r file; do
-            workflow_name=$(basename "$file")
+          # Known latest versions of common actions
+          declare -A LATEST_VERSIONS
+          LATEST_VERSIONS["actions/checkout"]="v4"
+          LATEST_VERSIONS["actions/setup-node"]="v4"
+          LATEST_VERSIONS["actions/cache"]="v4"
+          LATEST_VERSIONS["actions/upload-artifact"]="v4"
+          LATEST_VERSIONS["actions/download-artifact"]="v4"
+          LATEST_VERSIONS["actions/github-script"]="v7"
+          
+          # Find all workflow files
+          find .github/workflows -name "*.yml" -type f | while read -r workflow; do
+            workflow_name=$(basename "$workflow")
             
-            # Extract lines with uses: statements
-            grep -E "uses: [^@]+" "$file" | while read -r line; do
-              # Clean up the line to extract action and version
-              cleaned_line=$(echo "$line" | sed 's/^[[:space:]]*//g' | sed 's/uses: //g')
-              
-              # Skip if no @ symbol (local actions)
-              if [[ "$cleaned_line" != *"@"* ]]; then
-                if [[ "$cleaned_line" == ./.* ]]; then
-                  # This is a local action
-                  echo "| $workflow_name | $cleaned_line | local |" >> $GITHUB_STEP_SUMMARY
+            # Extract action versions using grep and sed
+            grep -E "uses: [a-zA-Z0-9_\-]+/[a-zA-Z0-9_\-]+@" "$workflow" | while read -r line; do
+              # Extract action name and version
+              if [[ $line =~ uses:[[:space:]]([a-zA-Z0-9_\-]+/[a-zA-Z0-9_\-]+)@([a-zA-Z0-9\._\-]+) ]]; then
+                action="${BASH_REMATCH[1]}"
+                version="${BASH_REMATCH[2]}"
+                
+                # Check if we know the latest version
+                if [[ -n "${LATEST_VERSIONS[$action]}" ]]; then
+                  latest="${LATEST_VERSIONS[$action]}"
+                  
+                  # Compare versions
+                  if [[ "$version" == "$latest" ]]; then
+                    status="✅ Current"
+                  else
+                    status="⚠️ Outdated"
+                  fi
+                else
+                  latest="Unknown"
+                  status="❓ Unknown"
                 fi
-                continue
+                
+                # Add to report
+                echo "| $workflow_name | $action | $version | $latest | $status |" >> action-versions.md
               fi
-              
-              # Extract action and version
-              action=$(echo "$cleaned_line" | cut -d '@' -f 1)
-              version=$(echo "$cleaned_line" | cut -d '@' -f 2 | cut -d ' ' -f 1)
-              
-              echo "| $workflow_name | $action | $version |" >> $GITHUB_STEP_SUMMARY
             done
           done
           
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Note**: For each action, verify if newer versions are available." >> $GITHUB_STEP_SUMMARY
-
-  check-deprecated-patterns:
-    name: Check for Deprecated Patterns
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+          # Check for actions that will be deprecated
+          echo "" >> action-versions.md
+          echo "## Actions with Known Deprecation Plans" >> action-versions.md
+          echo "" >> action-versions.md
+          echo "| Workflow | Action | Warning |" >> action-versions.md
+          echo "|----------|--------|---------|" >> action-versions.md
+          
+          # List of actions with known deprecation plans
+          grep -E "uses: actions/upload-pages-artifact@" --include="*.yml" -r .github/workflows/ | while read -r line; do
+            workflow=$(echo "$line" | cut -d: -f1)
+            workflow_name=$(basename "$workflow")
+            echo "| $workflow_name | actions/upload-pages-artifact | GitHub recommends migrating to new Pages workflow |" >> action-versions.md
+          done
+          
+          # Output summary to step
+          cat action-versions.md >> $GITHUB_STEP_SUMMARY
       
       - name: Check for deprecated patterns
+        id: check-patterns
         run: |
-          echo "## Deprecated Pattern Check" > $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Checking for patterns that may indicate deprecated features:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Deprecated Patterns Check" > deprecated-patterns.md
+          echo "" >> deprecated-patterns.md
+          echo "| Workflow | Line | Pattern | Recommendation |" >> deprecated-patterns.md
+          echo "|----------|------|---------|----------------|" >> deprecated-patterns.md
           
-          # Check for set-output (deprecated)
-          echo "### Deprecated `set-output` command" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          SET_OUTPUT_COUNT=$(grep -r "::set-output" --include="*.yml" .github || echo "")
-          if [ -n "$SET_OUTPUT_COUNT" ]; then
-            echo "⚠️ Found deprecated `::set-output` usage:" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            grep -r "::set-output" --include="*.yml" .github >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "Replace with \`echo \"name=value\" >> \$GITHUB_OUTPUT\`" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "✅ No deprecated `::set-output` usage found" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Check for save-state (deprecated)
-          echo "### Deprecated `save-state` command" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          SAVE_STATE_COUNT=$(grep -r "::save-state" --include="*.yml" .github || echo "")
-          if [ -n "$SAVE_STATE_COUNT" ]; then
-            echo "⚠️ Found deprecated `::save-state` usage:" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            grep -r "::save-state" --include="*.yml" .github >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "Replace with \`echo \"name=value\" >> \$GITHUB_STATE\`" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "✅ No deprecated `::save-state` usage found" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Check for add-path (deprecated)
-          echo "### Deprecated `add-path` command" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          ADD_PATH_COUNT=$(grep -r "::add-path" --include="*.yml" .github || echo "")
-          if [ -n "$ADD_PATH_COUNT" ]; then
-            echo "⚠️ Found deprecated `::add-path` usage:" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            grep -r "::add-path" --include="*.yml" .github >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "Replace with \`echo \"\$PATH_TO_ADD\" >> \$GITHUB_PATH\`" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "✅ No deprecated `::add-path` usage found" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Check for upload-artifact and download-artifact v2
-          echo "### Deprecated artifact action versions" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          ARTIFACT_V2_COUNT=$(grep -r "uses: actions/\(upload\|download\)-artifact@v[12]" --include="*.yml" .github || echo "")
-          if [ -n "$ARTIFACT_V2_COUNT" ]; then
-            echo "⚠️ Found deprecated artifact action versions:" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            grep -r "uses: actions/\(upload\|download\)-artifact@v[12]" --include="*.yml" .github >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "Update to v4 for best compatibility" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "✅ No deprecated artifact action versions found" >> $GITHUB_STEP_SUMMARY
-          fi
-
-  check-workflow-health:
-    name: Check Workflow Health
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      
-      - name: Validate workflow files
-        run: |
-          echo "## Workflow File Validation" > $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Find all workflow files
-          WORKFLOW_FILES=$(find .github/workflows -name "*.yml" -type f)
-          
-          echo "Checking workflow files for common issues:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Check each workflow file
-          for file in $WORKFLOW_FILES; do
-            echo "### $(basename $file)" >> $GITHUB_STEP_SUMMARY
-            
-            # Check for timeouts
-            if ! grep -q "timeout-minutes:" "$file"; then
-              echo "⚠️ No timeout specified - consider adding `timeout-minutes` to jobs" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "✅ Has timeout configuration" >> $GITHUB_STEP_SUMMARY
-            fi
-            
-            # Check for continue-on-error where appropriate
-            if grep -q "run:" "$file" && ! grep -q "continue-on-error:" "$file"; then
-              echo "ℹ️ Consider adding `continue-on-error` for non-critical steps" >> $GITHUB_STEP_SUMMARY
-            fi
-            
-            # Check for workflow_dispatch trigger
-            if ! grep -q "workflow_dispatch:" "$file"; then
-              echo "ℹ️ No manual trigger - consider adding `workflow_dispatch`" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "✅ Has manual trigger" >> $GITHUB_STEP_SUMMARY
-            fi
-            
-            echo "" >> $GITHUB_STEP_SUMMARY
+          # Check for set-output pattern (deprecated)
+          grep -n "::set-output" --include="*.yml" -r .github/workflows/ | while read -r line; do
+            file=$(echo "$line" | cut -d: -f1)
+            line_num=$(echo "$line" | cut -d: -f2)
+            workflow_name=$(basename "$file")
+            echo "| $workflow_name | $line_num | ::set-output | Use GITHUB_OUTPUT environment file instead |" >> deprecated-patterns.md
           done
-
-  summarize:
-    name: Summarize Findings
-    needs: [check-action-versions, check-deprecated-patterns, check-workflow-health]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Create summary
+          
+          # Check for deprecated commands
+          grep -n "::save-state" --include="*.yml" -r .github/workflows/ | while read -r line; do
+            file=$(echo "$line" | cut -d: -f1)
+            line_num=$(echo "$line" | cut -d: -f2)
+            workflow_name=$(basename "$file")
+            echo "| $workflow_name | $line_num | ::save-state | Use GITHUB_STATE environment file instead |" >> deprecated-patterns.md
+          done
+          
+          # Check for add-path command
+          grep -n "::add-path" --include="*.yml" -r .github/workflows/ | while read -r line; do
+            file=$(echo "$line" | cut -d: -f1)
+            line_num=$(echo "$line" | cut -d: -f2)
+            workflow_name=$(basename "$file")
+            echo "| $workflow_name | $line_num | ::add-path | Use GITHUB_PATH environment file instead |" >> deprecated-patterns.md
+          done
+          
+          # Check for missing timeout
+          find .github/workflows -name "*.yml" -type f | while read -r workflow; do
+            workflow_name=$(basename "$workflow")
+            # Check if job has timeout-minutes
+            if grep -q "jobs:" "$workflow" && ! grep -q "timeout-minutes:" "$workflow"; then
+              echo "| $workflow_name | N/A | Missing timeout | Add timeout-minutes to jobs to prevent stuck runs |" >> deprecated-patterns.md
+            fi
+          done
+          
+          # Output summary to step
+          cat deprecated-patterns.md >> $GITHUB_STEP_SUMMARY
+      
+      - name: Generate recommendations
         run: |
-          echo "# CI Health Check Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "CI health check completed on $(date). Review the individual job results for detailed findings." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Recommendations" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "1. Regularly update GitHub Actions to their latest versions" >> $GITHUB_STEP_SUMMARY
-          echo "2. Replace deprecated command syntaxes with the newer equivalents" >> $GITHUB_STEP_SUMMARY
-          echo "3. Ensure all jobs have appropriate timeouts to prevent hung workflows" >> $GITHUB_STEP_SUMMARY
-          echo "4. Consider adding error handling for non-critical steps" >> $GITHUB_STEP_SUMMARY
-          echo "5. Schedule regular CI maintenance to keep workflows healthy" >> $GITHUB_STEP_SUMMARY 
+          echo "## CI Improvement Recommendations" > recommendations.md
+          echo "" >> recommendations.md
+          
+          # Check if any issues were found
+          if grep -q "⚠️ Outdated" action-versions.md || grep -q "[a-zA-Z]" deprecated-patterns.md; then
+            echo "### 🛠️ Action Items" >> recommendations.md
+            echo "" >> recommendations.md
+            
+            # Recommendations for outdated actions
+            if grep -q "⚠️ Outdated" action-versions.md; then
+              echo "1. **Update outdated actions** to their latest versions for security and performance improvements" >> recommendations.md
+              grep "⚠️ Outdated" action-versions.md | sed 's/|/\n  -/g' | grep "⚠️" >> recommendations.md
+              echo "" >> recommendations.md
+            fi
+            
+            # Recommendations for deprecated patterns
+            if grep -q "[a-zA-Z]" deprecated-patterns.md && ! grep -q "No deprecated" deprecated-patterns.md; then
+              echo "2. **Fix deprecated workflow commands** to ensure future compatibility" >> recommendations.md
+              echo "   - Replace ::set-output with echo \"name=value\" >> \$GITHUB_OUTPUT" >> recommendations.md
+              echo "   - Replace ::save-state with echo \"name=value\" >> \$GITHUB_STATE" >> recommendations.md
+              echo "   - Replace ::add-path with echo \"value\" >> \$GITHUB_PATH" >> recommendations.md
+              echo "" >> recommendations.md
+            fi
+            
+            # General recommendations
+            echo "### 🌟 Best Practices" >> recommendations.md
+            echo "" >> recommendations.md
+            echo "1. **Set timeouts** on all jobs to prevent stuck workflows" >> recommendations.md
+            echo "2. **Use caching** to speed up workflows" >> recommendations.md
+            echo "3. **Implement matrix builds** for testing on multiple environments" >> recommendations.md
+            echo "4. **Add workflow concurrency limits** to prevent queue buildup" >> recommendations.md
+            echo "5. **Run this health check regularly** to maintain CI quality" >> recommendations.md
+          else
+            echo "✅ **No critical issues found in your CI configuration**" >> recommendations.md
+            echo "" >> recommendations.md
+            echo "Your workflows appear to be following best practices. Continue to run this health check regularly to catch any future issues." >> recommendations.md
+          fi
+          
+          # Output summary to step
+          cat recommendations.md >> $GITHUB_STEP_SUMMARY
+      
+      - name: Upload health check report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-health-report
+          path: |
+            action-versions.md
+            deprecated-patterns.md
+            recommendations.md
+          retention-days: 30 

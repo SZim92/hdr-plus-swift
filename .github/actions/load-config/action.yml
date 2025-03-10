@@ -1,123 +1,56 @@
 name: 'Load Workflow Configuration'
-description: 'Loads configuration values from workflow-config.yml'
-
-inputs:
-  config-path:
-    description: 'Path to the configuration file'
-    required: false
-    default: '.github/workflow-config.yml'
-
+description: 'Loads shared configuration values from workflow-config.yml'
 outputs:
-  version:
-    description: 'Project version string'
-    value: ${{ steps.load-config.outputs.version }}
-  macos-runners:
-    description: 'macOS runner configurations as JSON'
-    value: ${{ steps.load-config.outputs.macos-runners }}
-  linux-runners:
-    description: 'Linux runner configurations as JSON'
-    value: ${{ steps.load-config.outputs.linux-runners }}
+  config:
+    description: 'The full configuration as a JSON string'
+    value: ${{ steps.load-config.outputs.config }}
   project:
-    description: 'Xcode project name'
+    description: 'Project name'
     value: ${{ steps.load-config.outputs.project }}
-  main-branch:
+  main_branch:
     description: 'Main branch name'
-    value: ${{ steps.load-config.outputs.main-branch }}
-  docs-branch:
+    value: ${{ steps.load-config.outputs.main_branch }}
+  docs_branch:
     description: 'Documentation branch name'
-    value: ${{ steps.load-config.outputs.docs-branch }}
-  min-coverage:
-    description: 'Minimum code coverage threshold'
-    value: ${{ steps.load-config.outputs.min-coverage }}
-  target-coverage:
-    description: 'Target code coverage threshold'
-    value: ${{ steps.load-config.outputs.target-coverage }}
+    value: ${{ steps.load-config.outputs.docs_branch }}
+  version:
+    description: 'Current version string'
+    value: ${{ steps.load-config.outputs.version }}
 
 runs:
   using: "composite"
   steps:
-    - name: Install yq
-      shell: bash
-      run: |
-        if ! command -v yq &> /dev/null; then
-          echo "Installing yq..."
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-            sudo chmod +x /usr/local/bin/yq
-          elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            brew install yq
-          else
-            echo "Unsupported OS for yq installation"
-            exit 1
-          fi
-        fi
-        yq --version
-        
-        # Ensure jq is installed
-        if ! command -v jq &> /dev/null; then
-          echo "Installing jq..."
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            sudo apt-get update && sudo apt-get install -y jq
-          elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            brew install jq
-          else
-            echo "Unsupported OS for jq installation"
-            exit 1
-          fi
-        fi
-        jq --version
-
-    - name: Load configuration
+    - name: Load Configuration
       id: load-config
       shell: bash
       run: |
-        CONFIG_PATH="${{ inputs.config-path }}"
-        if [ ! -f "$CONFIG_PATH" ]; then
-          echo "::error::Configuration file not found: $CONFIG_PATH"
+        echo "Loading workflow configuration..."
+        
+        # Check if the config file exists
+        if [ ! -f ".github/workflow-config.yml" ]; then
+          echo "Error: workflow-config.yml not found"
           exit 1
         fi
         
-        # Load version
-        MAJOR=$(yq '.version.major' "$CONFIG_PATH")
-        MINOR=$(yq '.version.minor' "$CONFIG_PATH")
-        PATCH=$(yq '.version.patch' "$CONFIG_PATH")
+        # Read the configuration file and convert to JSON
+        CONFIG=$(yq -o=json '.version' .github/workflow-config.yml)
+        echo "config=$CONFIG" >> $GITHUB_OUTPUT
+        
+        # Extract specific values needed by most workflows
+        PROJECT=$(yq '.build.project' .github/workflow-config.yml)
+        MAIN_BRANCH=$(yq '.repository.main_branch' .github/workflow-config.yml)
+        DOCS_BRANCH=$(yq '.repository.docs_branch' .github/workflow-config.yml)
+        
+        # Create version string
+        MAJOR=$(yq '.version.major' .github/workflow-config.yml)
+        MINOR=$(yq '.version.minor' .github/workflow-config.yml)
+        PATCH=$(yq '.version.patch' .github/workflow-config.yml)
         VERSION="$MAJOR.$MINOR.$PATCH"
+        
+        # Output key values
+        echo "project=$PROJECT" >> $GITHUB_OUTPUT
+        echo "main_branch=$MAIN_BRANCH" >> $GITHUB_OUTPUT
+        echo "docs_branch=$DOCS_BRANCH" >> $GITHUB_OUTPUT
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         
-        # Load macOS runners
-        MACOS_RUNNERS=$(yq -o=json '.environments.macos' "$CONFIG_PATH")
-        # Escape JSON for GitHub output
-        MACOS_RUNNERS_ESCAPED=$(echo "$MACOS_RUNNERS" | jq -c -r '. | @json')
-        echo "macos-runners=$MACOS_RUNNERS_ESCAPED" >> $GITHUB_OUTPUT
-        
-        # Load Linux runners
-        LINUX_RUNNERS=$(yq -o=json '.environments.linux' "$CONFIG_PATH")
-        # Escape JSON for GitHub output
-        LINUX_RUNNERS_ESCAPED=$(echo "$LINUX_RUNNERS" | jq -c -r '. | @json')
-        echo "linux-runners=$LINUX_RUNNERS_ESCAPED" >> $GITHUB_OUTPUT
-        
-        # Load project name
-        PROJECT=$(yq '.build.project' "$CONFIG_PATH")
-        echo "project=$PROJECT" >> $GITHUB_OUTPUT
-        
-        # Load branch names
-        MAIN_BRANCH=$(yq '.repository.main_branch' "$CONFIG_PATH")
-        echo "main-branch=$MAIN_BRANCH" >> $GITHUB_OUTPUT
-        
-        DOCS_BRANCH=$(yq '.repository.docs_branch' "$CONFIG_PATH")
-        echo "docs-branch=$DOCS_BRANCH" >> $GITHUB_OUTPUT
-        
-        # Load coverage thresholds
-        MIN_COVERAGE=$(yq '.thresholds.coverage.minimum' "$CONFIG_PATH")
-        echo "min-coverage=$MIN_COVERAGE" >> $GITHUB_OUTPUT
-        
-        TARGET_COVERAGE=$(yq '.thresholds.coverage.target' "$CONFIG_PATH")
-        echo "target-coverage=$TARGET_COVERAGE" >> $GITHUB_OUTPUT
-        
-        # Display loaded configuration
-        echo "Loaded configuration from $CONFIG_PATH:"
-        echo "  Version: $VERSION"
-        echo "  Project: $PROJECT"
-        echo "  Main branch: $MAIN_BRANCH"
-        echo "  Docs branch: $DOCS_BRANCH"
-        echo "  Coverage thresholds: $MIN_COVERAGE% (min), $TARGET_COVERAGE% (target)" 
+        echo "Configuration loaded successfully" 
