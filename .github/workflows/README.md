@@ -63,6 +63,8 @@ These workflows handle specific scenarios:
 - **[scheduled.yml](./scheduled.yml)**: Scheduled maintenance tasks
 - **[swift-setup.yml](./swift-setup.yml)**: Reusable workflow for Swift setup
 - **[config.yml](./config.yml)**: Configuration management workflow
+- **[retry-utility.yml](./retry-utility.yml)**: Utility for running tests with automatic retries
+- **[ci-health-check.yml](./ci-health-check.yml)**: Weekly scan for CI health issues and outdated actions
 
 ## Shared Components (Actions)
 
@@ -228,6 +230,47 @@ The `ci-health-check.yml` workflow runs weekly to:
 - Generate a comprehensive health report
 
 Regularly review these reports to keep your CI system healthy and avoid surprises from deprecated features.
+
+### Handling Flaky Tests
+
+Flaky tests can be a significant problem in CI environments. We provide two approaches:
+
+1. **Test Stability Tracking**: The `test-stability.yml` workflow tracks tests that pass in some runs but fail in others, identifying potential flaky tests.
+
+2. **Automated Retries**: The `retry-utility.yml` workflow provides a pattern for automatically retrying flaky tests:
+
+```yaml
+# Example of using retry logic in a workflow
+- name: Run tests with retry
+  run: |
+    MAX_ATTEMPTS=3
+    ATTEMPT=1
+    SUCCESS=false
+    
+    while [ $ATTEMPT -le $MAX_ATTEMPTS ] && [ "$SUCCESS" = "false" ]; do
+      echo "Test attempt $ATTEMPT of $MAX_ATTEMPTS"
+      
+      if your-test-command; then
+        echo "Tests passed on attempt $ATTEMPT"
+        SUCCESS=true
+      else
+        echo "Tests failed on attempt $ATTEMPT"
+        if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+          echo "Retrying in 10 seconds..."
+          sleep 10
+        fi
+      fi
+      
+      ATTEMPT=$((ATTEMPT + 1))
+    done
+    
+    if [ "$SUCCESS" = "false" ]; then
+      echo "All $MAX_ATTEMPTS attempts failed"
+      exit 1
+    fi
+```
+
+You can also invoke the retry-utility workflow directly for specific tests that need retries.
 
 ## Extending the CI System
 

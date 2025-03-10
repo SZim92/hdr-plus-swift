@@ -1,0 +1,129 @@
+name: Test Retry Utility
+
+on:
+  workflow_dispatch:
+    inputs:
+      max-attempts:
+        description: 'Maximum retry attempts'
+        required: true
+        default: '3'
+        type: string
+      timeout-minutes:
+        description: 'Timeout for each attempt (minutes)'
+        required: true
+        default: '10'
+        type: string
+      test-command:
+        description: 'Test command to run'
+        required: true
+        default: 'xcodebuild test -project burstphoto.xcodeproj -scheme gui -destination "platform=macOS"'
+        type: string
+
+jobs:
+  retry-test:
+    name: Run Test with Retry
+    runs-on: macos-latest
+    timeout-minutes: 45  # Overall job timeout
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Set up Swift environment
+        uses: ./.github/actions/optimized-swift-setup
+        with:
+          cache-name: 'retry-test'
+          disable-code-signing: 'true'
+          
+      - name: Run tests with retry
+        id: test
+        run: |
+          echo "Running tests with up to ${{ github.event.inputs.max-attempts }} attempts"
+          
+          MAX_ATTEMPTS=${{ github.event.inputs.max-attempts }}
+          TIMEOUT_MINUTES=${{ github.event.inputs.timeout-minutes }}
+          TEST_COMMAND="${{ github.event.inputs.test-command }}"
+          
+          # Create a directory for test results
+          mkdir -p test-results
+          
+          # Initialize variables
+          ATTEMPT=1
+          SUCCESS=false
+          LAST_ERROR=""
+          
+          # Run the test command with retries
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ] && [ "$SUCCESS" = "false" ]; do
+            echo "::group::Test Attempt $ATTEMPT of $MAX_ATTEMPTS"
+            echo "Running: $TEST_COMMAND"
+            echo "Timeout: $TIMEOUT_MINUTES minutes"
+            
+            # Create a log file for this attempt
+            LOG_FILE="test-results/attempt-$ATTEMPT.log"
+            
+            # Run the command with a timeout
+            if timeout $(($TIMEOUT_MINUTES * 60)) bash -c "$TEST_COMMAND" > "$LOG_FILE" 2>&1; then
+              echo "✅ Test succeeded on attempt $ATTEMPT"
+              SUCCESS=true
+            else
+              EXIT_CODE=$?
+              echo "❌ Test failed on attempt $ATTEMPT with exit code: $EXIT_CODE"
+              
+              # Store the last 20 lines of the log for the error message
+              LAST_ERROR=$(tail -n 20 "$LOG_FILE")
+              
+              # If this was the last attempt, mark as failed
+              if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+                echo "❌ All $MAX_ATTEMPTS attempts failed"
+              else
+                echo "Retrying in 10 seconds..."
+                sleep 10
+              fi
+            fi
+            
+            echo "::endgroup::"
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+          
+          # Create a summary file
+          echo "## Test Execution Summary" > test-results/summary.md
+          echo "" >> test-results/summary.md
+          echo "- Command: \`$TEST_COMMAND\`" >> test-results/summary.md
+          echo "- Max attempts: $MAX_ATTEMPTS" >> test-results/summary.md
+          echo "- Timeout per attempt: $TIMEOUT_MINUTES minutes" >> test-results/summary.md
+          echo "" >> test-results/summary.md
+          
+          if [ "$SUCCESS" = "true" ]; then
+            echo "### ✅ Tests passed" >> test-results/summary.md
+            echo "" >> test-results/summary.md
+            echo "Tests succeeded after $((ATTEMPT - 1)) attempt(s)" >> test-results/summary.md
+            
+            # Set output and exit successfully
+            echo "success=true" >> $GITHUB_OUTPUT
+            echo "attempts=$((ATTEMPT - 1))" >> $GITHUB_OUTPUT
+          else
+            echo "### ❌ Tests failed" >> test-results/summary.md
+            echo "" >> test-results/summary.md
+            echo "Tests failed after $MAX_ATTEMPTS attempts" >> test-results/summary.md
+            echo "" >> test-results/summary.md
+            echo "**Last error:**" >> test-results/summary.md
+            echo "```" >> test-results/summary.md
+            echo "$LAST_ERROR" >> test-results/summary.md
+            echo "```" >> test-results/summary.md
+            
+            # Set output but exit with error
+            echo "success=false" >> $GITHUB_OUTPUT
+            echo "attempts=$MAX_ATTEMPTS" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          # Add the summary to the GitHub step summary
+          cat test-results/summary.md >> $GITHUB_STEP_SUMMARY
+          
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-retry-results
+          path: test-results/
+          retention-days: 7 
