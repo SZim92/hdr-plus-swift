@@ -54,13 +54,17 @@ Beyond the enforced rules, we recommend these additional best practices:
 You can check markdown formatting locally:
 
 ```bash
+
 # Install markdownlint-cli
+
 npm install -g markdownlint-cli
 
 # Check all markdown files
+
 markdownlint "**/*.md" --config .markdownlint.json
 
 # Check a specific file
+
 markdownlint README.md --config .markdownlint.json
 ```
 
@@ -69,16 +73,19 @@ markdownlint README.md --config .markdownlint.json
 We provide scripts to automatically fix common markdown formatting issues:
 
 **Windows (PowerShell):**
+
 ```powershell
 .\fix-markdown.ps1
 ```
 
 **macOS/Linux (Bash):**
+
 ```bash
 ./fix-markdown.sh
 ```
 
 These scripts will:
+
 - Remove trailing spaces
 - Add blank lines around headings
 - Add blank lines around lists

@@ -11,11 +11,11 @@ This document provides documentation for the CI/CD system used in the HDR+ Swift
 The primary workflow that runs tests and validates the codebase.
 
 - **Triggers**: Pull requests, pushes to main branch, and manual triggers
-- **Key Jobs**: 
+- **Key Jobs**:
   - Lint: Runs SwiftLint to check code style
   - Test: Executes tests on multiple macOS versions
   - Build: Creates release builds
-- **Key Features**: 
+- **Key Features**:
   - Smart path filtering to skip irrelevant runs
   - Caching of Swift dependencies and Homebrew
   - Concurrent job execution with dependencies
@@ -26,11 +26,11 @@ Verifies the project builds correctly on supported Apple platforms.
 
 - **Triggers**: Pull requests, pushes to main branch, scheduled runs, and manual triggers
 - **Purpose**: Validates the codebase builds successfully on different macOS versions
-- **Key Jobs**: 
+- **Key Jobs**:
   - Set up test matrix: Prepares the platforms to test (macOS Sonoma, Ventura)
   - Test on macOS: Builds the project and runs available tests
   - Summarize results: Collects and presents test results
-- **Key Features**: 
+- **Key Features**:
   - Metal environment diagnostics for GPU-dependent code
   - Robust platform matrix generation with filtering options
   - Comprehensive build output and error analysis
@@ -43,7 +43,7 @@ Tracks Swift compiler warnings to help maintain code quality.
 
 - **Triggers**: Scheduled runs, manual triggers, and after PRs
 - **Purpose**: Identifies Swift compiler warnings, tracks them over time, and reports increases
-- **Key Features**: 
+- **Key Features**:
   - Robust error handling for Xcode/Swift version checks
   - Fallback mechanisms to prevent broken pipe errors
   - Warning reports stored as artifacts for reference
@@ -54,9 +54,9 @@ Tracks Swift compiler warnings to help maintain code quality.
 Handles ongoing maintenance like README badge updates.
 
 - **Triggers**: Pushes to main branch and manual triggers
-- **Key Jobs**: 
+- **Key Jobs**:
   - update-badge: Manages the build status badge in the README
-- **Key Features**: 
+- **Key Features**:
   - Idempotent badge management (prevents duplicate badges)
   - Skips CI on badge commits to avoid unnecessary runs
 
@@ -72,7 +72,8 @@ Handles ongoing maintenance like README badge updates.
 2. It implements fallback mechanisms for version detection
 3. It continues execution even when initial checks fail
 
-**If it happens again**: 
+**If it happens again**:
+
 - Check the Xcode version command to ensure it isn't producing excessive output
 - Verify that `continue-on-error: true` is set for relevant steps
 
@@ -87,6 +88,7 @@ Handles ongoing maintenance like README badge updates.
 3. Uses content comparison to determine if changes are needed
 
 **If it happens again**:
+
 - Check the sed command in maintenance.yml that processes content
 - Verify the README structure hasn't been manually altered in an incompatible way
 

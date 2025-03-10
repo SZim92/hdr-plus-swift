@@ -158,6 +158,7 @@ Our GitHub Pages workflows use direct Git deployment instead of the standard Git
 - **Gives us more control**: Customizable deployment with direct Git access
 
 Example implementation:
+
 ```yaml
 
 - name: Deploy directly to gh-pages branch
@@ -191,6 +192,7 @@ Swift and Xcodebuild can fail in unexpected ways in CI environments. Our workflo
 - **Comprehensive logging**: Generate useful reports even when builds fail
 
 Example of robust xcodebuild usage:
+
 ```yaml
 
 # Write directly to log file instead of using tee (which can cause broken pipes)
@@ -209,24 +211,15 @@ xcodebuild build \
 For passing data between jobs:
 
 - **Job outputs**: Use for small data (<1MB) like status flags, paths, or configuration values
-- **Artifacts**: Use for larger files (build products, reports, logs) 
+- **Artifacts**: Use for larger files (build products, reports, logs)
 
 Example of job outputs:
+
 ```yaml
 jobs:
   generate-data:
     outputs:
       result: ${{ steps.my-step.outputs.result }}
-    steps:
-
-      - id: my-step
-        run: echo "result=some-value" >> $GITHUB_OUTPUT
-        
-  use-data:
-    needs: generate-data
-    steps:
-
-      - run: echo "Using ${{ needs.generate-data.outputs.result }}"
 ```
 
 ### Regular CI Health Checks
@@ -250,9 +243,6 @@ Flaky tests can be a significant problem in CI environments. We provide two appr
 
 ```yaml
 
-# Example of using retry logic in a workflow
-
-
 - name: Run tests with retry
   run: |
     MAX_ATTEMPTS=3
@@ -262,12 +252,14 @@ Flaky tests can be a significant problem in CI environments. We provide two appr
     while [ $ATTEMPT -le $MAX_ATTEMPTS ] && [ "$SUCCESS" = "false" ]; do
       echo "Test attempt $ATTEMPT of $MAX_ATTEMPTS"
       
-      if your-test-command; then
+      if xcodebuild test -scheme YourScheme -destination "platform=macOS"; then
         echo "Tests passed on attempt $ATTEMPT"
         SUCCESS=true
       else
-        echo "Tests failed on attempt $ATTEMPT"
-        if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+        if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+          echo "All $MAX_ATTEMPTS attempts failed"
+          exit 1
+        else
           echo "Retrying in 10 seconds..."
           sleep 10
         fi
@@ -275,14 +267,17 @@ Flaky tests can be a significant problem in CI environments. We provide two appr
       
       ATTEMPT=$((ATTEMPT + 1))
     done
-    
-    if [ "$SUCCESS" = "false" ]; then
-      echo "All $MAX_ATTEMPTS attempts failed"
-      exit 1
-    fi
 ```
 
 You can also invoke the retry-utility workflow directly for specific tests that need retries.
+
+## Additional Best Practices
+
+1. **Timeouts**: Always set `timeout-minutes` on jobs to prevent stuck workflows
+2. **Path Filtering**: Use `paths` filters to only run workflows when relevant files change
+3. **Caching**: Utilize `actions/cache` to speed up builds
+4. **Self-Hosted Runners**: Consider self-hosted runners for faster macOS builds
+5. **Matrix Builds**: Use matrix strategy for testing on multiple platforms/configurations
 
 ## Extending the CI System
 
@@ -307,18 +302,18 @@ When submitting CI changes, ensure:
 
 - Changes don't break existing workflows
 - New features are documented
-- Timeouts and retry strategies are appropriate 
+- Timeouts and retry strategies are appropriate
 
-# GitHub Actions Workflows
+## GitHub Actions Workflows
 
-## Core Workflows
+### Core Workflows
 
 - **[main.yml](./main.yml)**: Primary CI workflow for building and testing
 - **[maintenance.yml](./maintenance.yml)**: Manages readme badges and repository maintenance
 - **[documentation.yml](./documentation.yml)**: Generates and deploys documentation
 - **[release.yml](./release.yml)**: Creates releases with artifacts
 
-## Specialized Workflows
+### Specialized Workflows
 
 - **[retry-utility.yml](./retry-utility.yml)**: Utility for running tests with automatic retries
 - **[ci-health-check.yml](./ci-health-check.yml)**: Weekly scan for CI health issues and outdated actions
@@ -327,7 +322,7 @@ When submitting CI changes, ensure:
 - **[test-stability.yml](./test-stability.yml)**: Tracks flaky tests
 - **[warning-tracker.yml](./warning-tracker.yml)**: Tracks Swift compiler warnings
 
-## Utility Workflows
+### Utility Workflows
 
 - **[cleanup-artifacts.yml](./cleanup-artifacts.yml)**: Removes old workflow artifacts
 - **[stale-management.yml](./stale-management.yml)**: Manages stale issues and PRs
@@ -335,9 +330,9 @@ When submitting CI changes, ensure:
 - **[artifact-test.yml](./artifact-test.yml)**: Example workflow using job outputs instead of artifacts
 - **[orchestrator.yml](./orchestrator.yml)**: Coordinates running multiple workflows
 
-## Troubleshooting
+### Troubleshooting
 
-### Running Jobs Locally
+#### Running Jobs Locally
 
 For testing workflows locally before committing, use [act](https://github.com/nektos/act):
 
@@ -356,15 +351,15 @@ act -W .github/workflows/main.yml
 act -W .github/workflows/main.yml -j lint
 ```
 
-### Handling Flaky Tests
+#### Handling Flaky Tests
 
 Flaky tests (tests that sometimes pass and sometimes fail) can be addressed using two approaches:
 
-#### 1. Test Stability Tracking
+##### 1. Test Stability Tracking
 
 The `test-stability.yml` workflow tracks test stability across multiple runs to identify flaky tests automatically. When flaky tests are detected, they are reported in PR comments and logged for future reference.
 
-#### 2. Automated Retries
+##### 2. Automated Retries
 
 For known flaky tests, you can use the `retry-utility.yml` workflow or implement retry logic directly in your workflows:
 
@@ -395,11 +390,3 @@ For known flaky tests, you can use the `retry-utility.yml` workflow or implement
       ATTEMPT=$((ATTEMPT + 1))
     done
 ```
-
-## Best Practices
-
-1. **Timeouts**: Always set `timeout-minutes` on jobs to prevent stuck workflows
-2. **Path Filtering**: Use `paths` filters to only run workflows when relevant files change
-3. **Caching**: Utilize `actions/cache` to speed up builds
-4. **Self-Hosted Runners**: Consider self-hosted runners for faster macOS builds
-5. **Matrix Builds**: Use matrix strategy for testing on multiple platforms/configurations
