@@ -18,6 +18,22 @@ The primary workflow that runs tests and validates the codebase.
   - Caching of Swift dependencies and Homebrew
   - Concurrent job execution with dependencies
 
+### Apple Platform Compatibility (cross-platform.yml)
+Verifies the project builds correctly on supported Apple platforms.
+
+- **Triggers**: Pull requests, pushes to main branch, scheduled runs, and manual triggers
+- **Purpose**: Validates the codebase builds successfully on different macOS versions
+- **Key Jobs**: 
+  - Set up test matrix: Prepares the platforms to test (macOS Sonoma, Ventura)
+  - Test on macOS: Builds the project and runs available tests
+  - Summarize results: Collects and presents test results
+- **Key Features**: 
+  - Metal environment diagnostics for GPU-dependent code
+  - Robust platform matrix generation with filtering options
+  - Comprehensive build output and error analysis
+  - Support for platform filtering via workflow dispatch
+  - Handles Metal-specific limitations in CI environments
+
 ### Swift Warning Tracker (warning-tracker.yml)
 Tracks Swift compiler warnings to help maintain code quality.
 
@@ -75,6 +91,24 @@ Handles ongoing maintenance like README badge updates.
 1. Check cache keys in the workflow files
 2. Verify paths being cached (especially for Xcode/Swift caches)
 3. Look for cache size limits being exceeded
+
+### Apple Platform Compatibility Issues
+
+**Problem**: Build failures on specific macOS versions.
+
+**Solution**:
+1. Check the build output logs for specific errors
+2. Verify that the correct scheme ("gui") is being targeted
+3. Inspect Metal environment information for GPU/driver issues
+4. Consider platform-specific conditionals for problematic code
+
+**Problem**: "No scheme" or "Cannot find scheme" errors.
+
+**Solution**:
+1. Verify the scheme name matches exactly (case-sensitive)
+2. Check if the scheme is shared (schemes should be checked into version control)
+3. Run `xcodebuild -project burstphoto.xcodeproj -list` locally to verify schemes
+4. The workflow now automatically lists available schemes to help with debugging
 
 ## Configuration System
 
