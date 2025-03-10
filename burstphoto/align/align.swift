@@ -41,11 +41,20 @@ let warp_texture_xtrans_state                   = create_pipeline(with_function_
  * @return                      The aligned comparison texture
  */
 func align_texture(_ ref_pyramid: [MTLTexture], _ comp_texture: MTLTexture, _ downscale_factor_array: Array<Int>, _ tile_size_array: Array<Int>, _ search_dist_array: Array<Int>, _ uniform_exposure: Bool, _ black_level_mean: Double, _ color_factors3: Array<Double>) -> MTLTexture {
+    
+    // ISSUE: No validation of array lengths
+    // The function assumes that downscale_factor_array, tile_size_array, and search_dist_array
+    // all have the same length, but doesn't validate this.
+    // FIX: Add a check to ensure all arrays have matching lengths before proceeding.
         
     // initialize tile alignments
     let alignment_descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rg16Sint, width: 1, height: 1, mipmapped: false)
     alignment_descriptor.usage = [.shaderRead, .shaderWrite]
     alignment_descriptor.storageMode = .private
+    
+    // ISSUE: Force unwrapping of texture creation
+    // If texture creation fails (e.g., due to memory pressure), the application will crash
+    // FIX: Use optional binding and proper error handling
     var prev_alignment = device.makeTexture(descriptor: alignment_descriptor)!
     
     var current_alignment = device.makeTexture(descriptor: alignment_descriptor)!
@@ -60,6 +69,17 @@ func align_texture(_ ref_pyramid: [MTLTexture], _ comp_texture: MTLTexture, _ do
         
         // load layer params
         let tile_size = tile_size_array[i]
+        
+        // ISSUE: No validation of tile size constraints
+        // The Metal shaders use fixed buffer sizes (e.g., tmp_comp[5*68] and tmp_ref[64])
+        // which limit the maximum tile size to 64 pixels.
+        // FIX: Add validation to ensure tile_size <= 64 or adjust Metal shader to handle larger sizes.
+        
+        // ISSUE: No validation that tile_size divides 64 evenly
+        // Some Metal shaders use loop increments like "dy += 64/tile_size" which assumes
+        // tile_size divides 64 evenly.
+        // FIX: Validate that 64 % tile_size == 0 when using these shaders, or adjust the loop logic.
+        
         let search_dist = search_dist_array[i]
         let ref_layer = ref_pyramid[i]
         let comp_layer = comp_pyramid[i]
@@ -69,6 +89,11 @@ func align_texture(_ ref_pyramid: [MTLTexture], _ comp_texture: MTLTexture, _ do
         let n_tiles_y = ref_layer.height / (tile_size / 2) - 1
         let n_pos_1d = 2*search_dist + 1
         let n_pos_2d = n_pos_1d * n_pos_1d
+        
+        // ISSUE: No validation of search_dist == 2 assumption
+        // When n_pos_2d == 25 (resulting from search_dist == 2), specialized optimized
+        // shader functions are used, but we don't explicitly verify search_dist == 2.
+        // FIX: Add explicit check that search_dist == 2 when n_pos_2d == 25.
         
         // store the values together in a struct to make it easier and more readable when passing between functions
         tile_info = TileInfo(tile_size: tile_size, tile_size_merge: 0, search_dist: search_dist, n_tiles_x: n_tiles_x, n_tiles_y: n_tiles_y, n_pos_1d: n_pos_1d, n_pos_2d: n_pos_2d)
@@ -104,6 +129,10 @@ func align_texture(_ ref_pyramid: [MTLTexture], _ comp_texture: MTLTexture, _ do
     }
 
     // warp the aligned layer
+    // ISSUE: No safety for division by zero in warp functions
+    // The Metal warping shaders divide by total_weight without checking if it's zero,
+    // which could lead to undefined behavior.
+    // FIX: Modify the Metal shaders to check for zero before division.
     let aligned_texture = warp_texture(comp_texture, current_alignment, tile_info, downscale_factor_array[0])
     
     return aligned_texture
@@ -121,6 +150,11 @@ func align_texture(_ ref_pyramid: [MTLTexture], _ comp_texture: MTLTexture, _ do
  */
 func avg_pool(_ input_texture: MTLTexture, _ scale: Int, _ black_level_mean: Double, _ normalization: Bool, _ color_factors3: Array<Double>) -> MTLTexture {
 
+    // ISSUE: No validation of scale for avg_pool_normalization
+    // When normalization is true, avg_pool_normalization shader is used, which assumes scale==2
+    // for its norm_factors array indexing. Other scale values will cause out-of-bounds access.
+    // FIX: Add a check to ensure scale==2 when normalization is true, or adjust the Metal shader.
+
     // always set pixel format to float16 with reduced bit depth to make alignment as fast as possible
     let output_texture_descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r16Float, width: input_texture.width/scale, height: input_texture.height/scale, mipmapped: false)
     output_texture_descriptor.usage = [.shaderRead, .shaderWrite]
@@ -128,6 +162,10 @@ func avg_pool(_ input_texture: MTLTexture, _ scale: Int, _ black_level_mean: Dou
     let output_texture = device.makeTexture(descriptor: output_texture_descriptor)!
     output_texture.label = "\(input_texture.label!.components(separatedBy: ":")[0]): pool w/ scale \(scale)"
     
+    // ISSUE: Inefficient Command Buffer Management
+    // Each function creates and commits its own command buffer rather than batching operations.
+    // This prevents opportunities for the GPU to optimize across operations.
+    // FIX: Consider a design where command buffers can be shared across operations.
     let command_buffer = command_queue.makeCommandBuffer()!
     command_buffer.label = "Avg Pool"
     let command_encoder = command_buffer.makeComputeCommandEncoder()!
@@ -170,6 +208,10 @@ func build_pyramid(_ input_texture: MTLTexture, _ downscale_factor_list: Array<I
     for (i, downscale_factor) in downscale_factor_list.enumerated() {
         if i == 0 {
             // If color_factor is NOT available, a negative value will be set and normalization is deactivated.
+            // ISSUE: Scale factor not validated for avg_pool_normalization
+            // When color_factors3[0] > 0, normalization is enabled, but we don't check if downscale_factor==2,
+            // which is required by the avg_pool_normalization shader.
+            // FIX: Add a validation check to ensure downscale_factor==2 when color_factors3[0] > 0.
             pyramid.append(avg_pool(input_texture, downscale_factor, max(0.0, black_level_mean), (color_factors3[0] > 0), color_factors3))
         } else {
             pyramid.append(avg_pool(blur(pyramid.last!, with_pattern_width: 1, using_kernel_size: 2), downscale_factor, 0.0, false, color_factors3))
@@ -209,6 +251,12 @@ func compute_tile_diff(_ ref_layer: MTLTexture, _ comp_layer: MTLTexture, _ prev
     command_buffer.label = "Compute Tile Diff"
     let command_encoder = command_buffer.makeComputeCommandEncoder()!
     command_encoder.label = command_buffer.label
+    
+    // ISSUE: Specialized shader functions without explicit validation
+    // When tile_info.n_pos_2d==25, we use specialized optimized shaders without explicitly
+    // verifying that search_dist == 2 (which would guarantee n_pos_2d == 25).
+    // FIX: Add an assertion or validation check that tile_info.search_dist == 2 when n_pos_2d==25.
+    
     // either use generic function or highly-optimized function for testing a +/- 2 displacement in both image directions (in total 25 combinations)
     let state = (tile_info.n_pos_2d==25 ? (uniform_exposure ? compute_tile_differences25_state : compute_tile_differences_exposure25_state) : compute_tile_differences_state)
     command_encoder.setComputePipelineState(state)
@@ -245,6 +293,16 @@ func compute_tile_diff(_ ref_layer: MTLTexture, _ comp_layer: MTLTexture, _ prev
  * @return                  Texture containing corrected alignment vectors
  */
 func correct_upsampling_error(_ ref_layer: MTLTexture, _ comp_layer: MTLTexture, _ prev_alignment: MTLTexture, _ downscale_factor: Int, _ uniform_exposure: Bool, _ use_ssd: Bool, _ tile_info: TileInfo) -> MTLTexture {
+    
+    // ISSUE: No validation that tile_size <= 64
+    // The Metal shader 'correct_upsampling_error' uses a fixed buffer tmp_ref[64],
+    // limiting the maximum tile size to 64 pixels.
+    // FIX: Add validation to ensure tile_info.tile_size <= 64.
+    
+    // ISSUE: No validation that 64 % tile_size == 0
+    // The Metal shader uses increments like "dy += 64/tile_size" which assumes
+    // tile_size divides 64 evenly.
+    // FIX: Add validation to ensure 64 % tile_info.tile_size == 0.
     
     // create texture for corrected alignment
     let prev_alignment_corrected_descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: prev_alignment.pixelFormat, width: prev_alignment.width, height: prev_alignment.height, mipmapped: false)
@@ -321,6 +379,12 @@ func find_best_tile_alignment(_ tile_diff: MTLTexture, _ prev_alignment: MTLText
  * @return                  The warped and aligned texture
  */
 func warp_texture(_ texture_to_warp: MTLTexture, _ alignment: MTLTexture, _ tile_info: TileInfo, _ downscale_factor: Int) -> MTLTexture {
+    
+    // ISSUE: Division by zero risk in warp shaders
+    // Both warp_texture_bayer and warp_texture_xtrans Metal shaders divide by total_weight
+    // without checking if it's zero, which could lead to undefined behavior.
+    // FIX: Modify the Metal shaders to add a check before division:
+    // float out_intensity = (total_weight > 0.0f) ? (pixel_value / total_weight) : 0.0f;
     
     let warped_texture_descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: texture_to_warp.pixelFormat, width: texture_to_warp.width, height: texture_to_warp.height, mipmapped: false)
     warped_texture_descriptor.usage = [.shaderRead, .shaderWrite]
