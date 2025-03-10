@@ -31,12 +31,18 @@ open burstphoto.xcodeproj
 ## Development
 
 ### CI System
+
 This project uses GitHub Actions for continuous integration. For details on the CI system, see [CI_DOCS.md](CI_DOCS.md).
 
 #### CI Platform Support
+
 - **macOS-only Testing**: Due to Metal API requirements, automated testing is only performed on macOS platforms (currently Sonoma and Ventura).
 - **Build Verification**: CI primarily verifies that the code builds successfully and collects Metal environment diagnostics.
 - **Local Testing**: For full testing including Metal shaders, use physical devices with proper GPU support.
+
+### Documentation Standards
+
+This project follows consistent markdown formatting standards to ensure documentation readability and accessibility. For details on the standards and how to check your files, see [MARKDOWN_STANDARDS.md](MARKDOWN_STANDARDS.md).
 
 Burst Photo is a macOS app written in Swift / SwiftUI / Metal that implements a simplified version of HDR+, the computational photography pipeline in Google Pixel phones. With Burst Photo, this processing can be applied to a burst of images from any camera, increasing dynamic range and reducing noise of the resulting image. You can read more about HDR+ in Google's paper [Burst photography for high dynamic range and low-light imaging on mobile cameras](http://static.googleusercontent.com/media/www.hdrplusdata.org/en//hdrplus.pdf).
 

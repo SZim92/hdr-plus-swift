@@ -1,0 +1,106 @@
+name: Markdown Linting
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '**.md'
+      - '.markdownlint.json'
+      - '.github/workflows/markdown-lint.yml'
+  pull_request:
+    paths:
+      - '**.md'
+      - '.markdownlint.json'
+      - '.github/workflows/markdown-lint.yml'
+
+jobs:
+  markdown-lint:
+    name: Check Markdown formatting
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install markdownlint-cli
+        run: npm install -g markdownlint-cli
+      
+      - name: Run markdownlint
+        run: |
+          # Create output in GitHub Actions format
+          markdownlint "**/*.md" --config .markdownlint.json --dot --output markdownlint-result.txt || true
+          
+          # Check if there are any issues
+          if [ -s markdownlint-result.txt ]; then
+            echo "Markdown linting issues found:"
+            cat markdownlint-result.txt
+            
+            # Convert to GitHub Actions annotations format
+            while IFS= read -r line; do
+              # Parse the line - extract file, line, col, and message
+              file=$(echo "$line" | cut -d: -f1)
+              line_num=$(echo "$line" | cut -d: -f2)
+              col=$(echo "$line" | cut -d: -f3 | awk '{print $1}')
+              message=$(echo "$line" | cut -d: -f3- | sed 's/[0-9]* //' | sed 's/^[ \t]*//')
+              
+              # Output in GitHub Actions format
+              echo "::warning file=${file},line=${line_num},col=${col}::${message}"
+            done < markdownlint-result.txt
+            
+            # Determine if we should fail the check based on severity
+            CRITICAL_RULES="MD001,MD002,MD003,MD004,MD005,MD006,MD007,MD019,MD020,MD021,MD022,MD023,MD024,MD025,MD027,MD028,MD029,MD030,MD031,MD032,MD037,MD038,MD039,MD040,MD041,MD042,MD043,MD044,MD046,MD047,MD048,MD049,MD050,MD051,MD052,MD053"
+            
+            # Check if any critical rules were violated
+            grep -q -E "(${CRITICAL_RULES//,/|})" markdownlint-result.txt
+            if [ $? -eq 0 ]; then
+              echo "Critical markdown formatting issues found."
+              exit 1
+            else
+              echo "Only minor markdown formatting issues found - check warnings but allowing the build to pass."
+            fi
+          else
+            echo "No markdown linting issues found!"
+          fi
+      
+      - name: Upload markdownlint results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: markdownlint-results
+          path: markdownlint-result.txt
+          if-no-files-found: ignore
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "# Markdown Linting Results" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -s markdownlint-result.txt ]; then
+            count=$(wc -l < markdownlint-result.txt)
+            echo "Found $count formatting issues in markdown files." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## Issues by File" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Group issues by file
+            files=$(cut -d: -f1 markdownlint-result.txt | sort | uniq)
+            for file in $files; do
+              file_count=$(grep -c "^$file:" markdownlint-result.txt)
+              echo "- **$file**: $file_count issues" >> $GITHUB_STEP_SUMMARY
+            done
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "For details, check the annotations in the PR or the uploaded artifact." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ No markdown formatting issues found!" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Please follow the style defined in [.markdownlint.json](.markdownlint.json) for consistent formatting." >> $GITHUB_STEP_SUMMARY 
