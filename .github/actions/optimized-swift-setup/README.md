@@ -1,77 +1,88 @@
 # Optimized Swift Setup Action
 
-This action sets up a Swift environment with optimized caching, error handling, and performance metrics. It's designed to be a drop-in replacement for standard Swift setup steps with additional features for CI/CD workflows.
+This action sets up a Swift development environment with optimized caching to speed up CI builds. It handles Swift/Xcode installation verification, dependency caching, and optional tools like SwiftLint.
 
 ## Features
 
-- **Smart Caching**: Optimized caching of Swift and Xcode artifacts to speed up builds
-- **Error Handling**: Retry logic for flaky operations like tool installation
-- **Cross-Platform Support**: Works on both macOS and Linux environments
-- **Performance Metrics**: Tracks setup time and provides versioning information
-- **SwiftLint Integration**: Optional SwiftLint installation and configuration
-- **Code Signing Controls**: Easy code signing configuration for CI environments
-- **Simulator Support**: Optional iOS simulator configuration
+- Robust Swift and Xcode version detection with fallback mechanisms
+- Optimized caching of Swift packages, DerivedData, and Homebrew dependencies
+- Optional SwiftLint installation
+- Code signing configuration for CI environments
+- Error resilience for macOS CI environments
 
-## Usage
+## Inputs
+
+| Name                 | Description                              | Required | Default |
+|----------------------|------------------------------------------|----------|---------|
+| `cache-name`         | Identifier for the cache                 | No       | `default` |
+| `disable-code-signing` | Whether to disable code signing        | No       | `true` |
+| `install-swiftlint`  | Whether to install SwiftLint             | No       | `true` |
+| `use-retry`          | Enable retry mechanisms for flaky commands | No     | `false` |
+
+## Outputs
+
+| Name           | Description                              |
+|----------------|------------------------------------------|
+| `swift-version` | Detected Swift version                  |
+| `xcode-version` | Detected Xcode version                  |
+| `start`        | Timestamp when the action started        |
+| `swift-cache-hit` | Whether the Swift cache was hit       |
+| `brew-cache-hit` | Whether the Homebrew cache was hit     |
+
+## Example Usage
 
 ### Basic Usage
 
 ```yaml
-steps:
-  - uses: actions/checkout@v4
-  
-  - name: Set up Swift
-    uses: ./.github/actions/optimized-swift-setup
-    with:
-      cache-name: 'my-workflow'
+- name: Set up Swift environment
+  uses: ./.github/actions/optimized-swift-setup
 ```
 
-### Full Configuration
+### With Custom Cache Name and SwiftLint
 
 ```yaml
-steps:
-  - uses: actions/checkout@v4
-  
-  - name: Set up Swift with all options
-    id: swift-setup
-    uses: ./.github/actions/optimized-swift-setup
-    with:
-      cache-name: 'my-specific-job'
-      swift-version: '5.7'
-      install-swiftlint: 'true'
-      disable-code-signing: 'true'
-      xcode-path: '/Applications/Xcode_14.3.app'
-      use-retry: 'true'
-      configure-simulator: 'true'
-      
-  - name: Use Swift setup outputs
-    run: |
-      echo "Setup completed in ${{ steps.swift-setup.outputs.setup-time }} seconds"
-      echo "Using Swift version: ${{ steps.swift-setup.outputs.swift-version }}"
-      echo "Using Xcode version: ${{ steps.swift-setup.outputs.xcode-version }}"
-      echo "Cache hit: ${{ steps.swift-setup.outputs.cache-hit }}"
+- name: Set up Swift environment
+  uses: ./.github/actions/optimized-swift-setup
+  with:
+    cache-name: 'my-feature-branch'
+    install-swiftlint: true
 ```
 
-## Inputs
+### Disable Code Signing for CI
 
-| Name | Description | Required | Default |
-|------|-------------|----------|---------|
-| `cache-name` | Unique name for the cache (e.g., workflow name, job name) | No | `default` |
-| `swift-version` | Swift version to use (leave empty for default) | No | `` |
-| `install-swiftlint` | Whether to install SwiftLint | No | `true` |
-| `disable-code-signing` | Whether to disable code signing | No | `true` |
-| `xcode-path` | Path to Xcode.app if custom location is needed | No | `` |
-| `use-retry` | Whether to retry failed installations | No | `true` |
-| `configure-simulator` | Whether to configure iOS simulator | No | `false` |
+```yaml
+- name: Set up Swift environment
+  uses: ./.github/actions/optimized-swift-setup
+  with:
+    disable-code-signing: true
+```
 
-## Outputs
+## How It Works
 
-| Name | Description |
-|------|-------------|
-| `setup-time` | Time taken for setup in seconds |
-| `swift-version` | Swift version that was installed |
-| `xcode-version` | Xcode version that was used |
-| `cache-hit` | Whether there was a cache hit (true/false) |
+1. The action first attempts to detect the installed Swift and Xcode versions.
+2. It uses a robust detection mechanism with fallbacks in case of errors.
+3. Next, it sets up appropriate caching for Swift packages and Homebrew.
+4. If requested, it installs and configures SwiftLint.
+5. If requested, it disables code signing for CI environments.
+6. It provides output variables that can be used in subsequent steps.
+
+## Troubleshooting
+
+### Broken Pipe Errors
+
+If you encounter "broken pipe" errors during version detection:
+
+1. The action includes built-in fallback mechanisms to handle these errors
+2. Version detection now uses file redirection instead of pipes
+3. All critical steps include `continue-on-error: true` to prevent workflow failures
+
+### Cache Not Working
+
+If the cache doesn't seem to be working:
+
+1. Verify that cache keys are consistent across workflow runs
+2. Check if cache paths exist in your CI environment
+3. Consider using a more specific `cache-name` to isolate caching between branches or features
 
 ## When to Use This Action
 
@@ -99,24 +110,6 @@ Use this action when:
 2. **Use the action outputs** to track performance and diagnose issues
 3. **Set a specific Swift version** when requiring version consistency
 4. **Enable simulator configuration** only when needed for iOS tests
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Slow setup times**: 
-   - First run will always be slower due to empty cache
-   - Subsequent runs should be significantly faster
-   - Consider using more specific cache keys
-
-2. **Swift version mismatch**:
-   - Set `swift-version` input to ensure consistency
-   - Check that the Xcode version supports your required Swift version
-
-3. **Installation failures**:
-   - The action includes retry logic for common failures
-   - Check logs for specific error messages
-   - Consider setting `use-retry: 'false'` for debugging
 
 ## Examples
 
