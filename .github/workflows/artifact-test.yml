@@ -1,0 +1,29 @@
+name: Artifact Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  
+jobs:
+  test-workflow:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Swift environment
+        uses: ./.github/actions/optimized-swift-setup
+        with:
+          cache-name: 'test'
+          disable-code-signing: 'true'
+      
+      - name: Create test file
+        run: echo "Test file content" > test-file.txt
+      
+      - name: Upload test file
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifact
+          path: test-file.txt 
