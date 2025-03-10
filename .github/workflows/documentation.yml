@@ -35,11 +35,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       
+      # Direct setup instead of using optimized-swift-setup action
       - name: Set up Swift environment
-        uses: ./.github/actions/optimized-swift-setup
-        with:
-          cache-name: 'documentation'
-          disable-code-signing: 'true'
+        shell: bash
+        run: |
+          # Basic Swift setup
+          echo "Setting up Swift environment..."
+          swift --version
+          
+          # Disable code signing if needed
+          defaults write com.apple.dt.Xcode IDESkipCodeSigningVerification -bool YES
+          
+          # Set environment variables for xcodebuild
+          echo "EXPANDED_CODE_SIGN_IDENTITY=-" >> $GITHUB_ENV
+          echo "EXPANDED_CODE_SIGN_IDENTITY_NAME=-" >> $GITHUB_ENV
+          echo "CODE_SIGNING_REQUIRED=NO" >> $GITHUB_ENV
+          echo "CODE_SIGNING_ALLOWED=NO" >> $GITHUB_ENV
       
       - name: Install documentation tools
         run: |
