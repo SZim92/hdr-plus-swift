@@ -8,13 +8,16 @@ This directory contains workflows related to improving code quality and developm
 
 This workflow analyzes test results across multiple CI runs to identify tests that behave inconsistently (flaky tests).
 
-### Features:
+### Features
+
+
 - Automatically detects tests that pass in some runs but fail in others
 - Generates detailed reports with failure information
 - Comments on PRs when flaky tests are detected
 - Maintains a list of known flaky tests for future reference
 
-### Usage:
+### Usage
+
 This workflow runs automatically after each CI run. No manual action is required.
 
 ## Swift Compiler Warning Tracker
@@ -23,14 +26,17 @@ This workflow runs automatically after each CI run. No manual action is required
 
 This workflow tracks Swift compiler warnings over time, helping to reduce technical debt.
 
-### Features:
+### Features
+
+
 - Identifies all compiler warnings in the codebase
 - Groups warnings by file and type
 - Tracks warning trends over time
 - Identifies new warnings introduced in PRs
 - Posts detailed warning reports on PRs that introduce new warnings
 
-### Usage:
+### Usage
+
 This workflow runs automatically on PRs and pushes to main. You can also trigger it manually from the Actions tab.
 
 ## Build Time Analyzer
@@ -39,13 +45,16 @@ This workflow runs automatically on PRs and pushes to main. You can also trigger
 
 This workflow analyzes Swift compilation times and provides optimization suggestions.
 
-### Features:
+### Features
+
+
 - Identifies the slowest files and functions to compile
 - Provides specific optimization suggestions for improving build times
 - Creates detailed reports with timing information
 - Comments on PRs that modify the build system with performance analysis
 
-### Usage:
+### Usage
+
 This workflow runs weekly and on PRs that modify the build system. You can also trigger it manually.
 
 ## Benefits
@@ -64,4 +73,4 @@ These workflows are designed to be:
 - **Lightweight:** They don't add significant overhead to CI times
 - **Informative:** They provide actionable insights rather than just data
 - **Developer-friendly:** They integrate with GitHub's PR workflow for immediate feedback
-- **Low-maintenance:** They work autonomously without requiring manual intervention 
+- **Low-maintenance:** They work autonomously without requiring manual intervention

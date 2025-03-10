@@ -64,6 +64,27 @@ markdownlint "**/*.md" --config .markdownlint.json
 markdownlint README.md --config .markdownlint.json
 ```
 
+### Automatic Fixing
+
+We provide scripts to automatically fix common markdown formatting issues:
+
+**Windows (PowerShell):**
+```powershell
+.\fix-markdown.ps1
+```
+
+**macOS/Linux (Bash):**
+```bash
+./fix-markdown.sh
+```
+
+These scripts will:
+- Remove trailing spaces
+- Add blank lines around headings
+- Add blank lines around lists
+- Remove trailing punctuation from headings
+- Ensure files end with a single newline
+
 ## Editor Integration
 
 Many editors support markdownlint integration:
@@ -80,4 +101,4 @@ When contributing to documentation:
 1. Run markdownlint locally before submitting PRs
 2. Respect the existing document structure and formatting
 3. Update the table of contents if you add or remove sections
-4. Ensure any new images have appropriate alt text 
+4. Ensure any new images have appropriate alt text

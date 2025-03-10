@@ -24,6 +24,7 @@ The following custom actions need basic README files to explain their purpose, i
 Example README template for an action:
 
 ```markdown
+
 # Action Name
 
 Brief description of what this action does.
@@ -43,6 +44,7 @@ Brief description of what this action does.
 ## Example Usage
 
 ```yaml
+
 - name: Use This Action
   uses: ./.github/actions/action-name
   with:
@@ -65,6 +67,7 @@ Evaluate these workflows for potential archiving or documentation:
 - [ ] `.github/workflows/test-stability.yml`: Determine if actively used
 
 For each workflow that's determined to be unnecessary:
+
 1. Move it to `.github/archive/` with a `.archived` extension
 2. Add a comment at the top explaining why it was archived and when
 
@@ -111,4 +114,4 @@ After completing these tasks:
 
 1. Commit changes with the message "docs: add CI documentation and cleanup workflows"
 2. Test a few key workflows to ensure everything still works
-3. Future changes to the CI system should be documented in the `CI_DOCS.md` file 
+3. Future changes to the CI system should be documented in the `CI_DOCS.md` file

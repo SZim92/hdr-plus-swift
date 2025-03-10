@@ -139,11 +139,13 @@ Located at `.github/workflow-config.yml`, this file contains shared configuratio
 The configuration is loaded by the `load-config` action and makes values available as outputs. Example:
 
 ```yaml
+
 - name: Load configuration
   id: load-config
   uses: ./.github/actions/load-config
 
 - name: Use configuration values
+
   run: |
     echo "Project: ${{ steps.load-config.outputs.project }}"
     echo "Main branch: ${{ steps.load-config.outputs.main_branch }}"
@@ -176,4 +178,4 @@ Loads shared configuration values.
 2. **Leverage the Load Config Action**: Access shared configuration through this action
 3. **Add Error Handling**: Include fallbacks and error handling for critical steps
 4. **Avoid Pipes for Large Outputs**: Use file redirection instead of pipes for large command outputs
-5. **Be Explicit with Permissions**: Set minimum required permissions for each workflow 
+5. **Be Explicit with Permissions**: Set minimum required permissions for each workflow
