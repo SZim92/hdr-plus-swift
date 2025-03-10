@@ -32,16 +32,22 @@ jobs:
             # First, let's get the title of the README (first line with # at the start)
             TITLE=$(grep -m 1 "^# " README.md || echo "# HDR+ Swift")
             
-            # Create a new README with the badge right after the title
-            echo "$TITLE" > README.md.new
-            echo "" >> README.md.new
-            echo "$MAIN_BADGE" >> README.md.new
-            echo "" >> README.md.new
+            # Get the content after any blank lines following the badge
+            # This extracts the actual content, skipping empty lines at the beginning
+            CONTENT=$(grep -v "^# " README.md | grep -v "!\[Build Status\]" | sed '/./,$!d')
             
-            # Now append everything from the original README except:
-            # - The title (which we already added)
-            # - Any lines with ![Build Status] (to remove existing badges)
-            grep -v "^# " README.md | grep -v "!\[Build Status\]" >> README.md.new
+            # Create a new README with proper structure
+            {
+              echo "$TITLE"
+              echo ""
+              echo "$MAIN_BADGE"
+              echo ""
+              
+              # Only add content if there is any
+              if [ -n "$CONTENT" ]; then
+                echo "$CONTENT"
+              fi
+            } > README.md.new
             
             # Compare if the README changed
             if ! cmp -s README.md README.md.new; then
