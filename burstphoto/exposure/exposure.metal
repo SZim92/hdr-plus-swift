@@ -36,18 +36,30 @@ kernel void correct_exposure(texture2d<float, access::read> final_texture_blurre
                              constant float* black_levels_mean_buffer   [[buffer(7)]],
                              constant float* max_texture_buffer         [[buffer(8)]],
                              uint2 gid [[thread_position_in_grid]]) {
-    // load args
+    // ISSUE: Buffer access safety
+    // There's no validation that black_levels_mean_buffer has sufficient size 
+    // (mosaic_pattern_width * mosaic_pattern_width).
+    // FIX: Add validation in the Swift code before dispatching this shader to ensure 
+    // buffer size is adequate for the given mosaic_pattern_width.
     float const black_level = black_levels_mean_buffer[mosaic_pattern_width*(gid.y % mosaic_pattern_width) + (gid.x % mosaic_pattern_width)];
        
     // calculate gain for intensity correction
     float const correction_stops = float((target_exposure-exposure_bias)/100.0f);
     
-    // calculate linear gain to get close to full range of intensity values before tone mapping operator is applied
+    // ISSUE: Division by zero risk
+    // If max_texture_buffer[0] equals black_level_min, this will cause division by zero.
+    // FIX: Add a check for near-zero denominator:
+    // float denominator = max_texture_buffer[0] - black_level_min;
+    // float linear_gain = (denominator > 1e-6f) ? ((white_level - black_level_min) / denominator) : 16.0f;
     float linear_gain = (white_level-black_level_min)/(max_texture_buffer[0]-black_level_min);
     linear_gain = clamp(0.9f*linear_gain, 1.0f, 16.0f);
     
     // the gain is limited to 4.0 stops and it is slightly damped for values > 2.0 stops
     float gain_stops = clamp(correction_stops-log2(linear_gain), 0.0f, 4.0f);
+    
+    // ISSUE: Performance consideration
+    // These pow() operations are computationally expensive and performed for each pixel.
+    // FIX: Consider precalculating gain0 and gain1 in Swift and passing them as constants.
     float const gain0 = pow(2.0f, gain_stops-0.05f*max(0.0f, gain_stops-1.5f));
     float const gain1 = pow(2.0f, gain_stops/1.4f);
     
@@ -61,17 +73,24 @@ kernel void correct_exposure(texture2d<float, access::read> final_texture_blurre
     // use luminance estimated as the binomial weighted mean pixel value in a 3x3 window around the main pixel
     // apply correction with color factors to reduce clipping of the green color channel
     float luminance_before = final_texture_blurred.read(gid).r;
+    
+    // Good practice: This includes a clamp with a minimum value of 1e-12 to prevent division by zero
     luminance_before = clamp((luminance_before-black_level_mean)/(rescale_factor*color_factor_mean), 1e-12, 1.0f);
     
     // apply gains
     float luminance_after0 = linear_gain * gain0 * luminance_before;
     float luminance_after1 = linear_gain * gain1 * luminance_before;
-        
-    // apply tone mappting operator specified in equation (4) in https://www-old.cs.utah.edu/docs/techreports/2002/pdf/UUCS-02-001.pdf
-    // the operator is linear in the shadows and midtones while protecting the highlights
+    
+    // ISSUE: Numerical stability risk
+    // If gain0 is very small, this division could lead to numerical instability.
+    // FIX: Add a safety check for the denominator:
+    // float gain0_squared = max(gain0 * gain0, 1e-6f);
+    // luminance_after0 = luminance_after0 * (1.0f + luminance_after0/gain0_squared) / (1.0f + luminance_after0);
     luminance_after0 = luminance_after0 * (1.0f+luminance_after0/(gain0*gain0)) / (1.0f+luminance_after0);
     
     // apply a modified tone mapping operator, which better protects the highlights
+    // ISSUE: Similar numerical stability risk with gain1
+    // FIX: Add similar protection for gain1 calculations
     float const luminance_max = gain1 * (0.4f+gain1/(gain1*gain1)) / (0.4f+gain1);
     luminance_after1 = luminance_after1 * (0.4f+luminance_after1/(gain1*gain1)) / ((0.4f+luminance_after1)*luminance_max);
     
@@ -79,6 +98,9 @@ kernel void correct_exposure(texture2d<float, access::read> final_texture_blurre
     float const weight = clamp(gain_stops*0.25f, 0.0f, 1.0f);
         
     // apply scaling derived from luminance values and return to original intensity scale
+    // ISSUE: Potential division by very small number
+    // FIX: Since luminance_before is already clamped to minimum 1e-12 above, this is likely safe,
+    // but consider adding an explicit check if luminance_before could be modified elsewhere.
     pixel_value = pixel_value * ((1.0f-weight)*luminance_after0 + weight*luminance_after1)/luminance_before * rescale_factor + black_level;
     pixel_value = clamp(pixel_value, 0.0f, float(UINT16_MAX_VAL));
 
@@ -106,10 +128,16 @@ kernel void correct_exposure_linear(texture2d<float, access::read_write> final_t
                                     
                                     uint2 gid [[thread_position_in_grid]]) {
    
-    // load args
+    // ISSUE: Buffer access safety
+    // Same issue as in correct_exposure - no validation of buffer size.
+    // FIX: Validate buffer size in Swift code before dispatching.
     float const black_level = black_levels_mean_buffer[mosaic_pattern_width*(gid.y % mosaic_pattern_width) + (gid.x % mosaic_pattern_width)];
     
-    // calculate correction factor to get close to full range of intensity values
+    // ISSUE: Division by zero risk
+    // If max_texture_buffer[0] equals black_level_min, this division will fail.
+    // FIX: Add a safeguard against zero or near-zero denominator:
+    // float denominator = max_texture_buffer[0] - black_level_min;
+    // float corr_factor = (denominator > 1e-6f) ? ((white_level - black_level_min) / denominator) : 16.0f;
     float corr_factor = (white_level - black_level_min)/(max_texture_buffer[0] - black_level_min);
     corr_factor = clamp(0.9f*corr_factor, 1.0f, 16.0f);
     // use maximum of specified linear gain and correction factor
@@ -142,12 +170,18 @@ kernel void max_x(texture1d<float, access::read> in_texture [[texture(0)]],
                   device float *out_buffer [[buffer(0)]],
                   constant int& width [[buffer(1)]],
                   uint gid [[thread_position_in_grid]]) {
+    // ISSUE: Validation of width parameter
+    // No validation that width matches the actual texture width.
+    // FIX: Validate in Swift code or use in_texture.get_width() directly.
     float max_value = 0;
     
     for (int x = 0; x < width; x++) {
         max_value = max(max_value, in_texture.read(uint(x)).r);
     }
 
+    // ISSUE: Concurrency risk
+    // If multiple threads run with the same gid, they'll all write to the same out_buffer location.
+    // FIX: Ensure this kernel is called with only a single thread, or implement atomic operations.
     out_buffer[0] = max_value;
 }
 
@@ -167,6 +201,11 @@ kernel void max_y(texture2d<float, access::read> in_texture [[texture(0)]],
                   texture1d<float, access::write> out_texture [[texture(1)]],
                   uint gid [[thread_position_in_grid]]) {
     uint x = gid;
+    
+    // ISSUE: Bounds checking
+    // No validation that x is within the valid range for the texture.
+    // FIX: Validate in Swift that dispatch size matches texture width.
+    
     int texture_height = in_texture.get_height();
     float max_value = 0;
     
