@@ -237,7 +237,7 @@ jobs:
           echo "See the uploaded artifacts for detailed information." >> $GITHUB_STEP_SUMMARY
 
       - name: Notify via Slack
-        if: steps.check.outputs.vulnerabilities_found == 'true' && env.SLACK_WEBHOOK_URL != ''
+        if: steps.check.outputs.vulnerabilities_found == 'true' && vars.ENABLE_SLACK_NOTIFICATIONS == 'true'
         uses: rtCamp/action-slack-notify@v2
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
