@@ -5,9 +5,12 @@
 [![Apple Platform Compatibility](https://github.com/SZim92/hdr-plus-swift/actions/workflows/cross-platform.yml/badge.svg)](https://github.com/SZim92/hdr-plus-swift/actions/workflows/cross-platform.yml)
 
 ## About
+
 HDR+ Swift is a Swift implementation of Google's HDR+ burst photography algorithm, designed for computational photography on macOS. This project aims to bring powerful HDR image processing to Swift developers and photography enthusiasts.
 
 ## Features
+
+
 - Multi-frame burst photography processing
 - Automatic alignment of burst frames
 - Temporal merging for noise reduction
@@ -15,6 +18,7 @@ HDR+ Swift is a Swift implementation of Google's HDR+ burst photography algorith
 - Local and global contrast enhancement
 
 ## Installation
+
 Clone this repository and open the Xcode project:
 
 ```bash
@@ -24,6 +28,8 @@ open burstphoto.xcodeproj
 ```
 
 ## Requirements
+
+
 - macOS 13.0+ (Ventura)
 - Xcode 15.0+
 - Swift 5.9+
@@ -43,6 +49,14 @@ This project uses GitHub Actions for continuous integration. For details on the 
 ### Documentation Standards
 
 This project follows consistent markdown formatting standards to ensure documentation readability and accessibility. For details on the standards and how to check your files, see [MARKDOWN_STANDARDS.md](MARKDOWN_STANDARDS.md).
+
+#### Markdown Formatting Tools
+
+We provide tools to help maintain consistent markdown formatting:
+
+- **Automated Fixing**: Run `.\fix-markdown.ps1` (Windows) or `./fix-markdown.sh` (macOS/Linux) to automatically fix common formatting issues
+- **CI Linting**: The `markdown-lint.yml` workflow checks documentation formatting on PRs and pushes
+- **Editor Integration**: Configure your editor with markdownlint for real-time feedback
 
 Burst Photo is a macOS app written in Swift / SwiftUI / Metal that implements a simplified version of HDR+, the computational photography pipeline in Google Pixel phones. With Burst Photo, this processing can be applied to a burst of images from any camera, increasing dynamic range and reducing noise of the resulting image. You can read more about HDR+ in Google's paper [Burst photography for high dynamic range and low-light imaging on mobile cameras](http://static.googleusercontent.com/media/www.hdrplusdata.org/en//hdrplus.pdf).
 

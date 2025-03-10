@@ -1,6 +1,8 @@
 ---
+
 permalink: /tech/
 title: "Tech"
+
 ---
 
 All photos contain noise, especially those captured in low light or high dynamic range settings. Since this noise is random, it can be reduced by averaging a burst of images. Flagship smartphones have been doing this for years (eg Google's [Night Sight](https://www.theverge.com/2018/10/25/18021944/google-night-sight-pixel-3-camera-samples), Apple's [Night Mode](https://support.apple.com/en-us/HT211306)) and it turns out that the same technology can be used with essentially any camera capable of capturing a burst of RAW images.

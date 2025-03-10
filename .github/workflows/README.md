@@ -126,11 +126,13 @@ Many workflows use path-based filtering to optimize when they run:
 ### Workflow Timeouts
 
 Workflows have timeout limits to prevent hanging:
+
 - Standard workflows: 30 minutes
 - Complex build workflows: 45 minutes
 - Performance tests: 60 minutes
 
 If a workflow times out:
+
 1. Check if it's a temporary resource issue
 2. Consider optimizing the workflow for speed
 3. For legitimate long-running tasks, adjust the timeout limit
@@ -157,6 +159,7 @@ Our GitHub Pages workflows use direct Git deployment instead of the standard Git
 
 Example implementation:
 ```yaml
+
 - name: Deploy directly to gh-pages branch
   run: |
     git config --global user.name "GitHub Actions"
@@ -189,11 +192,15 @@ Swift and Xcodebuild can fail in unexpected ways in CI environments. Our workflo
 
 Example of robust xcodebuild usage:
 ```yaml
+
 # Write directly to log file instead of using tee (which can cause broken pipes)
+
 xcodebuild build \
+
   -project MyProject.xcodeproj \
   -scheme MyScheme \
   -destination "platform=macOS" \
+
   > build.log 2>&1 || echo "Build exited with non-zero status"
 ```
 
@@ -211,12 +218,14 @@ jobs:
     outputs:
       result: ${{ steps.my-step.outputs.result }}
     steps:
+
       - id: my-step
         run: echo "result=some-value" >> $GITHUB_OUTPUT
         
   use-data:
     needs: generate-data
     steps:
+
       - run: echo "Using ${{ needs.generate-data.outputs.result }}"
 ```
 
@@ -240,7 +249,10 @@ Flaky tests can be a significant problem in CI environments. We provide two appr
 2. **Automated Retries**: The `retry-utility.yml` workflow provides a pattern for automatically retrying flaky tests:
 
 ```yaml
+
 # Example of using retry logic in a workflow
+
+
 - name: Run tests with retry
   run: |
     MAX_ATTEMPTS=3
@@ -292,6 +304,7 @@ Improvements to the CI system are welcome! Please consider:
 4. Adding useful metrics and visualizations
 
 When submitting CI changes, ensure:
+
 - Changes don't break existing workflows
 - New features are documented
 - Timeouts and retry strategies are appropriate 
@@ -329,13 +342,17 @@ When submitting CI changes, ensure:
 For testing workflows locally before committing, use [act](https://github.com/nektos/act):
 
 ```bash
+
 # Install act
+
 brew install act
 
 # Run a specific workflow
+
 act -W .github/workflows/main.yml
 
 # Run a specific job
+
 act -W .github/workflows/main.yml -j lint
 ```
 
@@ -352,6 +369,7 @@ The `test-stability.yml` workflow tracks test stability across multiple runs to 
 For known flaky tests, you can use the `retry-utility.yml` workflow or implement retry logic directly in your workflows:
 
 ```yaml
+
 - name: Run tests with retry
   run: |
     MAX_ATTEMPTS=3
@@ -384,4 +402,4 @@ For known flaky tests, you can use the `retry-utility.yml` workflow or implement
 2. **Path Filtering**: Use `paths` filters to only run workflows when relevant files change
 3. **Caching**: Utilize `actions/cache` to speed up builds
 4. **Self-Hosted Runners**: Consider self-hosted runners for faster macOS builds
-5. **Matrix Builds**: Use matrix strategy for testing on multiple platforms/configurations 
+5. **Matrix Builds**: Use matrix strategy for testing on multiple platforms/configurations

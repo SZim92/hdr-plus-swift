@@ -34,6 +34,7 @@ This action sets up a Swift development environment with optimized caching to sp
 ### Basic Usage
 
 ```yaml
+
 - name: Set up Swift environment
   uses: ./.github/actions/optimized-swift-setup
 ```
@@ -41,6 +42,7 @@ This action sets up a Swift development environment with optimized caching to sp
 ### With Custom Cache Name and SwiftLint
 
 ```yaml
+
 - name: Set up Swift environment
   uses: ./.github/actions/optimized-swift-setup
   with:
@@ -51,6 +53,7 @@ This action sets up a Swift development environment with optimized caching to sp
 ### Disable Code Signing for CI
 
 ```yaml
+
 - name: Set up Swift environment
   uses: ./.github/actions/optimized-swift-setup
   with:
@@ -117,13 +120,16 @@ Use this action when:
 
 ```yaml
 steps:
+
   - uses: actions/checkout@v4
   
+
   - name: Set up Swift for SPM
     uses: ./.github/actions/optimized-swift-setup
     with:
       cache-name: 'spm-build'
       
+
   - name: Build and Test
     run: swift test
 ```
@@ -132,42 +138,52 @@ steps:
 
 ```yaml
 steps:
+
   - uses: actions/checkout@v4
   
+
   - name: Set up Swift for Xcode
     uses: ./.github/actions/optimized-swift-setup
     with:
       cache-name: 'xcode-build'
       disable-code-signing: 'true'
       
+
   - name: Build and Test
     run: |
       xcodebuild test \
+
         -project MyProject.xcodeproj \
         -scheme MyScheme \
         -destination "platform=macOS"
+
 ```
 
 ### iOS Project with Simulators
 
 ```yaml
 steps:
+
   - uses: actions/checkout@v4
   
+
   - name: Set up Swift for iOS
     uses: ./.github/actions/optimized-swift-setup
     with:
       cache-name: 'ios-build'
       configure-simulator: 'true'
       
+
   - name: Build and Test
     run: |
       xcodebuild test \
+
         -project MyiOSApp.xcodeproj \
         -scheme MyiOSScheme \
         -destination "platform=iOS Simulator,name=iPhone 14"
+
 ```
 
 ## Contributing
 
-Contributions to improve this action are welcome! Please feel free to submit PRs with enhancements or bug fixes. 
+Contributions to improve this action are welcome! Please feel free to submit PRs with enhancements or bug fixes.

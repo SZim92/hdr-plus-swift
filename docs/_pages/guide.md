@@ -1,6 +1,8 @@
 ---
+
 permalink: /guide/
 title: "Guide"
+
 ---
 
 Our app takes as input a burst of images and stacks them to produce a single output image with reduced noise and increased dynamic range (you can read more about the process [here](/tech/)). Below is a step-by-step guide to using the app.
@@ -24,6 +26,7 @@ To process a burst of images, please drag-and-drop them into the app. You can ei
 There are six settings in the preferences panel of the app. Their default values should work well in many cases. However, if you want to get the best results possible, please follow the tips below.
 
 `Exposure control`: RAW files of most cameras have a native bit-depth of 12-14 bits while the merging in the app is performed with a bit depth of 32 bit. As a consequence, tonality of the deep shadows is much improved after merging. `Exposure control` can help preserving this improved tonality by lifting the shadows to prevent quantization noise. The following options are available:
+
 - Off: Fallback solution with best file compatibility (no exposure metadata extraction required), but reduced functionality: Less efficient hot pixel suppression; Simple average can exhibit color casts in bright highlights.
 - Linear (full bit range): Recommended default option: Linear correction with exposure increase until full bit range of RAW file is used; Can improve tonality of shadows without clipping the highlights; No correction if darkest frame of the burst already has bright pixels close to the white point.
 - Linear (relative +1 EV): Applies the linear (full bit range) correction, but enforces a relative exposure increase of at least +1 EV; Improves tonality of shadows, but may clip the highlights.
@@ -61,4 +64,3 @@ Some example configurations and potential applications are shown in the table be
 | bracketed exposure; NR: 1 to 22        | ++   | ++  | daylight HDR scene |
 | uniform exposure; NR: simple average   | +++  | &minus; | static scene with tripod, virtual long exposure |
 | bracketed exposure; NR: simple average | ++++ | &minus; &minus; | static HDR scene with tripod |
-

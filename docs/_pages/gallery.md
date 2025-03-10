@@ -1,6 +1,8 @@
 ---
+
 permalink: /gallery/
 title: "Gallery"
+
 ---
 
 {% include figure image_path="/assets/images/gallery/monika_stars.jpg" caption="Sony A7S III, 51 images, ISO 130,500, f/0.95, 1/15s" %}
