@@ -88,13 +88,19 @@ kernel void avg_pool_normalization(texture2d<float, access::read> in_texture [[t
     int y0 = gid.y * scale;
     
     float const norm_factors[4] = {factor_red, factor_green, factor_green, factor_blue};
-    // QUESTION: Is it safe to assume scale==2 here for norm_factors indexing?
+    // ISSUE: This code assumes scale==2 for norm_factors indexing
+    // The array size of 4 only works for a 2×2 pattern (Bayer pattern). For other scale values,
+    // accessing norm_factors[dy*scale+dx] will cause out-of-bounds memory access when scale > 2.
+    // FIX: Either enforce scale==2 with a static_assert or runtime check, or make the array size
+    // dynamic based on scale (e.g., float norm_factors[scale*scale]).
     float const mean_factor = 0.25f*(norm_factors[0]+norm_factors[1]+norm_factors[2]+norm_factors[3]);
      
     for (int dx = 0; dx < scale; dx++) {
         for (int dy = 0; dy < scale; dy++) {
             int x = x0 + dx;
             int y = y0 + dy;
+            // ISSUE: This indexing is unsafe for scale > 2
+            // FIX: Add bounds checking or restructure to handle different scale values safely
             out_pixel += (mean_factor/norm_factors[dy*scale+dx]*in_texture.read(uint2(x, y)).r - black_level);
         }
     }
@@ -163,7 +169,10 @@ kernel void compute_tile_differences(texture2d<float, access::read> ref_texture 
             int comp_tile_y = ref_tile_y + dy0;
             
             // if the comparison pixels are outside of the frame, attach a high loss to them
-            // QUESTION: Is the chosen penalty value (2*FLOAT16_MIN_VAL) appropriate for out-of-bound pixels?
+            // ISSUE: Using 2*FLOAT16_MIN_VAL as penalty value for out-of-bounds pixels
+            // This magic constant may not be optimal for all image data and could lead to unexpected behavior.
+            // FIX: Consider using a more meaningful constant (e.g., MAX_FLOAT) or make this a parameter
+            // that can be tuned based on the specific characteristics of the input data.
             if ((comp_tile_x < 0) || (comp_tile_y < 0) || (comp_tile_x >= texture_width) || (comp_tile_y >= texture_height)) {
                 diff_abs = abs(ref_texture.read(uint2(ref_tile_x, ref_tile_y)).r - 2*FLOAT16_MIN_VAL);
             } else {
@@ -225,7 +234,11 @@ kernel void compute_tile_differences25(texture2d<half, access::read> ref_texture
     float diff_abs0, diff_abs1;
     half tmp_ref0, tmp_ref1;
     half tmp_comp[5*68];
-    // QUESTION: Is the fixed size buffer 'tmp_comp' (of size 5*68) sufficient for all tile sizes?
+    // ISSUE: Fixed size buffer assumption
+    // The buffer size of 5*68 is insufficient for tile sizes larger than 64.
+    // If tile_size exceeds 64, buffer overflow will occur, leading to undefined behavior.
+    // FIX: Either enforce a maximum tile size with a static_assert or runtime check,
+    // or allocate the buffer dynamically based on the tile size.
     
     // loop over first 4 rows of comp_texture
     for (int dy = -2; dy < +2; dy++) {
@@ -572,6 +585,10 @@ kernel void correct_upsampling_error(texture2d<half, access::read> ref_texture [
     int comp_tile_x, comp_tile_y, tmp_tile_x, tmp_tile_y, weight_outside;
     float diff_abs;
     half tmp_ref[64];
+    // ISSUE: Fixed size buffer assumption
+    // The buffer size of 64 limits tile_size to 64 or below. For larger tile sizes,
+    // this will cause a buffer overflow.
+    // FIX: Either enforce a maximum tile size or make the buffer dynamically sized.
     
     // compute tile position if previous alignment were 0
     int const x0 = gid.x*tile_size/2;
@@ -603,7 +620,12 @@ kernel void correct_upsampling_error(texture2d<half, access::read> ref_texture [
         float sum_v[3] = {0.0f, 0.0f, 0.0f};
         
         // loop over all rows
-        // QUESTION: Is the loop increment '64/tile_size' safe for all possible tile sizes?
+        // ISSUE: Division by tile_size assumption
+        // The increment `64/tile_size` assumes that tile_size divides 64 evenly.
+        // If tile_size doesn't divide 64 evenly (e.g., tile_size = 48), some rows may be skipped
+        // or the loop may not cover all rows properly.
+        // FIX: Use a different loop structure that doesn't make this assumption, or ensure
+        // that tile_size always divides 64 evenly through validation.
         for (int dy = 0; dy < tile_size; dy += 64/tile_size) {
             
             // copy 64/tile_size rows into temp vector
@@ -671,8 +693,11 @@ kernel void correct_upsampling_error(texture2d<half, access::read> ref_texture [
     }
     
     // store corrected (best) alignment
-    // QUESTION: Should we be using logical && instead of bitwise & in the following condition?
-    if(diff[0] < diff[1] & diff[0] < diff[2]) {
+    // ISSUE: Incorrect logical operator
+    // The code uses bitwise AND ('&') instead of logical AND ('&&') which can lead to incorrect results.
+    // Bitwise operations work on individual bits rather than evaluating the logical truth of expressions.
+    // FIX: Replace '&' with '&&' to ensure proper logical evaluation.
+    if(diff[0] < diff[1] && diff[0] < diff[2]) {
         prev_alignment_corrected.write(prev_align0, gid);
         
     } else if(diff[1] < diff[2]) {
@@ -799,7 +824,11 @@ kernel void warp_texture_bayer(texture2d<float, access::read> in_texture [[textu
     total_weight += weight_x*weight_y;
     
     // write output pixel
-    // QUESTION: Should we check that total_weight is non-zero to avoid division by zero?
+    // ISSUE: Division by zero risk
+    // There's no check for zero total_weight before division, which could lead to undefined behavior
+    // if all sampling points are invalid or weights become zero.
+    // FIX: Add a check to handle the case where total_weight is zero, such as:
+    // float out_intensity = (total_weight > 0.0f) ? (pixel_value / total_weight) : 0.0f;
     float out_intensity = pixel_value / total_weight;
     out_texture.write(out_intensity, gid);
 }
@@ -890,7 +919,12 @@ kernel void warp_texture_xtrans(texture2d<float, access::read> in_texture [[text
     }
     
     // write output pixel
-    // QUESTION: Should we check that total_weight is non-zero to avoid division by zero?
+    // ISSUE: Division by zero risk
+    // There's no check for zero total_weight before division. If no valid pixels are found
+    // (e.g., all sampled points are outside the reference tiles), total_weight could be zero,
+    // leading to undefined behavior.
+    // FIX: Add a check to handle this case, such as:
+    // float out_intensity = (total_weight > 0.0f) ? (total_intensity / total_weight) : 0.0f;
     float out_intensity = total_intensity / total_weight;
     out_texture.write(out_intensity, uint2(x1_pix, y1_pix));
 }
