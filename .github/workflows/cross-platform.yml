@@ -48,35 +48,41 @@ jobs:
           
           PLATFORM_FILTER="${{ github.event.inputs.platform_filter }}"
           
+          # Install jq if needed - essential for JSON processing
+          if ! command -v jq &>/dev/null; then
+            echo "Installing jq..."
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
+          
           if [ -z "$PLATFORM_FILTER" ] || [ "$PLATFORM_FILTER" = "all" ]; then
-            # Use all defined platforms
-            PLATFORMS=$(cat platforms.json)
+            # Use all defined platforms - but ensure output is compact JSON
+            PLATFORMS=$(cat platforms.json | jq -c .)
           else
-            # Filter based on input - simple approach using grep to check if the filter is in the JSON
+            # Filter based on input
             if grep -q "$PLATFORM_FILTER" platforms.json; then
               case "$PLATFORM_FILTER" in
                 macos-14|sonoma)
-                  PLATFORMS='[{"os": "macos-14", "xcode": "15.2", "displayName": "macOS Sonoma (Apple Silicon)"}]'
+                  PLATFORMS='[{"os":"macos-14","xcode":"15.2","displayName":"macOS Sonoma (Apple Silicon)"}]'
                   ;;
                 macos-13|ventura)
-                  PLATFORMS='[{"os": "macos-13", "xcode": "15.0", "displayName": "macOS Ventura (Intel)"}]'
+                  PLATFORMS='[{"os":"macos-13","xcode":"15.0","displayName":"macOS Ventura (Intel)"}]'
                   ;;
                 *)
                   # Default to all platforms if filter doesn't match precisely
-                  PLATFORMS=$(cat platforms.json)
+                  PLATFORMS=$(cat platforms.json | jq -c .)
                   ;;
               esac
             else
               # Default to all platforms if filter doesn't match
-              PLATFORMS=$(cat platforms.json)
+              PLATFORMS=$(cat platforms.json | jq -c .)
             fi
           fi
           
           # Debug output
           echo "Generated platforms JSON:"
-          echo "$PLATFORMS"
+          echo "$PLATFORMS" | jq .
           
-          # Set output for matrix
+          # Set output for matrix - ensure it's a compact, single-line JSON
           echo "platforms=$PLATFORMS" >> $GITHUB_OUTPUT
         shell: bash
 
