@@ -143,6 +143,92 @@ If a workflow times out:
 | Flaky tests | Timing-dependent tests, resource issues | Check test-stability reports |
 | Slow builds | Large Swift files, type checking | Check build-time-analyzer reports |
 
+## CI Troubleshooting and Best Practices
+
+### GitHub Pages Deployment
+
+Our GitHub Pages workflows use direct Git deployment instead of the standard GitHub Pages actions due to potential artifact-related issues. This approach:
+
+- **Eliminates action dependencies**: Avoids issues with deprecated artifact actions
+- **Provides more reliable deployments**: Reduces points of failure in the deployment process
+- **Gives us more control**: Customizable deployment with direct Git access
+
+Example implementation:
+```yaml
+- name: Deploy directly to gh-pages branch
+  run: |
+    git config --global user.name "GitHub Actions"
+    git config --global user.email "actions@github.com"
+    
+    # Create and navigate to a clean deploy directory
+    rm -rf /tmp/gh-pages-deploy
+    mkdir -p /tmp/gh-pages-deploy
+    cp -r your-content/* /tmp/gh-pages-deploy/
+    cd /tmp/gh-pages-deploy
+    
+    # Initialize git and create a commit
+    git init
+    git add .
+    git commit -m "Deploy from ${{ github.sha }}"
+    git branch -M main
+    
+    # Force push to gh-pages branch
+    git push -f https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git main:gh-pages
+```
+
+### Swift and Xcodebuild Robustness
+
+Swift and Xcodebuild can fail in unexpected ways in CI environments. Our workflows include:
+
+- **Pre-build verification**: Check if xcodebuild is working before running builds
+- **Avoid pipe redirections**: Write build output directly to files instead of using `tee`
+- **Multiple fallbacks**: Have fallback mechanisms for when tools fail
+- **Comprehensive logging**: Generate useful reports even when builds fail
+
+Example of robust xcodebuild usage:
+```yaml
+# Write directly to log file instead of using tee (which can cause broken pipes)
+xcodebuild build \
+  -project MyProject.xcodeproj \
+  -scheme MyScheme \
+  -destination "platform=macOS" \
+  > build.log 2>&1 || echo "Build exited with non-zero status"
+```
+
+### Job Outputs vs. Artifacts
+
+For passing data between jobs:
+
+- **Job outputs**: Use for small data (<1MB) like status flags, paths, or configuration values
+- **Artifacts**: Use for larger files (build products, reports, logs) 
+
+Example of job outputs:
+```yaml
+jobs:
+  generate-data:
+    outputs:
+      result: ${{ steps.my-step.outputs.result }}
+    steps:
+      - id: my-step
+        run: echo "result=some-value" >> $GITHUB_OUTPUT
+        
+  use-data:
+    needs: generate-data
+    steps:
+      - run: echo "Using ${{ needs.generate-data.outputs.result }}"
+```
+
+### Regular CI Health Checks
+
+The `ci-health-check.yml` workflow runs weekly to:
+
+- Scan all workflow files for outdated action versions
+- Identify deprecated command patterns
+- Check for best practices like timeouts and error handling
+- Generate a comprehensive health report
+
+Regularly review these reports to keep your CI system healthy and avoid surprises from deprecated features.
+
 ## Extending the CI System
 
 When adding new workflows:
