@@ -19,6 +19,10 @@ on:
         default: 'xcodebuild test -project burstphoto.xcodeproj -scheme gui -destination "platform=macOS"'
         type: string
 
+# Set explicit permissions - minimal set needed
+permissions:
+  contents: read
+
 jobs:
   retry-test:
     name: Run Test with Retry

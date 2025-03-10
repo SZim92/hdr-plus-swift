@@ -5,12 +5,21 @@ on:
   schedule:
     - cron: '0 0 * * 0'  # Every Sunday at midnight
 
+# Set explicit permissions
+permissions:
+  contents: write  # Needed to create/update branches
+  pull-requests: write  # Needed to create PRs
+  actions: read  # Needed to read workflow runs for dashboard
+
+# Prevent concurrent dashboard generation
+concurrency:
+  group: "ci-dashboard"
+  cancel-in-progress: true  # Cancel outdated dashboard generation
+
 jobs:
   generate-dashboard:
     name: Generate CI Dashboard
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     
     steps:
       - name: Checkout code

@@ -5,6 +5,17 @@ on:
     - cron: '0 5 * * 1'  # Run at 5 AM UTC every Monday
   workflow_dispatch:  # Allow manual triggering
 
+# Set explicit permissions
+permissions:
+  contents: read
+  actions: write  # Needed to delete workflow runs
+  packages: read  # If checking package dependencies
+
+# Prevent concurrent maintenance runs
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false  # Don't cancel maintenance in progress
+
 jobs:
   # Clean up old artifacts and caches
   cleanup:
