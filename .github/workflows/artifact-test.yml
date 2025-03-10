@@ -9,21 +9,30 @@ permissions:
 jobs:
   test-workflow:
     runs-on: ubuntu-latest
+    outputs:
+      test-content: ${{ steps.create-content.outputs.content }}
+      timestamp: ${{ steps.create-content.outputs.timestamp }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      # Direct simple setup without composite actions
-      - name: Basic setup
+      - name: Create test content
+        id: create-content
         run: |
-          echo "Basic environment setup"
-          uname -a
-          
-      - name: Create test file
-        run: echo "Test file content" > test-file.txt
+          echo "Creating test content without artifacts"
+          CONTENT="This is test content created at $(date)"
+          TIMESTAMP=$(date +%s)
+          echo "content=$CONTENT" >> $GITHUB_OUTPUT
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+          echo "Content: $CONTENT"
+          echo "Timestamp: $TIMESTAMP"
       
-      - name: Upload test file
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-artifact
-          path: test-file.txt 
+  use-output:
+    needs: test-workflow
+    runs-on: ubuntu-latest
+    steps:
+      - name: Use test content from previous job
+        run: |
+          echo "Received content from previous job:"
+          echo "${{ needs.test-workflow.outputs.test-content }}"
+          echo "Created at timestamp: ${{ needs.test-workflow.outputs.timestamp }}" 
