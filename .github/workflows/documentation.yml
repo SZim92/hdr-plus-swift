@@ -19,24 +19,20 @@ concurrency:
 
 # Permissions required for GitHub Pages
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write  # Need write permission to update the gh-pages branch
+  pages: write     # Also keep pages permission for future use
 
 jobs:
-  # Ultra-minimal documentation job with only essential components
+  # Direct deployment to gh-pages branch without using standard GitHub Pages actions
   documentation:
-    runs-on: ubuntu-latest  # Use Ubuntu instead of macOS to minimize dependencies
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Create documentation
         run: |
-          # Create minimal documentation directly without any tools
+          # Create minimal documentation
           mkdir -p docs
           cat > docs/index.html << 'EOF'
           <!DOCTYPE html>
@@ -55,15 +51,28 @@ jobs:
           EOF
           echo "Created minimal documentation"
 
-      - name: Setup Pages
-        id: pages
-        uses: actions/configure-pages@v4
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v2
-        with:
-          path: docs
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4 
+      # Direct deployment to gh-pages without GitHub Pages actions
+      - name: Deploy directly to gh-pages branch
+        run: |
+          # Configure git
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          # Generate a folder for documentation
+          rm -rf /tmp/gh-pages-deploy
+          mkdir -p /tmp/gh-pages-deploy
+          cp -r docs/* /tmp/gh-pages-deploy/
+          
+          # Navigate to the deploy directory
+          cd /tmp/gh-pages-deploy
+          
+          # Initialize git and force push to gh-pages branch
+          git init
+          git add .
+          git commit -m "Deploy documentation from ${{ github.sha }}"
+          git branch -M main
+          
+          # Force push to gh-pages branch
+          git push -f https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git main:gh-pages
+          
+          echo "Documentation deployed to gh-pages branch" 
