@@ -17,11 +17,20 @@ concurrency:
   group: docs-${{ github.ref }}
   cancel-in-progress: true
 
+# Permissions required for GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 jobs:
   # Generate and deploy documentation
   documentation:
     runs-on: macos-latest
     timeout-minutes: 30  # Set timeout to 30 minutes for documentation generation
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -277,18 +286,20 @@ jobs:
           
           echo "Documentation generated successfully"
       
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
+      - name: Setup GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v4
+      
+      - name: Upload documentation to GitHub Pages
+        uses: actions/upload-pages-artifact@v2
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./docs
-          publish_branch: gh-pages
-          destination_dir: api
-          allow_empty_commit: false
-          user_name: 'github-actions[bot]'
-          user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: 'docs: update API documentation [skip ci]'
-          full_commit_message: 'docs: update API documentation from commit ${{ github.sha }} [skip ci]'
+          path: ./docs
+      
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        with:
+          preview: false
       
       - name: Add Documentation Summary
         run: |
