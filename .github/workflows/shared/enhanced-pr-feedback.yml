@@ -1,0 +1,381 @@
+name: Enhanced PR Feedback
+
+on:
+  workflow_call:
+    inputs:
+      pr-number:
+        required: true
+        type: number
+      artifact-prefix:
+        required: false
+        type: string
+        default: 'test-results-'
+      include-metal-diagnostics:
+        required: false
+        type: boolean
+        default: true
+      include-visual-comparisons:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      token:
+        required: true
+
+jobs:
+  analyze-and-comment:
+    name: Analyze PR and Provide Feedback
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Download test results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "${{ inputs.artifact-prefix }}*"
+          path: test-results
+          
+      - name: Download Metal diagnostics
+        if: inputs.include-metal-diagnostics
+        uses: actions/download-artifact@v4
+        with:
+          name: metal-diagnostics
+          path: metal-diagnostics
+          
+      - name: Download visual comparisons
+        if: inputs.include-visual-comparisons
+        uses: actions/download-artifact@v4
+        with:
+          name: visual-comparisons
+          path: visual-comparisons
+          continue-on-error: true
+          
+      - name: Check file changes
+        id: file-changes
+        run: |
+          echo "Analyzing PR changes..."
+          
+          # Get PR branch and base from PR number using GitHub API
+          PR_DATA=$(curl -s -H "Authorization: token ${{ secrets.token }}" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls/${{ inputs.pr-number }}")
+          
+          PR_BRANCH=$(echo "$PR_DATA" | jq -r '.head.ref')
+          BASE_BRANCH=$(echo "$PR_DATA" | jq -r '.base.ref')
+          
+          echo "PR branch: $PR_BRANCH"
+          echo "Base branch: $BASE_BRANCH"
+          
+          # Get file changes
+          ADDED_FILES=$(git diff --name-only --diff-filter=A origin/$BASE_BRANCH...origin/$PR_BRANCH || echo "")
+          MODIFIED_FILES=$(git diff --name-only --diff-filter=M origin/$BASE_BRANCH...origin/$PR_BRANCH || echo "")
+          ALL_CHANGED_FILES=$(git diff --name-only origin/$BASE_BRANCH...origin/$PR_BRANCH || echo "")
+          
+          # Initialize variables for labels
+          HAS_UI_CHANGES=false
+          HAS_CORE_CHANGES=false
+          HAS_TEST_CHANGES=false
+          HAS_DOC_CHANGES=false
+          HAS_CI_CHANGES=false
+          HAS_DEPENDENCIES_CHANGES=false
+          HAS_METAL_CHANGES=false
+          CHANGE_SIZE="size/small"
+          
+          # Set file count for size labeling
+          FILE_COUNT=$(echo "$ALL_CHANGED_FILES" | wc -l)
+          if [ $FILE_COUNT -gt 10 ]; then
+            CHANGE_SIZE="size/medium"
+          fi
+          if [ $FILE_COUNT -gt 30 ]; then
+            CHANGE_SIZE="size/large"
+          fi
+          
+          # Check for specific types of changes
+          echo "$ALL_CHANGED_FILES" | while read file; do
+            if [[ "$file" == *.swift && "$file" == */ui/* || "$file" == */view/* || "$file" == */ViewController* ]]; then
+              HAS_UI_CHANGES=true
+            fi
+            
+            if [[ "$file" == *.swift && "$file" == */core/* || "$file" == */model/* || "$file" == */util/* ]]; then
+              HAS_CORE_CHANGES=true
+            fi
+            
+            if [[ "$file" == */test/* || "$file" == *Test* || "$file" == *test_* ]]; then
+              HAS_TEST_CHANGES=true
+            fi
+            
+            if [[ "$file" == *.md || "$file" == */docs/* || "$file" == *.rst || "$file" == */doc/* ]]; then
+              HAS_DOC_CHANGES=true
+            fi
+            
+            if [[ "$file" == */.github/* || "$file" == *workflow* || "$file" == *CI* || "$file" == *ci* ]]; then
+              HAS_CI_CHANGES=true
+            fi
+            
+            if [[ "$file" == */Podfile* || "$file" == *.podspec || "$file" == */Package.swift || "$file" == */Package.resolved ]]; then
+              HAS_DEPENDENCIES_CHANGES=true
+            fi
+            
+            if [[ "$file" == *.metal || "$file" == *Metal* || "$file" == *metal* ]]; then
+              HAS_METAL_CHANGES=true
+            fi
+          done
+          
+          # Output variables
+          echo "has_ui_changes=${HAS_UI_CHANGES}" >> $GITHUB_OUTPUT
+          echo "has_core_changes=${HAS_CORE_CHANGES}" >> $GITHUB_OUTPUT
+          echo "has_test_changes=${HAS_TEST_CHANGES}" >> $GITHUB_OUTPUT
+          echo "has_doc_changes=${HAS_DOC_CHANGES}" >> $GITHUB_OUTPUT
+          echo "has_ci_changes=${HAS_CI_CHANGES}" >> $GITHUB_OUTPUT
+          echo "has_dependencies_changes=${HAS_DEPENDENCIES_CHANGES}" >> $GITHUB_OUTPUT
+          echo "has_metal_changes=${HAS_METAL_CHANGES}" >> $GITHUB_OUTPUT
+          echo "change_size=${CHANGE_SIZE}" >> $GITHUB_OUTPUT
+          echo "file_count=${FILE_COUNT}" >> $GITHUB_OUTPUT
+      
+      - name: Generate PR report
+        id: generate-report
+        run: |
+          # Create comprehensive report
+          cat > pr-report.md << 'EOF'
+          # HDR+ Swift PR Analysis
+
+          ## Test Results Summary
+          EOF
+          
+          # Add platform-specific results
+          for platform_dir in test-results/*/; do
+            if [ -d "$platform_dir" ]; then
+              platform=$(basename "$platform_dir")
+              platform=${platform#${{ inputs.artifact-prefix }}}
+              
+              if [ -f "$platform_dir/summary.md" ]; then
+                # Extract pass/fail counts
+                TOTAL=$(grep -o '[0-9]* tests' "$platform_dir/summary.md" | head -1 | awk '{print $1}' || echo "?")
+                FAILED=$(grep -o '[0-9]* failures' "$platform_dir/summary.md" | head -1 | awk '{print $1}' || echo "0")
+                PASSED=$((TOTAL - FAILED))
+                
+                if [ "$FAILED" = "0" ]; then
+                  echo "✅ **${platform}**: All $TOTAL tests passed" >> pr-report.md
+                else
+                  echo "⚠️ **${platform}**: $PASSED/$TOTAL tests passed" >> pr-report.md
+                  
+                  # Add failure details if available
+                  if [ -f "$platform_dir/failures.md" ]; then
+                    echo "" >> pr-report.md
+                    echo "<details><summary>View Failures</summary>" >> pr-report.md
+                    echo "" >> pr-report.md
+                    cat "$platform_dir/failures.md" >> pr-report.md
+                    echo "" >> pr-report.md
+                    echo "</details>" >> pr-report.md
+                  fi
+                fi
+              fi
+            fi
+          done
+          
+          # Add Metal compatibility section if enabled
+          if [ "${{ inputs.include-metal-diagnostics }}" = "true" ]; then
+            echo "" >> pr-report.md
+            echo "## Metal Compatibility" >> pr-report.md
+            
+            if [ -d "metal-diagnostics" ] && [ -f "metal-diagnostics/metal_support_summary.md" ]; then
+              METAL_SUPPORTED=$(grep "Metal Supported" metal-diagnostics/metal_support_summary.md | grep -q "true" && echo "true" || echo "false")
+              GPU_INFO=$(grep "GPU:" metal-diagnostics/metal_support_summary.md | sed 's/GPU: //' || echo "Unknown GPU")
+              
+              if [ "$METAL_SUPPORTED" = "true" ]; then
+                echo "✅ **Metal API Support**: Compatible with Metal API" >> pr-report.md
+                echo "🖥️ **GPU**: $GPU_INFO" >> pr-report.md
+                
+                # Check if PR modifies Metal code
+                if [ "${{ steps.file-changes.outputs.has_metal_changes }}" = "true" ]; then
+                  echo "" >> pr-report.md
+                  echo "⚠️ **Metal Code Modified**: This PR modifies Metal code. Pay special attention to GPU compatibility." >> pr-report.md
+                fi
+              else
+                echo "⚠️ **Metal API Support**: Potential compatibility issues detected" >> pr-report.md
+                echo "🖥️ **GPU**: $GPU_INFO" >> pr-report.md
+                
+                # Check if PR modifies Metal code
+                if [ "${{ steps.file-changes.outputs.has_metal_changes }}" = "true" ]; then
+                  echo "" >> pr-report.md
+                  echo "❌ **Warning**: This PR modifies Metal code but testing was performed on a system without Metal support." >> pr-report.md
+                  echo "Please test on a Metal-compatible system before merging." >> pr-report.md
+                fi
+              fi
+              
+              # Add detailed Metal diagnostics in a collapsible section
+              echo "" >> pr-report.md
+              echo "<details><summary>View Metal Diagnostics</summary>" >> pr-report.md
+              echo "" >> pr-report.md
+              cat "metal-diagnostics/metal_support_summary.md" >> pr-report.md
+              echo "" >> pr-report.md
+              echo "</details>" >> pr-report.md
+            else
+              echo "🔍 **Metal API Usage**: No Metal diagnostics available" >> pr-report.md
+            fi
+          fi
+          
+          # Add visual comparison if available and enabled
+          if [ "${{ inputs.include-visual-comparisons }}" = "true" ] && [ -d "visual-comparisons" ] && [ "$(ls -A visual-comparisons 2>/dev/null)" ]; then
+            echo "" >> pr-report.md
+            echo "## Visual Verification" >> pr-report.md
+            echo "" >> pr-report.md
+            echo "| Before | After |" >> pr-report.md
+            echo "|--------|-------|" >> pr-report.md
+            
+            for img in visual-comparisons/*-diff.png; do
+              if [ -f "$img" ]; then
+                # In a real implementation, we would upload these images somewhere
+                # For now, just mention them in the report
+                base_name=$(basename "$img" -diff.png)
+                echo "| [Before Image for $base_name] | [After Image for $base_name] |" >> pr-report.md
+              fi
+            done
+          fi
+          
+          # Add PR analysis section based on file changes
+          echo "" >> pr-report.md
+          echo "## PR Analysis" >> pr-report.md
+          echo "" >> pr-report.md
+          
+          # Add file change statistics
+          echo "| Metric | Value |" >> pr-report.md
+          echo "|--------|-------|" >> pr-report.md
+          echo "| Files Changed | ${{ steps.file-changes.outputs.file_count }} |" >> pr-report.md
+          echo "| Size Category | ${{ steps.file-changes.outputs.change_size }} |" >> pr-report.md
+          
+          # Add change areas
+          echo "" >> pr-report.md
+          echo "### Changes By Area" >> pr-report.md
+          echo "" >> pr-report.md
+          
+          AREAS=()
+          
+          if [ "${{ steps.file-changes.outputs.has_ui_changes }}" = "true" ]; then
+            AREAS+=("UI")
+          fi
+          
+          if [ "${{ steps.file-changes.outputs.has_core_changes }}" = "true" ]; then
+            AREAS+=("Core")
+          fi
+          
+          if [ "${{ steps.file-changes.outputs.has_test_changes }}" = "true" ]; then
+            AREAS+=("Tests")
+          fi
+          
+          if [ "${{ steps.file-changes.outputs.has_doc_changes }}" = "true" ]; then
+            AREAS+=("Documentation")
+          fi
+          
+          if [ "${{ steps.file-changes.outputs.has_ci_changes }}" = "true" ]; then
+            AREAS+=("CI")
+          fi
+          
+          if [ "${{ steps.file-changes.outputs.has_dependencies_changes }}" = "true" ]; then
+            AREAS+=("Dependencies")
+          fi
+          
+          if [ "${{ steps.file-changes.outputs.has_metal_changes }}" = "true" ]; then
+            AREAS+=("Metal")
+          fi
+          
+          if [ ${#AREAS[@]} -eq 0 ]; then
+            echo "No specific areas identified." >> pr-report.md
+          else
+            for area in "${AREAS[@]}"; do
+              echo "- $area" >> pr-report.md
+            done
+          fi
+          
+          # Add recommendations based on analysis
+          echo "" >> pr-report.md
+          echo "### Recommendations" >> pr-report.md
+          echo "" >> pr-report.md
+          
+          # Size recommendations
+          if [ "${{ steps.file-changes.outputs.change_size }}" = "size/large" ]; then
+            echo "- 🔍 Consider breaking this PR into smaller ones for easier review" >> pr-report.md
+          fi
+          
+          # Test recommendations
+          if [ "${{ steps.file-changes.outputs.has_core_changes }}" = "true" ] && [ "${{ steps.file-changes.outputs.has_test_changes }}" = "false" ]; then
+            echo "- 🧪 Consider adding tests for the core changes" >> pr-report.md
+          fi
+          
+          # Documentation recommendations
+          if [ "${{ steps.file-changes.outputs.has_core_changes }}" = "true" ] && [ "${{ steps.file-changes.outputs.has_doc_changes }}" = "false" ]; then
+            echo "- 📝 Consider updating documentation for the changes" >> pr-report.md
+          fi
+          
+          # Metal specific recommendations
+          if [ "${{ steps.file-changes.outputs.has_metal_changes }}" = "true" ]; then
+            echo "- 🖥️ Verify Metal changes on both Apple Silicon and Intel platforms" >> pr-report.md
+            echo "- 🧪 Consider testing with Metal Performance Shaders validation" >> pr-report.md
+          fi
+      
+      - name: Post PR comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.token }}
+          script: |
+            const fs = require('fs');
+            const prReport = fs.readFileSync('pr-report.md', 'utf8');
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ inputs.pr-number }},
+              body: prReport
+            });
+            
+      - name: Apply PR labels
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.token }}
+          script: |
+            // Prepare labels based on file changes
+            const labels = [];
+            
+            // Add size label
+            labels.push('${{ steps.file-changes.outputs.change_size }}');
+            
+            // Add area labels
+            if ('${{ steps.file-changes.outputs.has_ui_changes }}' === 'true') {
+              labels.push('area/ui');
+            }
+            
+            if ('${{ steps.file-changes.outputs.has_core_changes }}' === 'true') {
+              labels.push('area/core');
+            }
+            
+            if ('${{ steps.file-changes.outputs.has_test_changes }}' === 'true') {
+              labels.push('area/testing');
+            }
+            
+            if ('${{ steps.file-changes.outputs.has_doc_changes }}' === 'true') {
+              labels.push('area/documentation');
+            }
+            
+            if ('${{ steps.file-changes.outputs.has_ci_changes }}' === 'true') {
+              labels.push('area/ci');
+            }
+            
+            if ('${{ steps.file-changes.outputs.has_dependencies_changes }}' === 'true') {
+              labels.push('area/dependencies');
+            }
+            
+            if ('${{ steps.file-changes.outputs.has_metal_changes }}' === 'true') {
+              labels.push('area/metal');
+            }
+            
+            // Apply labels
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: ${{ inputs.pr-number }},
+                labels: labels
+              });
+            } 
