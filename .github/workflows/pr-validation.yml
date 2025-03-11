@@ -168,13 +168,17 @@ jobs:
       - name: Check code and provide suggestions
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
+        env:
+          HAS_SWIFT_FILES: ${{ steps.pr_files.outputs.has_swift_files }}
+          HAS_TEST_FILES: ${{ steps.pr_files.outputs.has_test_files }}
+          HAS_DOC_FILES: ${{ steps.pr_files.outputs.has_doc_files }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            // Check if the PR has Swift files but no test files
-            const hasSwiftFiles = ${{ steps.pr_files.outputs.has_swift_files == 'true' }};
-            const hasTestFiles = ${{ steps.pr_files.outputs.has_test_files == 'true' }};
-            const hasDocFiles = ${{ steps.pr_files.outputs.has_doc_files == 'true' }};
+            // Read the environment variables provided by GitHub Actions
+            const hasSwiftFiles = process.env.HAS_SWIFT_FILES === 'true';
+            const hasTestFiles = process.env.HAS_TEST_FILES === 'true';
+            const hasDocFiles = process.env.HAS_DOC_FILES === 'true';
             
             // If we have Swift changes but no test updates, suggest adding tests
             if (hasSwiftFiles && !hasTestFiles) {
