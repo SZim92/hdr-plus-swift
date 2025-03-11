@@ -155,55 +155,39 @@ jobs:
       platform: ${{ matrix.platform.runner }}
       xcode-version: ${{ matrix.platform.xcode }}
       architecture: ${{ matrix.platform.architecture }}
+
+  # Check if Metal is supported and determine if visual tests should run
+  metal-config:
+    name: Metal Configuration
+    needs: [config]
+    uses: ./.github/workflows/shared/metal-config.yml
+    with:
+      platform: macos-14
+      test-scene-count: 5
+      cache-key-prefix: visual-test
   
   # Add visual regression testing for Metal rendering
   visual-testing:
     name: Metal Visual Regression
-    # Only run on PRs with Metal or UI changes, or when manually triggered
-    if: >
-      github.event_name == 'workflow_dispatch' || 
-      (github.event_name == 'pull_request' && 
-       (contains(github.event.pull_request.labels.*.name, 'area/metal') || 
-        contains(github.event.pull_request.labels.*.name, 'area/ui')))
-    needs: [config]
+    needs: [metal-config]
+    if: needs.metal-config.outputs.should-run-visual-tests == 'true'
     runs-on: macos-14
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      # Add Metal shader compilation cache
-      - name: Cache Metal shaders
-        uses: actions/cache@v4
+      - name: Run Visual Tests
+        uses: ./.github/actions/visual-testing
         with:
-          path: .metal-cache
-          key: metal-visual-${{ runner.os }}-${{ hashFiles('**/*.metal') }}
-          restore-keys: |
-            metal-visual-${{ runner.os }}-
-      
-      - name: Setup Metal environment
-        run: |
-          echo "Setting up environment for Metal testing"
-          mkdir -p test-outputs/visual-tests
-          # Make the render test script executable
-          chmod +x tools/render-test-scenes.sh
-        
-      - name: Run visual test scene renderer
-        run: |
-          # Use the standardized script instead of embedded code
-          echo "Generating test scenes using the shared renderer script..."
-          ./tools/render-test-scenes.sh --count 5 --output test-outputs/visual-tests
-          
-      - name: Upload visual test results
-        uses: actions/upload-artifact@v4
-        with:
-          name: visual-test-outputs
-          path: test-outputs/visual-tests
-          if-no-files-found: error
-      
+          output-dir: visual-test-outputs
+          scene-count: 5
+          metal-supported: ${{ needs.metal-config.outputs.metal-supported }}
+          verbose: "true"
+  
   summarize:
     name: Summarize Results
-    needs: test
+    needs: [test]
     if: always()  # Run even if tests fail
     
     uses: ./.github/workflows/shared/test-summarizer.yml
@@ -211,16 +195,28 @@ jobs:
   notify:
     name: Notify on Completion
     needs: [lint, test, summarize]
-    if: |
-      always() &&
-      !failure()
+    if: always()
     runs-on: ubuntu-latest
     
     steps:
       - name: Check workflow status
         id: check
         run: |
-          if [ "${{ contains(needs.*.result, 'failure') }}" == "true" ]; then
+          LINT_RESULT="${{ needs.lint.result }}"
+          TEST_RESULT="${{ needs.test.result }}"
+          SUMMARIZE_RESULT="${{ needs.summarize.result }}"
+          
+          # Define function for status check
+          function is_failure() {
+            if [ "$1" == "failure" ]; then
+              return 0
+            else
+              return 1
+            fi
+          }
+          
+          # Check required jobs
+          if is_failure "$LINT_RESULT" || is_failure "$TEST_RESULT" || is_failure "$SUMMARIZE_RESULT"; then
             echo "status=failure" >> $GITHUB_OUTPUT
             echo "icon=❌" >> $GITHUB_OUTPUT
           else
@@ -240,9 +236,9 @@ jobs:
           echo "| Testing | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Summary | ${{ needs.summarize.result }} |" >> $GITHUB_STEP_SUMMARY
           
-          # Check if we have a visual testing job based on the conditions that would trigger it
-          if [ "${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && (contains(github.event.pull_request.labels.*.name, 'area/metal') || contains(github.event.pull_request.labels.*.name, 'area/ui'))) }}" == "true" ]; then
-            echo "| Visual Testing | Ran (see artifacts) |" >> $GITHUB_STEP_SUMMARY
+          # Only check visual-testing if the job ran
+          if ${{ contains(needs.*.name, 'Metal Visual Regression') }}; then
+            echo "| Visual Testing | ${{ needs.visual-testing.result }} |" >> $GITHUB_STEP_SUMMARY
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -252,12 +248,12 @@ jobs:
     name: PR Feedback
     # Only run for PR events
     if: github.event_name == 'pull_request'
-    needs: [summarize]
+    needs: [summarize, metal-config, visual-testing]
     uses: ./.github/workflows/shared/enhanced-pr-feedback.yml
     with:
       pr-number: ${{ github.event.pull_request.number }}
       artifact-prefix: 'test-results-'
       include-metal-diagnostics: true
-      include-visual-comparisons: ${{ github.event_name == 'pull_request' && (contains(github.event.pull_request.labels.*.name, 'area/metal') || contains(github.event.pull_request.labels.*.name, 'area/ui')) }}
+      include-visual-comparisons: ${{ needs.metal-config.outputs.should-run-visual-tests == 'true' }}
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }} 
