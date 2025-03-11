@@ -35,12 +35,11 @@ Steps to reproduce the behavior:
 
 ## Environment
 
-
- - OS: [e.g. macOS 13.4, iOS 16.5]
- - Swift Version: [e.g. 5.9]
- - Xcode Version: [e.g. 15.0]
- - Device (if applicable): [e.g. iPhone 15 Pro]
- - Library Version: [e.g. 0.1.0]
+- OS: [e.g. macOS 13.4, iOS 16.5]
+- Swift Version: [e.g. 5.9]
+- Xcode Version: [e.g. 15.0]
+- Device (if applicable): [e.g. iPhone 15 Pro]
+- Library Version: [e.g. 0.1.0]
 
 ## Logs and Error Messages
 
