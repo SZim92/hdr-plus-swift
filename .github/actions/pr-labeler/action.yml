@@ -1,0 +1,114 @@
+name: PR Labeler Action
+# This composite action analyzes the pull request file changes and outputs a set of labels in JSON format
+
+description: "A composite action to analyze pull request file changes and determine labels based on file types."
+
+inputs: {}
+
+outputs:
+  labels:
+    description: "Labels to be applied to the PR (in JSON array format)"
+    value: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Analyze PR changes and determine labels
+      id: detect
+      shell: bash
+      run: |
+        echo "Analyzing PR changes..."
+        # Ensure we are in a pull_request context
+        if [ "$(jq -r '.pull_request' "$GITHUB_EVENT_PATH")" = "null" ]; then
+          echo "Not a pull request event. Exiting."
+          echo "labels=[]" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        PR_HEAD=$(jq -r '.pull_request.head.ref' "$GITHUB_EVENT_PATH")
+        PR_BASE=$(jq -r '.pull_request.base.ref' "$GITHUB_EVENT_PATH")
+        echo "PR branch: $PR_HEAD"
+        echo "Base branch: $PR_BASE"
+
+        # Get all changed files using git diff
+        ALL_CHANGED_FILES=$(git diff --name-only "origin/$PR_BASE...origin/$PR_HEAD" || echo "")
+
+        # Initialize flags
+        HAS_UI_CHANGES=false
+        HAS_CORE_CHANGES=false
+        HAS_TEST_CHANGES=false
+        HAS_DOC_CHANGES=false
+        HAS_CI_CHANGES=false
+        HAS_DEPENDENCIES_CHANGES=false
+        HAS_METAL_CHANGES=false
+        CHANGE_SIZE="size/small"
+
+        FILE_COUNT=$(echo "$ALL_CHANGED_FILES" | wc -l)
+        if [ "$FILE_COUNT" -gt 10 ]; then
+          CHANGE_SIZE="size/medium"
+        fi
+        if [ "$FILE_COUNT" -gt 30 ]; then
+          CHANGE_SIZE="size/large"
+        fi
+
+        for file in $ALL_CHANGED_FILES; do
+          if [[ "$file" == *.swift && ( "$file" == */ui/* || "$file" == */view/* || "$file" == */ViewController* ) ]]; then
+            HAS_UI_CHANGES=true
+          fi
+          if [[ "$file" == *.swift && ( "$file" == */core/* || "$file" == */model/* || "$file" == */util/* ) ]]; then
+            HAS_CORE_CHANGES=true
+          fi
+          if [[ "$file" == */test/* || "$file" == *Test* || "$file" =~ test_ ]]; then
+            HAS_TEST_CHANGES=true
+          fi
+          if [[ "$file" == *.md || "$file" == */docs/* || "$file" == *.rst || "$file" == */doc/* ]]; then
+            HAS_DOC_CHANGES=true
+          fi
+          if [[ "$file" == */.github/* || "$file" == *workflow* || "$file" == *CI* || "$file" == *ci* ]]; then
+            HAS_CI_CHANGES=true
+          fi
+          if [[ "$file" == */Podfile* || "$file" == *.podspec || "$file" == */Package.swift || "$file" == */Package.resolved ]]; then
+            HAS_DEPENDENCIES_CHANGES=true
+          fi
+          if [[ "$file" == *.metal || "$file" == *Metal* || "$file" == *MTL* || "$file" == *.air ]]; then
+            HAS_METAL_CHANGES=true
+          fi
+        done
+
+        LABELS=($CHANGE_SIZE)
+        if [ "$HAS_UI_CHANGES" = true ]; then
+          LABELS+=("area/ui")
+        fi
+        if [ "$HAS_CORE_CHANGES" = true ]; then
+          LABELS+=("area/core")
+        fi
+        if [ "$HAS_TEST_CHANGES" = true ]; then
+          LABELS+=("area/testing")
+        fi
+        if [ "$HAS_DOC_CHANGES" = true ]; then
+          LABELS+=("area/documentation")
+        fi
+        if [ "$HAS_CI_CHANGES" = true ]; then
+          LABELS+=("area/ci")
+        fi
+        if [ "$HAS_DEPENDENCIES_CHANGES" = true ]; then
+          LABELS+=("area/dependencies")
+        fi
+        if [ "$HAS_METAL_CHANGES" = true ]; then
+          LABELS+=("area/metal")
+        fi
+
+        # Convert LABELS array to JSON array
+        LABELS_JSON=$(printf "%s\n" "${LABELS[@]}" | jq -R -s -c 'split("\n") | map(select(. != ""))')
+        echo "labels=${LABELS_JSON}" >> "$GITHUB_OUTPUT"
+        echo "Detected labels: ${LABELS_JSON}"
+
+    - name: Set composite output
+      shell: bash
+      run: |
+        echo "labels=${{ steps.detect.outputs.labels }}" >> "$GITHUB_OUTPUT" 
