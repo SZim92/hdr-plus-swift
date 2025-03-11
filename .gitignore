@@ -1,3 +1,60 @@
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+
+# Project specific
 deprecated
 releases
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+yarn-debug.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Swift/Xcode
+.build/
+DerivedData/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+*.xccheckout
+*.moved-aside
+*.xcuserstate
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# CI
+.coverage
+coverage/
+htmlcov/
+test-results/

@@ -350,6 +350,7 @@ jobs:
           disable-code-signing: 'true'
       
       - name: Run static analysis
+        id: security-scan
         run: |
           echo "Running static analysis on Swift code..."
           

@@ -143,6 +143,7 @@ The configuration is loaded by the `load-config` action and makes values availab
 ```yaml
 
 - name: Load configuration
+
   id: load-config
   uses: ./.github/actions/load-config
 
