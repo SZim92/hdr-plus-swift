@@ -194,7 +194,7 @@ jobs:
     
   notify:
     name: Notify on Completion
-    needs: [lint, test, summarize]
+    needs: [lint, test, summarize, visual-testing]
     if: always()
     runs-on: ubuntu-latest
     
@@ -235,12 +235,7 @@ jobs:
           echo "| Linting | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Testing | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Summary | ${{ needs.summarize.result }} |" >> $GITHUB_STEP_SUMMARY
-          
-          # Only check visual-testing if the job ran
-          if ${{ contains(needs.*.name, 'Metal Visual Regression') }}; then
-            echo "| Visual Testing | ${{ needs.visual-testing.result }} |" >> $GITHUB_STEP_SUMMARY
-          fi
-          
+          echo "| Visual Testing | ${{ needs.visual-testing.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Overall status: **${{ steps.check.outputs.status }}**" >> $GITHUB_STEP_SUMMARY
       
