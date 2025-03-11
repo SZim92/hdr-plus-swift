@@ -1,136 +1,320 @@
-name: 'Test Results Summarizer'
+name: Test Summary Generator
+
 on:
   workflow_call:
     inputs:
-      artifact-prefix:
-        description: 'Prefix for test results artifacts'
+      base-artifact-name:
         required: false
         type: string
-        default: 'test-results-'
+        default: 'test-results'
+      include-visual-tests:
+        required: false
+        type: boolean
+        default: true
+      include-performance-metrics:
+        required: false
+        type: boolean
+        default: true
+      include-flaky-detection:
+        required: false
+        type: boolean
+        default: true
+      artifacts-retention-days:
+        required: false
+        type: number
+        default: 14
 
 jobs:
   summarize:
-    name: 'Summarize Test Results'
+    name: Process Test Results
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - name: Download all test artifacts
+        uses: actions/download-artifact@v3
         with:
           path: artifacts
           
-      - name: Ensure artifacts directory exists
-        run: mkdir -p artifacts
-        
-      - name: Generate test summary
+      - name: Create test summary
+        id: create-summary
         run: |
-          echo "# Test Results Summary 📊" > test-summary.md
-          echo "" >> test-summary.md
-          echo "Generated on $(date)" >> test-summary.md
-          echo "" >> test-summary.md
+          mkdir -p test-summary
           
-          echo "## Platform Results" >> test-summary.md
-          echo "" >> test-summary.md
-          echo "| Platform | Status | Build | Tests Passed | Tests Failed |" >> test-summary.md
-          echo "|----------|--------|-------|--------------|--------------|" >> test-summary.md
+          # Create summary files
+          SUMMARY_FILE="test-summary/summary.md"
+          DETAILS_FILE="test-summary/details.md"
+          METRICS_FILE="test-summary/metrics.md"
+          FAILED_FILE="test-summary/failed.md"
+          FLAKY_FILE="test-summary/flaky.md"
+          VISUAL_FILE="test-summary/visual.md"
           
-          # Process all test result artifacts
-          TEST_RESULTS=$(find artifacts -name "${{ inputs.artifact-prefix }}*" -type d)
+          # Initialize summary file
+          echo "# HDR+ Swift Test Summary" > $SUMMARY_FILE
+          echo "" >> $SUMMARY_FILE
+          echo "Generated on $(date)" >> $SUMMARY_FILE
+          echo "" >> $SUMMARY_FILE
           
-          if [ -z "$TEST_RESULTS" ]; then
-            echo "| All Platforms | ⚠️ No Results | - | - | - |" >> test-summary.md
+          # Process test results files
+          echo "## Test Results" >> $SUMMARY_FILE
+          echo "" >> $SUMMARY_FILE
+          
+          # Count test outcomes
+          TOTAL_TESTS=0
+          PASSED_TESTS=0
+          FAILED_TESTS=0
+          SKIPPED_TESTS=0
+          
+          # Create failed tests file
+          echo "# Failed Tests" > $FAILED_FILE
+          echo "" >> $FAILED_FILE
+          
+          # Find all test result files
+          TEST_FILES=$(find artifacts -name "*-test-results.json" -o -name "test-results.json" | sort)
+          
+          # Process each results file
+          for file in $TEST_FILES; do
+            echo "Processing $file..."
+            
+            # Extract platform from path
+            PLATFORM=$(echo "$file" | grep -o -E 'macos-[0-9]+|ios-[0-9]+|ubuntu-[0-9]+' || echo "unknown")
+            
+            if [ -f "$file" ]; then
+              # Count test outcomes
+              TESTS=$(jq '.tests | length' "$file" 2>/dev/null || echo "0")
+              PASSED=$(jq '[.tests[] | select(.status == "passed")] | length' "$file" 2>/dev/null || echo "0")
+              FAILED=$(jq '[.tests[] | select(.status == "failed")] | length' "$file" 2>/dev/null || echo "0")
+              SKIPPED=$(jq '[.tests[] | select(.status == "skipped")] | length' "$file" 2>/dev/null || echo "0")
+              
+              # Update totals
+              TOTAL_TESTS=$((TOTAL_TESTS + TESTS))
+              PASSED_TESTS=$((PASSED_TESTS + PASSED))
+              FAILED_TESTS=$((FAILED_TESTS + FAILED))
+              SKIPPED_TESTS=$((SKIPPED_TESTS + SKIPPED))
+              
+              # Extract failed tests
+              if [ "$FAILED" -gt 0 ]; then
+                echo "### Failed tests in $PLATFORM" >> $FAILED_FILE
+                echo "" >> $FAILED_FILE
+                echo "| Test | Error |" >> $FAILED_FILE
+                echo "|------|-------|" >> $FAILED_FILE
+                
+                jq -r '.tests[] | select(.status == "failed") | "| \(.name) | \(.message) |"' "$file" >> $FAILED_FILE
+                echo "" >> $FAILED_FILE
+              fi
+            fi
+          done
+          
+          # Add summary counts
+          echo "| Category | Count | Percentage |" >> $SUMMARY_FILE
+          echo "|----------|-------|------------|" >> $SUMMARY_FILE
+          if [ "$TOTAL_TESTS" -gt 0 ]; then
+            PASSED_PCT=$(( (PASSED_TESTS * 100) / TOTAL_TESTS ))
+            FAILED_PCT=$(( (FAILED_TESTS * 100) / TOTAL_TESTS ))
+            SKIPPED_PCT=$(( (SKIPPED_TESTS * 100) / TOTAL_TESTS ))
           else
-            for result_dir in $TEST_RESULTS; do
-              platform=$(basename "$result_dir" | sed "s/${{ inputs.artifact-prefix }}//")
-              
-              # Default values
-              status="⚠️ Unknown"
-              build="Unknown"
-              passed="?"
-              failed="?"
-              
-              # Check build log
-              if [ -f "$result_dir/build.log" ]; then
-                if grep -q "BUILD SUCCEEDED\|Build complete" "$result_dir/build.log"; then
-                  build="✅ Success"
-                else
-                  build="❌ Failed"
-                fi
-              fi
-              
-              # Check test log
-              if [ -f "$result_dir/test.log" ]; then
-                if grep -q "Test Suite.*passed" "$result_dir/test.log"; then
-                  status="✅ Passed"
-                  # Extract number of passed tests
-                  passed=$(grep -o "[0-9]\\+ passed" "$result_dir/test.log" | head -1 | cut -d' ' -f1 || echo "?")
-                  failed=$(grep -o "[0-9]\\+ failed" "$result_dir/test.log" | head -1 | cut -d' ' -f1 || echo "0")
-                elif grep -q "Test Suite.*failed" "$result_dir/test.log"; then
-                  status="❌ Failed"
-                  passed=$(grep -o "[0-9]\\+ passed" "$result_dir/test.log" | head -1 | cut -d' ' -f1 || echo "?")
-                  failed=$(grep -o "[0-9]\\+ failed" "$result_dir/test.log" | head -1 | cut -d' ' -f1 || echo "?")
-                fi
-              elif [ -f "$result_dir/results.json" ]; then
-                # Process Xcode test results if available
-                status="🔍 See Details"
-                passed=$(grep -o '"testStatus":"Success"' "$result_dir/results.json" | wc -l)
-                failed=$(grep -o '"testStatus":"Failure"' "$result_dir/results.json" | wc -l)
-              fi
-              
-              # Special case for Metal checks
-              if [ -f "$result_dir/metal_info.txt" ] && grep -q "Metal.*Not Supported" "$result_dir/metal_info.txt"; then
-                status="⚠️ Metal Limited"
-              fi
-              
-              echo "| $platform | $status | $build | $passed | $failed |" >> test-summary.md
-            done
+            PASSED_PCT=0
+            FAILED_PCT=0
+            SKIPPED_PCT=0
           fi
           
-          # Add Metal environment information
-          echo "" >> test-summary.md
-          echo "## Metal Environment Information" >> test-summary.md
-          echo "" >> test-summary.md
+          echo "| Total Tests | $TOTAL_TESTS | 100% |" >> $SUMMARY_FILE
+          echo "| Passed | $PASSED_TESTS | ${PASSED_PCT}% |" >> $SUMMARY_FILE
+          echo "| Failed | $FAILED_TESTS | ${FAILED_PCT}% |" >> $SUMMARY_FILE
+          echo "| Skipped | $SKIPPED_TESTS | ${SKIPPED_PCT}% |" >> $SUMMARY_FILE
+          echo "" >> $SUMMARY_FILE
           
-          METAL_INFO=$(find artifacts -name "metal-diagnostics-*" -type d)
-          
-          if [ -z "$METAL_INFO" ]; then
-            echo "No Metal diagnostics found." >> test-summary.md
-          else
-            for metal_dir in $METAL_INFO; do
-              platform=$(basename "$metal_dir" | sed "s/metal-diagnostics-//")
-              echo "### $platform" >> test-summary.md
-              echo "" >> test-summary.md
+          # Process visual test results if enabled
+          if [ "${{ inputs.include-visual-tests }}" == "true" ]; then
+            echo "## Visual Test Results" >> $SUMMARY_FILE
+            echo "" >> $SUMMARY_FILE
+            
+            # Create visual test summary file
+            echo "# Visual Test Results" > $VISUAL_FILE
+            echo "" >> $VISUAL_FILE
+            
+            # Find all visual test artifacts
+            VISUAL_FILES=$(find artifacts -name "visual-test-*.json" | sort)
+            VISUAL_COUNT=0
+            VISUAL_PASSED=0
+            VISUAL_FAILED=0
+            
+            # Process each visual results file
+            for file in $VISUAL_FILES; do
+              if [ -f "$file" ]; then
+                # Count visual test outcomes
+                TESTS=$(jq '.tests | length' "$file" 2>/dev/null || echo "0")
+                PASSED=$(jq '[.tests[] | select(.status == "passed")] | length' "$file" 2>/dev/null || echo "0")
+                FAILED=$(jq '[.tests[] | select(.status == "failed")] | length' "$file" 2>/dev/null || echo "0")
+                
+                VISUAL_COUNT=$((VISUAL_COUNT + TESTS))
+                VISUAL_PASSED=$((VISUAL_PASSED + PASSED))
+                VISUAL_FAILED=$((VISUAL_FAILED + FAILED))
+                
+                # Add visual test details
+                echo "### Visual tests from $(basename "$file" .json)" >> $VISUAL_FILE
+                
+                # List all tests
+                if [ "$TESTS" -gt 0 ]; then
+                  echo "" >> $VISUAL_FILE
+                  echo "| Test | Status | Difference |" >> $VISUAL_FILE
+                  echo "|------|--------|------------|" >> $VISUAL_FILE
+                  
+                  jq -r '.tests[] | "| \(.name) | \(.status) | \(.difference // "-")% |"' "$file" >> $VISUAL_FILE
+                  echo "" >> $VISUAL_FILE
+                  
+                  # Check for failed visual tests with images
+                  IMAGE_DIR=$(dirname "$file")
+                  if [ "$FAILED" -gt 0 ] && ls "$IMAGE_DIR"/*.png 1> /dev/null 2>&1; then
+                    echo "Failed tests have visual artifacts in the test results." >> $VISUAL_FILE
+                  fi
+                fi
+              fi
+            done
+            
+            # Add visual summary counts
+            if [ "$VISUAL_COUNT" -gt 0 ]; then
+              echo "| Category | Count | Percentage |" >> $SUMMARY_FILE
+              echo "|----------|-------|------------|" >> $SUMMARY_FILE
               
-              if [ -f "$metal_dir/metal_info.txt" ]; then
-                echo '```' >> test-summary.md
-                head -n 20 "$metal_dir/metal_info.txt" >> test-summary.md
-                echo '...' >> test-summary.md
-                echo '```' >> test-summary.md
+              VISUAL_PASSED_PCT=$(( (VISUAL_PASSED * 100) / VISUAL_COUNT ))
+              VISUAL_FAILED_PCT=$(( (VISUAL_FAILED * 100) / VISUAL_COUNT ))
+              
+              echo "| Total Visual Tests | $VISUAL_COUNT | 100% |" >> $SUMMARY_FILE
+              echo "| Passed | $VISUAL_PASSED | ${VISUAL_PASSED_PCT}% |" >> $SUMMARY_FILE
+              echo "| Failed | $VISUAL_FAILED | ${VISUAL_FAILED_PCT}% |" >> $SUMMARY_FILE
+            else
+              echo "No visual tests were run in this build." >> $SUMMARY_FILE
+            fi
+            echo "" >> $SUMMARY_FILE
+          fi
+          
+          # Process performance metrics if enabled
+          if [ "${{ inputs.include-performance-metrics }}" == "true" ]; then
+            echo "## Performance Metrics" >> $SUMMARY_FILE
+            echo "" >> $SUMMARY_FILE
+            
+            # Create performance metrics file
+            echo "# Performance Test Results" > $METRICS_FILE
+            echo "" >> $METRICS_FILE
+            
+            # Find all performance test artifacts
+            PERF_FILES=$(find artifacts -name "performance-*.json" | sort)
+            
+            if [ -z "$PERF_FILES" ]; then
+              echo "No performance metrics were collected in this build." >> $SUMMARY_FILE
+              echo "" >> $SUMMARY_FILE
+            else
+              # Process each performance results file
+              echo "| Test | Metric | Value | Baseline | Change |" >> $METRICS_FILE
+              echo "|------|--------|-------|----------|--------|" >> $METRICS_FILE
+              
+              for file in $PERF_FILES; do
+                if [ -f "$file" ]; then
+                  # Extract platform from filename
+                  PLATFORM=$(echo $(basename "$file") | grep -o -E 'macos-[0-9]+|ios-[0-9]+' || echo "unknown")
+                  
+                  # Process each performance metric
+                  jq -r '.metrics[] | "| \(.test) | \(.name) | \(.value) \(.unit) | \(.baseline // "-") \(.unit) | \(.change // "-")% |"' "$file" >> $METRICS_FILE
+                  
+                  # Add summary metrics to main summary
+                  if [ "$PLATFORM" != "unknown" ]; then
+                    echo "### $PLATFORM Performance" >> $SUMMARY_FILE
+                    echo "" >> $SUMMARY_FILE
+                    echo "| Metric | Value | Change |" >> $SUMMARY_FILE
+                    echo "|--------|-------|--------|" >> $SUMMARY_FILE
+                    
+                    # Extract key metrics for summary
+                    jq -r '.metrics[] | select(.isKey == true) | "| \(.name) | \(.value) \(.unit) | \(.change // "-")% |"' "$file" >> $SUMMARY_FILE
+                    echo "" >> $SUMMARY_FILE
+                  fi
+                fi
+              done
+            fi
+          fi
+          
+          # Process flaky test detection if enabled
+          if [ "${{ inputs.include-flaky-detection }}" == "true" ]; then
+            echo "## Flaky Test Detection" >> $SUMMARY_FILE
+            echo "" >> $SUMMARY_FILE
+            
+            # Create flaky test file
+            echo "# Flaky Test Detection" > $FLAKY_FILE
+            echo "" >> $FLAKY_FILE
+            
+            # Find flaky test artifacts
+            FLAKY_REPORTS=$(find artifacts -name "flaky-test-*.json" | sort)
+            
+            if [ -z "$FLAKY_REPORTS" ]; then
+              echo "No flaky test detection was performed in this build." >> $SUMMARY_FILE
+              echo "" >> $SUMMARY_FILE
+            else
+              # Process flaky test reports
+              TOTAL_FLAKY=0
+              
+              for file in $FLAKY_REPORTS; do
+                if [ -f "$file" ]; then
+                  FLAKY_COUNT=$(jq '.tests | length' "$file" 2>/dev/null || echo "0")
+                  TOTAL_FLAKY=$((TOTAL_FLAKY + FLAKY_COUNT))
+                  
+                  if [ "$FLAKY_COUNT" -gt 0 ]; then
+                    PLATFORM=$(echo $(basename "$file") | grep -o -E 'macos-[0-9]+|ios-[0-9]+' || echo "unknown")
+                    
+                    echo "### Flaky tests in $PLATFORM" >> $FLAKY_FILE
+                    echo "" >> $FLAKY_FILE
+                    echo "| Test | Failure Rate | Details |" >> $FLAKY_FILE
+                    echo "|------|--------------|---------|" >> $FLAKY_FILE
+                    
+                    jq -r '.tests[] | "| \(.name) | \(.failureRate)% | \(.details) |"' "$file" >> $FLAKY_FILE
+                    echo "" >> $FLAKY_FILE
+                  fi
+                fi
+              done
+              
+              # Add flaky test summary
+              if [ "$TOTAL_FLAKY" -gt 0 ]; then
+                echo "**${TOTAL_FLAKY} potentially flaky tests detected.** See the full report for details." >> $SUMMARY_FILE
+                echo "" >> $SUMMARY_FILE
               else
-                echo "No Metal information available." >> test-summary.md
+                echo "No flaky tests detected." >> $SUMMARY_FILE
+                echo "" >> $SUMMARY_FILE
               fi
-              
-              echo "" >> test-summary.md
-            done
+            fi
           fi
           
-          # Add Metal testing notes
-          echo "" >> test-summary.md
-          echo "## Metal Testing Notes" >> test-summary.md
-          echo "" >> test-summary.md
-          echo "- Metal tests may fail in CI environments due to limited GPU access" >> test-summary.md
-          echo "- Running Metal tests locally provides more accurate results" >> test-summary.md
-          echo "- Build success is the primary indicator of CI health" >> test-summary.md
+          # Add GitHub Actions status
+          echo "## Test Results Status" >> $SUMMARY_FILE
+          echo "" >> $SUMMARY_FILE
           
-          cat test-summary.md
+          if [ "$FAILED_TESTS" -gt 0 ]; then
+            echo "test_status=failure" >> $GITHUB_OUTPUT
+            echo "❌ Some tests failed. See the Failed Tests section for details." >> $SUMMARY_FILE
+          else
+            echo "test_status=success" >> $GITHUB_OUTPUT
+            echo "✅ All tests passed successfully!" >> $SUMMARY_FILE
+          fi
+          
+          # Copy summary to GitHub step summary
+          cat $SUMMARY_FILE >> $GITHUB_STEP_SUMMARY
+          
+          # Create combined results JSON
+          echo "{\"total\": $TOTAL_TESTS, \"passed\": $PASSED_TESTS, \"failed\": $FAILED_TESTS, \"skipped\": $SKIPPED_TESTS}" > test-summary/results.json
           
       - name: Upload test summary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: test-summary
-          path: test-summary.md
+          path: test-summary
+          retention-days: ${{ inputs.artifacts-retention-days }}
           
-      - name: Add summary to workflow
-        run: cat test-summary.md >> $GITHUB_STEP_SUMMARY 
+      - name: Set job status based on test results
+        run: |
+          # Set the GitHub step status based on test results
+          if [ "${{ steps.create-summary.outputs.test_status }}" == "failure" ]; then
+            echo "Some tests failed. See the test summary for details."
+            exit 1
+          else
+            echo "All tests passed successfully!"
+          fi 
