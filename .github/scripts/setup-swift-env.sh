@@ -131,6 +131,12 @@ if [[ "$CACHE_KEY" == *"metal"* || "$CACHE_KEY" == "performance" || "$CACHE_KEY"
   METAL_DIAGNOSTICS_DIR="metal-setup-diagnostics"
   mkdir -p "$METAL_DIAGNOSTICS_DIR"
   
+  # Set up Metal shader caching to improve CI performance
+  METAL_CACHE_DIR="$GITHUB_WORKSPACE/.metal-cache"
+  mkdir -p "$METAL_CACHE_DIR"
+  export MTL_SHADER_CACHE_PATH="$METAL_CACHE_DIR"
+  log "Set Metal shader cache path to $MTL_CACHE_DIR"
+  
   # Set Metal environment variables based on the build type
   case "$METAL_CONFIG" in
     "performance")

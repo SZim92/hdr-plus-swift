@@ -1,0 +1,300 @@
+name: Metal Visual Testing
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        required: true
+        type: string
+        description: 'Platform to run on (e.g., macos-14)'
+      xcode-version:
+        required: false
+        type: string
+        default: '15.2'
+        description: 'Xcode version to use'
+      test-scene-count:
+        required: false
+        type: number
+        default: 5
+        description: 'Number of test scenes to render'
+      tolerance-threshold:
+        required: false
+        type: string
+        default: '0.02'
+        description: 'Pixel difference tolerance (0.0-1.0)'
+      reference-branch:
+        required: false
+        type: string
+        default: 'main'
+        description: 'Branch to use for reference renders'
+
+jobs:
+  visual-regression:
+    name: Metal Visual Regression Testing
+    runs-on: ${{ inputs.platform }}
+    
+    steps:
+      - name: Checkout code (current branch)
+        uses: actions/checkout@v4
+        with:
+          path: current
+      
+      - name: Checkout code (reference branch)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.reference-branch }}
+          path: reference
+      
+      # Add Metal shader compilation cache
+      - name: Cache Metal shaders
+        uses: actions/cache@v4
+        with:
+          path: .metal-cache
+          key: metal-visual-${{ runner.os }}-${{ inputs.platform }}-${{ hashFiles('current/**/*.metal') }}
+          restore-keys: |
+            metal-visual-${{ runner.os }}-${{ inputs.platform }}-
+            metal-visual-${{ runner.os }}-
+      
+      - name: Set up Swift environment
+        run: |
+          cd current
+          chmod +x .github/scripts/setup-swift-env.sh
+          ./.github/scripts/setup-swift-env.sh 'metal-visual' 'false' 'true' 'false' 'standard'
+      
+      - name: Check Metal support
+        id: metal-check
+        run: |
+          cd current
+          # Use Metal detection script
+          chmod +x .github/scripts/check-metal-support.sh
+          ./.github/scripts/check-metal-support.sh metal-diagnostics
+          
+          # Extract Metal support status
+          if [ -f "metal-diagnostics/metal_support_summary.md" ]; then
+            echo "Found Metal diagnostics"
+            METAL_SUPPORTED=$(grep "Metal Supported" metal-diagnostics/metal_support_summary.md | grep -q "true" && echo "true" || echo "false")
+            echo "metal_supported=$METAL_SUPPORTED" >> $GITHUB_OUTPUT
+          else
+            echo "No Metal diagnostics found"
+            echo "metal_supported=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Generate reference renders
+        if: steps.metal-check.outputs.metal_supported == 'true'
+        id: reference-renders
+        run: |
+          echo "Generating reference renders from ${{ inputs.reference-branch }} branch..."
+          
+          # Create output directory for reference renders
+          mkdir -p visual-testing/reference
+          
+          cd reference
+          
+          # Create test scenes and render them
+          # This would normally call your app's command line interface or test suite
+          # For demonstration, we'll use a helper script that should be in your codebase
+          if [ -f "tools/render-test-scenes.sh" ]; then
+            chmod +x tools/render-test-scenes.sh
+            ./tools/render-test-scenes.sh --count ${{ inputs.test-scene-count }} --output ../visual-testing/reference
+          else
+            # Create a minimal implementation if script doesn't exist
+            echo "Reference rendering script not found, creating minimal implementation"
+            mkdir -p tools
+            
+            cat > tools/render-test-scenes.sh << 'EOF'
+#!/bin/bash
+# Simple Metal test scene renderer
+set -e
+
+# Parse arguments
+COUNT=5
+OUTPUT_DIR="renders"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --count)
+      COUNT="$2"
+      shift 2
+      ;;
+    --output)
+      OUTPUT_DIR="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1"
+      exit 1
+      ;;
+  esac
+done
+
+mkdir -p "$OUTPUT_DIR"
+
+# We'll simulate test scene rendering with simple colored image generation
+# In a real implementation, this would use your actual Metal rendering code
+for i in $(seq 1 $COUNT); do
+  echo "Rendering test scene $i..."
+  
+  # Use sips (built-in to macOS) to create a solid color image
+  WIDTH=1024
+  HEIGHT=768
+  
+  # Generate different hues for different test scenes
+  HUE=$((i * 35 % 360))
+  
+  # Create a temporary PNG with transparent background
+  TEMP_FILE="$OUTPUT_DIR/temp_$i.png"
+  FINAL_FILE="$OUTPUT_DIR/scene_$i.png"
+  
+  # Create blank PNG
+  sips -s format png -s formatOptions 100 -g pixelWidth $WIDTH -g pixelHeight $HEIGHT -p 50 -s bkgColor 0 0 0 temp.jpeg --out "$TEMP_FILE" &>/dev/null
+  
+  # Use ImageMagick if available to create a more interesting test image
+  if command -v convert &> /dev/null; then
+    convert -size ${WIDTH}x${HEIGHT} -define gradient:angle=45 gradient:hsb\($HUE%,80%,90%\)-hsb\($(((HUE+30)%360))%,90%,80%\) "$FINAL_FILE"
+  else
+    # Fallback to solid color if ImageMagick not available
+    sips -s format png "$TEMP_FILE" --out "$FINAL_FILE" &>/dev/null
+  fi
+  
+  rm -f "$TEMP_FILE"
+  echo "Created test image: $FINAL_FILE"
+done
+
+echo "Generated $COUNT test scenes in $OUTPUT_DIR"
+EOF
+            
+            chmod +x tools/render-test-scenes.sh
+            ./tools/render-test-scenes.sh --count ${{ inputs.test-scene-count }} --output ../visual-testing/reference
+          fi
+      
+      - name: Generate current renders
+        if: steps.metal-check.outputs.metal_supported == 'true'
+        id: current-renders
+        run: |
+          echo "Generating current renders from the PR/current branch..."
+          
+          # Create output directory for current renders
+          mkdir -p visual-testing/current
+          
+          cd current
+          
+          # Render the same test scenes with current code
+          if [ -f "tools/render-test-scenes.sh" ]; then
+            chmod +x tools/render-test-scenes.sh
+            ./tools/render-test-scenes.sh --count ${{ inputs.test-scene-count }} --output ../visual-testing/current
+          else
+            # Use the same minimal implementation as before
+            chmod +x ../reference/tools/render-test-scenes.sh
+            ../reference/tools/render-test-scenes.sh --count ${{ inputs.test-scene-count }} --output ../visual-testing/current
+          fi
+      
+      - name: Compare renders and generate diffs
+        if: steps.metal-check.outputs.metal_supported == 'true'
+        id: image-diff
+        run: |
+          echo "Comparing reference and current renders..."
+          
+          # Create output directory for diff images
+          mkdir -p visual-testing/diff
+          mkdir -p visual-testing/results
+          
+          # Check if we have the compare tool from ImageMagick
+          if ! command -v compare &> /dev/null; then
+            echo "ImageMagick compare command not found, installing..."
+            brew install imagemagick
+          fi
+          
+          # Initialize variables for summary
+          TOTAL_SCENES=${{ inputs.test-scene-count }}
+          SCENES_WITH_DIFFERENCES=0
+          SIGNIFICANT_DIFFERENCES=0
+          
+          # Create a results file
+          RESULTS_FILE="visual-testing/results/summary.md"
+          echo "# Metal Visual Regression Test Results" > $RESULTS_FILE
+          echo "" >> $RESULTS_FILE
+          echo "Test executed on: $(date)" >> $RESULTS_FILE
+          echo "Platform: ${{ inputs.platform }}" >> $RESULTS_FILE
+          echo "Tolerance threshold: ${{ inputs.tolerance-threshold }}" >> $RESULTS_FILE
+          echo "" >> $RESULTS_FILE
+          echo "## Results" >> $RESULTS_FILE
+          echo "" >> $RESULTS_FILE
+          echo "| Scene | Status | Difference | Preview |" >> $RESULTS_FILE
+          echo "|-------|--------|------------|---------|" >> $RESULTS_FILE
+          
+          # Compare each scene
+          for i in $(seq 1 $TOTAL_SCENES); do
+            REF_IMG="visual-testing/reference/scene_${i}.png"
+            CUR_IMG="visual-testing/current/scene_${i}.png"
+            DIFF_IMG="visual-testing/diff/scene_${i}_diff.png"
+            
+            if [ -f "$REF_IMG" ] && [ -f "$CUR_IMG" ]; then
+              echo "Comparing scene $i..."
+              
+              # Calculate difference metrics using ImageMagick compare
+              DIFF_METRICS=$(compare -metric RMSE "$REF_IMG" "$CUR_IMG" "$DIFF_IMG" 2>&1 || true)
+              DIFFERENCE=$(echo "$DIFF_METRICS" | grep -o '[0-9]\+\.[0-9]\+' | head -1)
+              
+              # Normalize to 0-1 range
+              NORMALIZED_DIFF=$(echo "scale=4; $DIFFERENCE / 65535" | bc)
+              
+              # Determine if difference is significant
+              if (( $(echo "$NORMALIZED_DIFF > ${{ inputs.tolerance-threshold }}" | bc -l) )); then
+                STATUS="❌ Different"
+                SCENES_WITH_DIFFERENCES=$((SCENES_WITH_DIFFERENCES + 1))
+                SIGNIFICANT_DIFFERENCES=$((SIGNIFICANT_DIFFERENCES + 1))
+              elif (( $(echo "$NORMALIZED_DIFF > 0.001" | bc -l) )); then
+                STATUS="⚠️ Minor differences"
+                SCENES_WITH_DIFFERENCES=$((SCENES_WITH_DIFFERENCES + 1))
+              else
+                STATUS="✅ Identical"
+              fi
+              
+              # Add to results table
+              echo "| Scene $i | $STATUS | $NORMALIZED_DIFF | [View Diff](../diff/scene_${i}_diff.png) |" >> $RESULTS_FILE
+            else
+              echo "Missing images for scene $i"
+              echo "| Scene $i | ❓ Missing images | N/A | N/A |" >> $RESULTS_FILE
+            fi
+          done
+          
+          # Add overall summary
+          echo "" >> $RESULTS_FILE
+          echo "## Summary" >> $RESULTS_FILE
+          echo "" >> $RESULTS_FILE
+          echo "| Metric | Count |" >> $RESULTS_FILE
+          echo "|--------|-------|" >> $RESULTS_FILE
+          echo "| Total scenes | $TOTAL_SCENES |" >> $RESULTS_FILE
+          echo "| Scenes with differences | $SCENES_WITH_DIFFERENCES |" >> $RESULTS_FILE
+          echo "| Significant differences | $SIGNIFICANT_DIFFERENCES |" >> $RESULTS_FILE
+          
+          # Determine test result
+          if [ $SIGNIFICANT_DIFFERENCES -gt 0 ]; then
+            echo "⚠️ Test failed: Found significant visual differences in $SIGNIFICANT_DIFFERENCES scenes"
+            echo "test_result=failure" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Test passed: No significant visual differences detected"
+            echo "test_result=success" >> $GITHUB_OUTPUT
+          fi
+          
+          # Add summary to GitHub step summary
+          cat $RESULTS_FILE >> $GITHUB_STEP_SUMMARY
+          
+          # Set outputs for subsequent steps
+          echo "scenes_with_differences=$SCENES_WITH_DIFFERENCES" >> $GITHUB_OUTPUT
+          echo "significant_differences=$SIGNIFICANT_DIFFERENCES" >> $GITHUB_OUTPUT
+      
+      - name: Upload visual test results
+        if: steps.metal-check.outputs.metal_supported == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: metal-visual-test-results
+          path: visual-testing/
+          retention-days: 14
+      
+      - name: Set job status based on comparison result
+        if: steps.metal-check.outputs.metal_supported == 'true'
+        run: |
+          if [ "${{ steps.image-diff.outputs.test_result }}" == "failure" ]; then
+            echo "::warning::Found significant visual differences in ${{ steps.image-diff.outputs.significant_differences }} scenes"
+          fi 

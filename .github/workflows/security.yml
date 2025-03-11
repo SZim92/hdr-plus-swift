@@ -342,6 +342,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       
+      # Add Metal shader compilation cache for security validation
+      - name: Cache Metal shaders
+        uses: actions/cache@v4
+        with:
+          path: .metal-cache
+          key: metal-security-${{ runner.os }}-${{ hashFiles('**/*.metal') }}
+          restore-keys: |
+            metal-security-${{ runner.os }}-
+      
       - name: Set up Swift environment
         run: |
           # Use our standardized Swift environment setup script
