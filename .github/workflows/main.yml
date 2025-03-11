@@ -172,82 +172,30 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         
+      # Add Metal shader compilation cache
+      - name: Cache Metal shaders
+        uses: actions/cache@v4
+        with:
+          path: .metal-cache
+          key: metal-visual-${{ runner.os }}-${{ hashFiles('**/*.metal') }}
+          restore-keys: |
+            metal-visual-${{ runner.os }}-
+      
       - name: Setup Metal environment
         run: |
           echo "Setting up environment for Metal testing"
           mkdir -p test-outputs/visual-tests
+          # Make the render test script executable
+          chmod +x tools/render-test-scenes.sh
         
       - name: Run visual test scene renderer
         run: |
-          # Simple Metal test scene renderer
-          set -e
-          
-          # Parse arguments
-          COUNT=5
-          OUTPUT_DIR="test-outputs/visual-tests"
-          
-          # Set up output directory
-          mkdir -p "$OUTPUT_DIR"
-          
-          echo "Generating $COUNT test scenes in $OUTPUT_DIR"
-          
-          # In a real implementation, this would use your actual Metal rendering code
-          for i in $(seq 1 $COUNT); do
-            echo "Rendering test scene $i"
-            
-            # Use sips (built-in to macOS) to create a solid color image
-            WIDTH=1024
-            HEIGHT=768
-            
-            # Generate different hues for different test scenes
-            HUE=$((i * 35 % 360))
-            
-            # Create a temporary PNG with transparent background
-            TEMP_FILE="$OUTPUT_DIR/temp_$i.png"
-            
-            # Use a placeholder command that creates a colored image
-            # In a real implementation, this would call your Metal renderer
-            convert -size ${WIDTH}x${HEIGHT} xc:none -fill "hsla($HUE,80%,50%,1)" -draw "rectangle 0,0 $WIDTH,$HEIGHT" "$TEMP_FILE" || {
-              echo "Error creating test image. Using default image generation method..."
-              # Fallback if convert (ImageMagick) isn't available
-              echo "Creating fallback test image for scene $i"
-              
-              # Generate a default test pattern using pure UNIX tools available on macOS
-              echo "<svg width=\"$WIDTH\" height=\"$HEIGHT\" xmlns=\"http://www.w3.org/2000/svg\">
-                <rect width=\"100%\" height=\"100%\" fill=\"hsl($HUE,80%,50%)\" />
-                <text x=\"50%\" y=\"50%\" font-family=\"Arial\" font-size=\"30\" fill=\"white\" text-anchor=\"middle\">
-                  Test Scene $i
-                </text>
-              </svg>" > "$OUTPUT_DIR/fallback_$i.svg"
-              
-              # Convert SVG to PNG if possible
-              if command -v rsvg-convert &>/dev/null; then
-                rsvg-convert -o "$TEMP_FILE" "$OUTPUT_DIR/fallback_$i.svg"
-                rm "$OUTPUT_DIR/fallback_$i.svg"
-              elif command -v safari &>/dev/null; then
-                # Extremely hacky fallback using Safari's screenshot capability
-                echo "Using Safari to generate PNG"
-                open -a Safari "$OUTPUT_DIR/fallback_$i.svg"
-                sleep 2
-                screencapture -w "$TEMP_FILE"
-                killall Safari
-                rm "$OUTPUT_DIR/fallback_$i.svg"
-              else
-                echo "WARNING: Couldn't generate proper test image"
-                # Create an extremely simple 1x1 PNG as absolute fallback
-                echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==" | base64 --decode > "$TEMP_FILE"
-              fi
-            }
-            
-            # Rename to final output file
-            mv "$TEMP_FILE" "$OUTPUT_DIR/test_scene_$i.png"
-            echo "Created test scene image: $OUTPUT_DIR/test_scene_$i.png"
-          done
-          
-          echo "All test scenes generated successfully"
+          # Use the standardized script instead of embedded code
+          echo "Generating test scenes using the shared renderer script..."
+          ./tools/render-test-scenes.sh --count 5 --output test-outputs/visual-tests
           
       - name: Upload visual test results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: visual-test-outputs
           path: test-outputs/visual-tests
@@ -290,8 +238,8 @@ jobs:
           echo "| Testing | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Summary | ${{ needs.summarize.result }} |" >> $GITHUB_STEP_SUMMARY
           
-          # Add visual testing status if it was run
-          if [[ "${{ needs.visual-testing.result != 'skipped' }}" == "true" ]]; then
+          # Add visual testing status if it was run (using correct condition syntax)
+          if [ -n "${{ needs.visual-testing.result }}" ] && [ "${{ needs.visual-testing.result }}" != "skipped" ]; then
             echo "| Visual Testing | ${{ needs.visual-testing.result }} |" >> $GITHUB_STEP_SUMMARY
           fi
           
@@ -302,12 +250,12 @@ jobs:
     name: PR Feedback
     # Only run for PR events
     if: github.event_name == 'pull_request'
-    needs: [summarize, visual-testing]
+    needs: [summarize]
     uses: ./.github/workflows/shared/enhanced-pr-feedback.yml
     with:
       pr-number: ${{ github.event.pull_request.number }}
       artifact-prefix: 'test-results-'
       include-metal-diagnostics: true
-      include-visual-comparisons: true
+      include-visual-comparisons: ${{ (needs.visual-testing.result == 'success' || needs.visual-testing.result == 'failure') }}
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }} 
