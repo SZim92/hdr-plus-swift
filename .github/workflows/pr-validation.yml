@@ -287,8 +287,14 @@ jobs:
         run: |
           # Use GitHub API to download artifacts from the latest CI workflow
           echo "Fetching artifacts from the main CI workflow"
-          PR_NUMBER=${{ github.event.pull_request.number }}
-          HEAD_SHA=${{ github.event.pull_request.head.sha }}
+          
+          # Only access PR context variables when in a pull request event
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "Processing pull request #${{ github.event.pull_request.number }}"
+            echo "Head SHA: ${{ github.event.pull_request.head.sha }}"
+          else
+            echo "Not running in a pull request context"
+          fi
           
           # Create a directory for artifacts
           mkdir -p artifacts

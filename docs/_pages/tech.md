@@ -27,9 +27,9 @@ Once the images are aligned, all that's left to do is to merge them.
 
 ### Merging
 
-Our app uses merging approaches that are robust againt imperfect alignment of images caused by scene motion. It offers merging in the spatial domain and merging in the frequency domain. The latter is very similar to the approach described in the original [paper](http://static.googleusercontent.com/media/www.hdrplusdata.org/en//hdrplus.pdf). 
+Our app uses merging approaches that are robust againt imperfect alignment of images caused by scene motion. It offers merging in the spatial domain and merging in the frequency domain. The latter is very similar to the approach described in the original [paper](http://static.googleusercontent.com/media/www.hdrplusdata.org/en//hdrplus.pdf).
 
-The motion robustness of the algorithms can be controlled by the paramter `Noise reduction`. Stronger noise reduction yields lower motion robustness and vice versa. 
+The motion robustness of the algorithms can be controlled by the paramter `Noise reduction`. Stronger noise reduction yields lower motion robustness and vice versa.
 
 To test motion robustness, a burst with strong scene motion is evaluated. The following figure shows a comparison between a single frame, the output from our app, and the output shown in Figure 6 of the original [paper](http://static.googleusercontent.com/media/www.hdrplusdata.org/en//hdrplus.pdf). The image is taken from Google's [HDR+ dataset](https://hdrplusdata.org/dataset.html) licensed under [CC BY-SA](https://creativecommons.org/licenses/by-sa/4.0/).
 

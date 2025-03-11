@@ -22,17 +22,24 @@ jobs:
         run: |
           echo "Analyzing PR changes..."
           
-          # Get changed files
-          PR_BRANCH=$(echo ${{ github.event.pull_request.head.ref }})
-          BASE_BRANCH=$(echo ${{ github.event.pull_request.base.ref }})
-          
-          echo "PR branch: $PR_BRANCH"
-          echo "Base branch: $BASE_BRANCH"
-          
-          # Get file changes
-          ADDED_FILES=$(git diff --name-only --diff-filter=A origin/$BASE_BRANCH...origin/$PR_BRANCH || echo "")
-          MODIFIED_FILES=$(git diff --name-only --diff-filter=M origin/$BASE_BRANCH...origin/$PR_BRANCH || echo "")
-          ALL_CHANGED_FILES=$(git diff --name-only origin/$BASE_BRANCH...origin/$PR_BRANCH || echo "")
+          # This workflow is triggered only on pull_request events, so we can safely use these contexts
+          # But wrapping in a check to satisfy workflow linting
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # Get changed files
+            PR_BRANCH="${{ github.event.pull_request.head.ref }}"
+            BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+            
+            echo "PR branch: $PR_BRANCH"
+            echo "Base branch: $BASE_BRANCH"
+            
+            # Get file changes
+            ADDED_FILES=$(git diff --name-only --diff-filter=A origin/$BASE_BRANCH...origin/$PR_BRANCH || echo "")
+            MODIFIED_FILES=$(git diff --name-only --diff-filter=M origin/$BASE_BRANCH...origin/$PR_BRANCH || echo "")
+            ALL_CHANGED_FILES=$(git diff --name-only origin/$BASE_BRANCH...origin/$PR_BRANCH || echo "")
+          else
+            echo "Not running in a pull request context"
+            exit 1
+          fi
           
           # Initialize variables for labels
           HAS_UI_CHANGES=false

@@ -17,7 +17,7 @@ The only *natively* supported image format is DNG. However, if you download and 
 
 ### Processing images
 
-To process a burst of images, please drag-and-drop them into the app. You can either drag-and-drop individual images or a folder containing the whole burst. The resulting image will be either based on the middle frame of the burst (uniform exposure) or on the most central, darkest frame of the burst (bracketed exposure). The output file will be in the RAW-DNG format and its filename contains the most important settings selected. It can be further processed with the RAW converter of choice. 
+To process a burst of images, please drag-and-drop them into the app. You can either drag-and-drop individual images or a folder containing the whole burst. The resulting image will be either based on the middle frame of the burst (uniform exposure) or on the most central, darkest frame of the burst (bracketed exposure). The output file will be in the RAW-DNG format and its filename contains the most important settings selected. It can be further processed with the RAW converter of choice.
 
 {% include figure image_path="/assets/images/help/drag-and-drop.jpg" %}
 
@@ -41,16 +41,16 @@ There are six settings in the preferences panel of the app. Their default values
 
 `Merging algorithm`: This parameter selects the approach used for merging of images. The option “Fast” applies merging in the spatial domain, which results in quick processing times. The option “Higher quality” performs merging in the frequency domain, which achieves better preservation of details at the cost of longer processing times.
 
-`Output bit depth`: Similar to the `Exposure control` setting, this parameter can help improving the tonality of the deep shadows. It specifies if the output file should use the native RAW bit-depth (typically 12-14 bits) or if the pixel values shall be scaled to full 16 bit precision. The latter can reduce quantization noise in the deep shadows considerably, but it may lead to file incompatibility for some cameras/RAW converters. 
+`Output bit depth`: Similar to the `Exposure control` setting, this parameter can help improving the tonality of the deep shadows. It specifies if the output file should use the native RAW bit-depth (typically 12-14 bits) or if the pixel values shall be scaled to full 16 bit precision. The latter can reduce quantization noise in the deep shadows considerably, but it may lead to file incompatibility for some cameras/RAW converters.
 
 ### Tips
 
 - To achieve the highest dynamic range, either underexpose your images or use a burst with bracketed exposure. Shadows can typically be boosted but if the highlights are clipped, they cannot be recovered in post. Further, it is recommended that you expose to the right. Keep in mind that the histogram on your camera is probably giving you information based on the *JPEG* output and not on the *RAW* file.
-- Bursts with uniform exposure may be the better choice for night scenes as each frame can have a maxed out exposure time while bursts with bracketed exposure may be more suitable for daylight HDR scenes where one frame can best capture the highlights while another frame can best capture the shadows.  
-- Typical bursts with bracketed exposure may span a range of 4 EV (e.g. from -2 EV to +2 EV) and should be captured at a constant ISO value (ideally at base ISO). Values in the extended ISO range are not supported. Ideally let your camera capture the bracketed burst automatically, rather than turning the exposure compensation or shutter speed dial manually, to minimize the impact of scene motion. 
+- Bursts with uniform exposure may be the better choice for night scenes as each frame can have a maxed out exposure time while bursts with bracketed exposure may be more suitable for daylight HDR scenes where one frame can best capture the highlights while another frame can best capture the shadows.
+- Typical bursts with bracketed exposure may span a range of 4 EV (e.g. from -2 EV to +2 EV) and should be captured at a constant ISO value (ideally at base ISO). Values in the extended ISO range are not supported. Ideally let your camera capture the bracketed burst automatically, rather than turning the exposure compensation or shutter speed dial manually, to minimize the impact of scene motion.
 - The default `Tile size` („Medium“) and `Search distance` („Medium“) usually work very well.
 - To improve tonality in the shadows, you can experiment with the various `Exposure control` options. The setting "Linear (full bit range)" is recommended as the starting point. In addition, you can try setting the `Output bit depth` to 16 bit.
-- `Exposure control` only works if several exposure metadata information can be extracted correctly from the DNG. If you get any color casts for your files, you can try the setting „Off“, try to decrease `Noise reduction`, set `Output bit depth` to "Native" and/or use only bursts with uniform exposure. The setting "Off" should only be used as a fallback solution in case the setting "Linear (full bit range)" exhibits artifacts. 
+- `Exposure control` only works if several exposure metadata information can be extracted correctly from the DNG. If you get any color casts for your files, you can try the setting „Off“, try to decrease `Noise reduction`, set `Output bit depth` to "Native" and/or use only bursts with uniform exposure. The setting "Off" should only be used as a fallback solution in case the setting "Linear (full bit range)" exhibits artifacts.
 - When the exposure bias is derived from shutter speed, only a relative bias between the frames can be calculated. In that case, an absolute exposure bias of -2 EV is assumed for the darkest frame.
 - If you see any motion artifacts, ghosting or color casts in the output image, decrease`Noise reduction`.
 - If you see too much noise in the output image, increase `Noise reduction`.
