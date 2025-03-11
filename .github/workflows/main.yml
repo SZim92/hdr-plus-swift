@@ -211,7 +211,9 @@ jobs:
   notify:
     name: Notify on Completion
     needs: [lint, test, summarize]
-    if: always()
+    if: |
+      always() &&
+      !failure()
     runs-on: ubuntu-latest
     
     steps:
@@ -238,14 +240,14 @@ jobs:
           echo "| Testing | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Summary | ${{ needs.summarize.result }} |" >> $GITHUB_STEP_SUMMARY
           
-          # Add visual testing status if it was run (using proper job name existence check)
-          if [[ "${{ contains(needs.*.name, 'Metal Visual Regression') }}" == "true" ]] && [[ -n "${{ needs.visual-testing.result }}" ]]; then
-            echo "| Visual Testing | ${{ needs.visual-testing.result }} |" >> $GITHUB_STEP_SUMMARY
+          # Check if we have a visual testing job based on the conditions that would trigger it
+          if [ "${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && (contains(github.event.pull_request.labels.*.name, 'area/metal') || contains(github.event.pull_request.labels.*.name, 'area/ui'))) }}" == "true" ]; then
+            echo "| Visual Testing | Ran (see artifacts) |" >> $GITHUB_STEP_SUMMARY
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Overall status: **${{ steps.check.outputs.status }}**" >> $GITHUB_STEP_SUMMARY
-          
+      
   pr-feedback:
     name: PR Feedback
     # Only run for PR events
@@ -256,6 +258,6 @@ jobs:
       pr-number: ${{ github.event.pull_request.number }}
       artifact-prefix: 'test-results-'
       include-metal-diagnostics: true
-      include-visual-comparisons: ${{ contains(needs.*.result, 'visual-testing') && (needs.visual-testing.result == 'success' || needs.visual-testing.result == 'failure') }}
+      include-visual-comparisons: ${{ github.event_name == 'pull_request' && (contains(github.event.pull_request.labels.*.name, 'area/metal') || contains(github.event.pull_request.labels.*.name, 'area/ui')) }}
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }} 

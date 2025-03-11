@@ -436,12 +436,12 @@ jobs:
   pr-feedback:
     name: PR Feedback
     if: github.event_name == 'pull_request'
-    needs: [summarize, shader-compatibility, visual-compatibility]
+    needs: [summarize]
     uses: ./.github/workflows/shared/enhanced-pr-feedback.yml
     with:
       pr-number: ${{ github.event.pull_request.number }}
       artifact-prefix: 'test-results-'
       include-metal-diagnostics: true
-      include-visual-comparisons: true  # Enable visual comparison feedback
+      include-visual-comparisons: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'area/metal') }}
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }} 
