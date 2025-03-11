@@ -1,0 +1,183 @@
+name: Visual Testing Action
+description: "Perform visual regression testing for Metal shaders"
+
+inputs:
+  output-dir:
+    description: "Directory to output test results"
+    required: false
+    default: "visual-test-outputs"
+  scene-count:
+    description: "Number of test scenes to render"
+    required: false
+    default: "5"
+  metal-supported:
+    description: "Whether Metal is supported (from metal-config workflow)"
+    required: true
+  verbose:
+    description: "Enable verbose output"
+    required: false
+    default: "false"
+  reference-images-dir:
+    description: "Directory containing reference images for comparison"
+    required: false
+    default: "reference-images"
+  compare-with-reference:
+    description: "Whether to compare with reference images"
+    required: false
+    default: "false"
+
+outputs:
+  has-changes:
+    description: "Whether there are visual changes compared to reference images"
+    value: ${{ steps.compare.outputs.has_changes }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Metal environment
+      shell: bash
+      run: |
+        echo "Setting up environment for Metal testing"
+        mkdir -p ${{ inputs.output-dir }}
+        
+        # Make the render test script executable
+        if [ -f "tools/render-test-scenes.sh" ]; then
+          chmod +x tools/render-test-scenes.sh
+        else
+          echo "::error::Could not find render-test-scenes.sh script"
+          exit 1
+        fi
+      
+    - name: Run visual test scene renderer
+      if: inputs.metal-supported == 'true'
+      shell: bash
+      run: |
+        # Use the standardized script 
+        echo "Generating test scenes using the shared renderer script..."
+        
+        VERBOSE_FLAG=""
+        if [ "${{ inputs.verbose }}" == "true" ]; then
+          VERBOSE_FLAG="--verbose"
+        fi
+        
+        ./tools/render-test-scenes.sh --count ${{ inputs.scene-count }} --output ${{ inputs.output-dir }} $VERBOSE_FLAG
+        
+        # Print diagnostics
+        echo "Generated $(ls ${{ inputs.output-dir }} | wc -l | xargs) test scenes"
+      
+    - name: Compare with reference images
+      id: compare
+      if: inputs.metal-supported == 'true' && inputs.compare-with-reference == 'true'
+      shell: bash
+      run: |
+        echo "Comparing test images with reference images..."
+        
+        # Ensure reference directory exists
+        if [ ! -d "${{ inputs.reference-images-dir }}" ]; then
+          echo "Reference images directory not found, skipping comparison"
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # Create comparison directory
+        mkdir -p ${{ inputs.output-dir }}/comparison
+        
+        # Track if we have any differences
+        HAS_CHANGES=false
+        
+        # Compare each image in the output directory with the corresponding reference image
+        for test_image in ${{ inputs.output-dir }}/*.png; do
+          # Get just the filename
+          filename=$(basename "$test_image")
+          
+          # Check if we have a corresponding reference image
+          if [ -f "${{ inputs.reference-images-dir }}/$filename" ]; then
+            echo "Comparing $filename with reference..."
+            
+            # Use ImageMagick to calculate the difference if available
+            if command -v compare &> /dev/null; then
+              compare -metric RMSE "$test_image" "${{ inputs.reference-images-dir }}/$filename" "${{ inputs.output-dir }}/comparison/$filename-diff.png" 2> "${{ inputs.output-dir }}/comparison/$filename-diff.txt" || true
+              
+              # Read the difference value
+              DIFF=$(cat "${{ inputs.output-dir }}/comparison/$filename-diff.txt")
+              echo "Difference for $filename: $DIFF"
+              
+              # Check if difference is above threshold
+              # For RMSE, 0 means identical, 1 means completely different
+              if [[ "$DIFF" != "0 (0)" && "$DIFF" != *"0)"* ]]; then
+                echo "$filename has visual differences from reference"
+                HAS_CHANGES=true
+              fi
+            else
+              echo "ImageMagick 'compare' not available, skipping detailed comparison"
+              echo "Visual verification must be done manually."
+              
+              # Create a side-by-side comparison using any available tools
+              if command -v montage &> /dev/null; then
+                montage "$test_image" "${{ inputs.reference-images-dir }}/$filename" -geometry +4+4 "${{ inputs.output-dir }}/comparison/$filename-montage.png"
+              else
+                # Just copy both images to the comparison directory
+                cp "$test_image" "${{ inputs.output-dir }}/comparison/$filename-test.png"
+                cp "${{ inputs.reference-images-dir }}/$filename" "${{ inputs.output-dir }}/comparison/$filename-reference.png"
+              fi
+              
+              # Assume changes for manual verification
+              HAS_CHANGES=true
+            fi
+          else
+            echo "No reference image for $filename, marking as new"
+            cp "$test_image" "${{ inputs.output-dir }}/comparison/$filename-new.png"
+            HAS_CHANGES=true
+          fi
+        done
+        
+        # Report results
+        if [ "$HAS_CHANGES" = true ]; then
+          echo "Visual differences detected. Check the comparison directory."
+        else
+          echo "No visual differences detected."
+        fi
+        
+        echo "has_changes=$HAS_CHANGES" >> $GITHUB_OUTPUT
+        
+    - name: Create visual test summary
+      if: inputs.metal-supported == 'true'
+      shell: bash
+      run: |
+        echo "## Visual Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Count test images
+        TEST_COUNT=$(ls ${{ inputs.output-dir }}/*.png 2>/dev/null | wc -l)
+        echo "Generated $TEST_COUNT test images." >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ inputs.compare-with-reference }}" == "true" ]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.compare.outputs.has_changes }}" == "true" ]; then
+            echo "⚠️ **Visual differences detected**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Review the comparison images in the artifacts." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **No visual differences detected**" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+        
+        # List the test scenes
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Test Scenes" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        for image in ${{ inputs.output-dir }}/*.png; do
+          if [ -f "$image" ]; then
+            echo "- $(basename "$image")" >> $GITHUB_STEP_SUMMARY
+          fi
+        done
+    
+    - name: Upload visual test results
+      if: inputs.metal-supported == 'true'
+      uses: actions/upload-artifact@v4
+      shell: bash
+      with:
+        name: visual-test-outputs
+        path: ${{ inputs.output-dir }}
+        if-no-files-found: error 

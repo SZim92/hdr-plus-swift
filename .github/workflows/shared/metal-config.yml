@@ -1,0 +1,179 @@
+name: Metal Testing Configuration
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        required: false
+        type: string
+        default: 'macos-14'
+        description: 'macOS platform to run on'
+      test-scene-count:
+        required: false
+        type: number
+        default: 5
+        description: 'Number of test scenes to render'
+      cache-key-prefix:
+        required: false
+        type: string
+        default: 'metal'
+        description: 'Prefix for the cache key'
+    outputs:
+      metal-supported:
+        description: 'Whether Metal is supported on the runner'
+        value: ${{ jobs.metal-config.outputs.metal_supported }}
+      should-run-visual-tests:
+        description: 'Whether visual tests should be run'
+        value: ${{ jobs.metal-config.outputs.should_run_visual_tests }}
+
+jobs:
+  metal-config:
+    name: Metal Configuration
+    runs-on: ${{ inputs.platform }}
+    outputs:
+      metal_supported: ${{ steps.metal-check.outputs.metal_supported }}
+      should_run_visual_tests: ${{ steps.check-conditions.outputs.should_run }}
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      # Add Metal shader compilation cache
+      - name: Cache Metal shaders
+        uses: actions/cache@v4
+        with:
+          path: .metal-cache
+          key: ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ hashFiles('**/*.metal') }}
+          restore-keys: |
+            ${{ inputs.cache-key-prefix }}-${{ runner.os }}-
+      
+      - name: Check Metal support
+        id: metal-check
+        run: |
+          # Create metal diagnostics directory
+          mkdir -p metal-diagnostics
+          
+          # Run basic Metal detection
+          echo "Checking Metal support on runner..."
+          
+          # Create a simple Metal test program
+          cat > metal-test.swift << 'EOF'
+          import Metal
+          
+          guard let device = MTLCreateSystemDefaultDevice() else {
+              print("Metal device not available")
+              print("Metal Supported: false")
+              exit(1)
+          }
+          
+          print("Metal Device: \(device.name)")
+          print("Metal Supported: true")
+          print("Device Headless: \(device.isHeadless)")
+          print("Device Low Power: \(device.isLowPower)")
+          print("Device Removable: \(device.isRemovable)")
+          print("Maximum Buffer Length: \(device.maxBufferLength)")
+          print("Unified Memory: \(device.hasUnifiedMemory)")
+          print("Depth24Stencil8 Format Supported: \(device.isDepth24Stencil8PixelFormatSupported)")
+          print("Resource Options: \(device.readWriteTextureSupport.rawValue)")
+          
+          // Check for family support
+          let families = [
+              (MTLGPUFamily.apple1, "Apple1"),
+              (MTLGPUFamily.apple2, "Apple2"),
+              (MTLGPUFamily.apple3, "Apple3"),
+              (MTLGPUFamily.apple4, "Apple4"),
+              (MTLGPUFamily.apple5, "Apple5"),
+              (MTLGPUFamily.apple6, "Apple6"),
+              (MTLGPUFamily.apple7, "Apple7"),
+              (MTLGPUFamily.mac1, "Mac1"),
+              (MTLGPUFamily.mac2, "Mac2"),
+              (MTLGPUFamily.macCatalyst1, "MacCatalyst1"),
+              (MTLGPUFamily.macCatalyst2, "MacCatalyst2")
+          ]
+          
+          print("\nGPU Family Support:")
+          for (family, name) in families {
+              let supported = device.supportsFamily(family)
+              print("\(name): \(supported)")
+          }
+          
+          EOF
+          
+          # Compile and run the test
+          xcrun -sdk macosx swiftc metal-test.swift -o metal-test -framework Metal
+          
+          # Run and capture output
+          ./metal-test > metal-diagnostics/metal_support_output.txt || true
+          
+          # Generate summary markdown
+          echo "# Metal Support Summary" > metal-diagnostics/metal_support_summary.md
+          echo "" >> metal-diagnostics/metal_support_summary.md
+          echo "Runner: ${{ inputs.platform }}" >> metal-diagnostics/metal_support_summary.md
+          echo "" >> metal-diagnostics/metal_support_summary.md
+          
+          # Extract key information
+          METAL_SUPPORTED=$(grep "Metal Supported" metal-diagnostics/metal_support_output.txt | cut -d: -f2 | xargs)
+          DEVICE_NAME=$(grep "Metal Device" metal-diagnostics/metal_support_output.txt | cut -d: -f2 | xargs || echo "None")
+          
+          echo "Metal Supported: $METAL_SUPPORTED" >> metal-diagnostics/metal_support_summary.md
+          echo "Metal Device: $DEVICE_NAME" >> metal-diagnostics/metal_support_summary.md
+          
+          # Extract family support as a table
+          echo "" >> metal-diagnostics/metal_support_summary.md
+          echo "## GPU Family Support" >> metal-diagnostics/metal_support_summary.md
+          echo "" >> metal-diagnostics/metal_support_summary.md
+          echo "| Family | Supported |" >> metal-diagnostics/metal_support_summary.md
+          echo "|--------|-----------|" >> metal-diagnostics/metal_support_summary.md
+          
+          grep -A 20 "GPU Family Support" metal-diagnostics/metal_support_output.txt | grep -v "GPU Family Support" | while read line; do
+            if [[ "$line" =~ ([A-Za-z0-9]+)[[:space:]]*:[[:space:]]*(true|false) ]]; then
+              FAMILY="${BASH_REMATCH[1]}"
+              SUPPORTED="${BASH_REMATCH[2]}"
+              echo "| $FAMILY | $SUPPORTED |" >> metal-diagnostics/metal_support_summary.md
+            fi
+          done
+          
+          # Set output
+          echo "metal_supported=$METAL_SUPPORTED" >> $GITHUB_OUTPUT
+          
+      - name: Check if visual tests should run
+        id: check-conditions
+        run: |
+          # Check event type condition
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            # Always run for manual triggers
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "Visual tests should run because this is a workflow_dispatch event"
+            exit 0
+          fi
+          
+          # For pull requests, check Metal-related labels
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # Check if we have labels containing "metal" or "ui"
+            if [[ "${{ contains(github.event.pull_request.labels.*.name, 'area/metal') || contains(github.event.pull_request.labels.*.name, 'area/ui') }}" == "true" ]]; then
+              echo "should_run=true" >> $GITHUB_OUTPUT
+              echo "Visual tests should run because PR has area/metal or area/ui label"
+              exit 0
+            fi
+          fi
+          
+          # Default is not to run visual tests
+          echo "should_run=false" >> $GITHUB_OUTPUT
+          echo "Visual tests should not run based on current conditions"
+          
+      - name: Add Metal diagnostics to summary
+        run: |
+          if [ -f "metal-diagnostics/metal_support_summary.md" ]; then
+            cat metal-diagnostics/metal_support_summary.md >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## Metal Support" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "No Metal diagnostics available" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+      - name: Upload Metal diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: metal-diagnostics
+          path: metal-diagnostics/
+          retention-days: 5 
