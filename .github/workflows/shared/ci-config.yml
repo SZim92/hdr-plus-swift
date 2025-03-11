@@ -1,0 +1,36 @@
+# Configuration for CI/CD pipelines
+name: 'HDR+ Swift CI Configuration'
+
+# Platform matrices
+platforms:
+  macos:
+    - name: "macOS Sonoma (Apple Silicon)"
+      runner: "macos-14"
+      xcode: "15.2"
+      metal: true
+      architecture: "arm64"
+    - name: "macOS Ventura (Intel)"
+      runner: "macos-13" 
+      xcode: "15.0"
+      metal: true
+      architecture: "x86_64"
+
+# Cache configuration
+cache:
+  key_prefix: "hdr-plus-swift-cache"
+  paths:
+    - .build
+    - ~/.swiftpm
+    - ~/Library/Developer/Xcode/DerivedData
+    - ~/Library/Caches/org.swift.swiftpm
+
+# Test configuration
+test:
+  timeout_minutes: 20
+  retry_attempts: 2
+  
+# Build configuration
+build:
+  optimize: true
+  parallel: true
+  warning_level: "strict" 

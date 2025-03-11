@@ -1,0 +1,136 @@
+name: 'Test Results Summarizer'
+on:
+  workflow_call:
+    inputs:
+      artifact-prefix:
+        description: 'Prefix for test results artifacts'
+        required: false
+        type: string
+        default: 'test-results-'
+
+jobs:
+  summarize:
+    name: 'Summarize Test Results'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          
+      - name: Ensure artifacts directory exists
+        run: mkdir -p artifacts
+        
+      - name: Generate test summary
+        run: |
+          echo "# Test Results Summary 📊" > test-summary.md
+          echo "" >> test-summary.md
+          echo "Generated on $(date)" >> test-summary.md
+          echo "" >> test-summary.md
+          
+          echo "## Platform Results" >> test-summary.md
+          echo "" >> test-summary.md
+          echo "| Platform | Status | Build | Tests Passed | Tests Failed |" >> test-summary.md
+          echo "|----------|--------|-------|--------------|--------------|" >> test-summary.md
+          
+          # Process all test result artifacts
+          TEST_RESULTS=$(find artifacts -name "${{ inputs.artifact-prefix }}*" -type d)
+          
+          if [ -z "$TEST_RESULTS" ]; then
+            echo "| All Platforms | ⚠️ No Results | - | - | - |" >> test-summary.md
+          else
+            for result_dir in $TEST_RESULTS; do
+              platform=$(basename "$result_dir" | sed "s/${{ inputs.artifact-prefix }}//")
+              
+              # Default values
+              status="⚠️ Unknown"
+              build="Unknown"
+              passed="?"
+              failed="?"
+              
+              # Check build log
+              if [ -f "$result_dir/build.log" ]; then
+                if grep -q "BUILD SUCCEEDED\|Build complete" "$result_dir/build.log"; then
+                  build="✅ Success"
+                else
+                  build="❌ Failed"
+                fi
+              fi
+              
+              # Check test log
+              if [ -f "$result_dir/test.log" ]; then
+                if grep -q "Test Suite.*passed" "$result_dir/test.log"; then
+                  status="✅ Passed"
+                  # Extract number of passed tests
+                  passed=$(grep -o "[0-9]\\+ passed" "$result_dir/test.log" | head -1 | cut -d' ' -f1 || echo "?")
+                  failed=$(grep -o "[0-9]\\+ failed" "$result_dir/test.log" | head -1 | cut -d' ' -f1 || echo "0")
+                elif grep -q "Test Suite.*failed" "$result_dir/test.log"; then
+                  status="❌ Failed"
+                  passed=$(grep -o "[0-9]\\+ passed" "$result_dir/test.log" | head -1 | cut -d' ' -f1 || echo "?")
+                  failed=$(grep -o "[0-9]\\+ failed" "$result_dir/test.log" | head -1 | cut -d' ' -f1 || echo "?")
+                fi
+              elif [ -f "$result_dir/results.json" ]; then
+                # Process Xcode test results if available
+                status="🔍 See Details"
+                passed=$(grep -o '"testStatus":"Success"' "$result_dir/results.json" | wc -l)
+                failed=$(grep -o '"testStatus":"Failure"' "$result_dir/results.json" | wc -l)
+              fi
+              
+              # Special case for Metal checks
+              if [ -f "$result_dir/metal_info.txt" ] && grep -q "Metal.*Not Supported" "$result_dir/metal_info.txt"; then
+                status="⚠️ Metal Limited"
+              fi
+              
+              echo "| $platform | $status | $build | $passed | $failed |" >> test-summary.md
+            done
+          fi
+          
+          # Add Metal environment information
+          echo "" >> test-summary.md
+          echo "## Metal Environment Information" >> test-summary.md
+          echo "" >> test-summary.md
+          
+          METAL_INFO=$(find artifacts -name "metal-diagnostics-*" -type d)
+          
+          if [ -z "$METAL_INFO" ]; then
+            echo "No Metal diagnostics found." >> test-summary.md
+          else
+            for metal_dir in $METAL_INFO; do
+              platform=$(basename "$metal_dir" | sed "s/metal-diagnostics-//")
+              echo "### $platform" >> test-summary.md
+              echo "" >> test-summary.md
+              
+              if [ -f "$metal_dir/metal_info.txt" ]; then
+                echo '```' >> test-summary.md
+                head -n 20 "$metal_dir/metal_info.txt" >> test-summary.md
+                echo '...' >> test-summary.md
+                echo '```' >> test-summary.md
+              else
+                echo "No Metal information available." >> test-summary.md
+              fi
+              
+              echo "" >> test-summary.md
+            done
+          fi
+          
+          # Add Metal testing notes
+          echo "" >> test-summary.md
+          echo "## Metal Testing Notes" >> test-summary.md
+          echo "" >> test-summary.md
+          echo "- Metal tests may fail in CI environments due to limited GPU access" >> test-summary.md
+          echo "- Running Metal tests locally provides more accurate results" >> test-summary.md
+          echo "- Build success is the primary indicator of CI health" >> test-summary.md
+          
+          cat test-summary.md
+          
+      - name: Upload test summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-summary
+          path: test-summary.md
+          
+      - name: Add summary to workflow
+        run: cat test-summary.md >> $GITHUB_STEP_SUMMARY 

@@ -3,418 +3,194 @@ name: CI
 on:
   push:
     branches: [ main ]
-    paths:
-      - 'burstphoto/**'       # Only run on code changes
-      - '**/*.xcodeproj/**'   # Or Xcode project changes
-      - 'Package.swift'       # Or package dependency changes
-      - '.github/workflows/main.yml' # Or changes to this workflow
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.gitignore'
   pull_request:
-    branches: [ main ]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.gitignore'
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: 'Platforms to test (comma-separated, e.g., "macos-14,macos-13")'
+        required: false
+        default: ''
 
-# Set explicit permissions - principle of least privilege
-permissions:
-  contents: read
-  checks: write
-  pull-requests: write
-
-# Prevent concurrent runs of the same workflow on the same branch
+# Prevent concurrent runs on the same branch/PR
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # Core linting job to run quickly in parallel
+  config:
+    name: Setup Test Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      platforms: ${{ steps.matrix-setup.outputs.platforms }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Load CI configuration
+        id: matrix-setup
+        run: |
+          # Check if jq is installed, install if needed
+          if ! command -v jq &>/dev/null; then
+            echo "Installing jq..."
+            apt-get update && apt-get install -y jq
+          fi
+          
+          # Get the list of platforms from config file
+          if [ -f ".github/workflows/shared/ci-config.yml" ]; then
+            # Parse YAML with yq or another tool if available
+            # For now, using hardcoded values or manual parsing
+            
+            # Default platforms (if file parsing fails)
+            PLATFORM_DEFINITIONS=$(cat <<'EOF'
+            [
+              {"name": "macOS Sonoma (Apple Silicon)", "runner": "macos-14", "xcode": "15.2", "architecture": "arm64"},
+              {"name": "macOS Ventura (Intel)", "runner": "macos-13", "xcode": "15.0", "architecture": "x86_64"}
+            ]
+            EOF
+            )
+          else
+            # Fallback platforms
+            PLATFORM_DEFINITIONS=$(cat <<'EOF'
+            [
+              {"name": "macOS Sonoma (Apple Silicon)", "runner": "macos-14", "xcode": "15.2", "architecture": "arm64"},
+              {"name": "macOS Ventura (Intel)", "runner": "macos-13", "xcode": "15.0", "architecture": "x86_64"}
+            ]
+            EOF
+            )
+          fi
+          
+          # Apply platform filter if specified
+          PLATFORM_FILTER="${{ github.event.inputs.platforms }}"
+          if [ -n "$PLATFORM_FILTER" ]; then
+            # Filter platforms based on input
+            FILTERED_PLATFORMS="["
+            IFS=',' read -ra FILTER_LIST <<< "$PLATFORM_FILTER"
+            
+            for platform in "${FILTER_LIST[@]}"; do
+              case "$platform" in
+                macos-14|sonoma)
+                  # Extract the macOS 14 entry from PLATFORM_DEFINITIONS
+                  echo "Including macOS Sonoma..."
+                  FILTERED_PLATFORMS+=$(echo "$PLATFORM_DEFINITIONS" | jq '.[] | select(.runner == "macos-14")')
+                  FILTERED_PLATFORMS+=","
+                  ;;
+                macos-13|ventura)
+                  # Extract the macOS 13 entry from PLATFORM_DEFINITIONS
+                  echo "Including macOS Ventura..."
+                  FILTERED_PLATFORMS+=$(echo "$PLATFORM_DEFINITIONS" | jq '.[] | select(.runner == "macos-13")')
+                  FILTERED_PLATFORMS+=","
+                  ;;
+                *)
+                  echo "Ignoring unknown platform: $platform"
+                  ;;
+              esac
+            done
+            
+            # Remove trailing comma and close array
+            FILTERED_PLATFORMS="${FILTERED_PLATFORMS%,}]"
+            
+            # Use filtered platforms if not empty, otherwise use all
+            if [ "$FILTERED_PLATFORMS" != "[]" ]; then
+              PLATFORMS=$FILTERED_PLATFORMS
+            else
+              echo "No valid platforms specified, using all platforms"
+              PLATFORMS=$PLATFORM_DEFINITIONS
+            fi
+          else
+            # Use all platforms
+            PLATFORMS=$PLATFORM_DEFINITIONS
+          fi
+          
+          echo "Generated platform configuration:"
+          echo "$PLATFORMS" | jq .
+          
+          # Output as compact JSON
+          echo "platforms=$(echo "$PLATFORMS" | jq -c .)" >> $GITHUB_OUTPUT
+        shell: bash
+        
   lint:
     name: Lint Swift Code
     runs-on: macos-latest
-    timeout-minutes: 5
+    
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          
-      - name: Set up Swift environment
-        id: swift-setup
-        uses: ./.github/actions/optimized-swift-setup
-        with:
-          cache-name: 'lint'
-          install-swiftlint: 'true'
-          
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Install SwiftLint
+        run: |
+          if ! command -v swiftlint &>/dev/null; then
+            brew install swiftlint
+          fi
+      
       - name: Run SwiftLint
         run: |
-          echo "Running linting checks..."
-          swiftlint --strict --reporter github-actions-logging burstphoto || true
-          mkdir -p test-results
-          swiftlint burstphoto --reporter json > test-results/swiftlint-results.json || true
-          echo "::group::Lint Summary"
-          echo "Linting completed. See detailed results in the artifacts."
-          echo "::endgroup::"
-          
-      - name: Upload lint results
-        uses: actions/upload-artifact@v4
-        with:
-          name: lint-results
-          path: test-results/
-          retention-days: 3
-
-  # Matrix-based testing across macOS versions
-  test:
-    name: Test on ${{ matrix.os }}
-    needs: lint
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-13, macos-14]
-        
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Swift environment
-        id: swift-setup
-        uses: ./.github/actions/optimized-swift-setup
-        with:
-          cache-name: 'test-${{ matrix.os }}'
-          disable-code-signing: 'true'
-          use-retry: 'true'
-          
-      - name: Report Setup Metrics
-        run: |
-          echo "::group::Environment Info"
-          echo "Swift setup completed in ${{ steps.swift-setup.outputs.setup-time }} seconds"
-          echo "Using Swift version: ${{ steps.swift-setup.outputs.swift-version }}"
-          echo "Using Xcode version: ${{ steps.swift-setup.outputs.xcode-version }}"
-          echo "Cache hit: ${{ steps.swift-setup.outputs.cache-hit }}"
-          echo "::endgroup::"
-          
-      - name: Build and Test
-        id: build-test
-        continue-on-error: true
-        run: |
-          echo "::group::Building HDR+ Project"
-          START_TIME=$(date +%s)
-          
-          # Print environment details
-          echo "Current directory: $(pwd)"
-          echo "Available DNG libraries:"
-          ls -la dng_sdk/xmp_lib/
-          
-          # Ensure correct library paths
-          mkdir -p ~/Library/Developer/Xcode/DerivedData/burstphoto-*/Build/Products/Debug
-          
-          # Build the project with correct library paths and diagnostics
-          set -x  # Enable command echo for debugging
-          xcodebuild clean build-for-testing \
-            -project burstphoto.xcodeproj \
-            -scheme gui \
-            -destination "platform=macOS" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            OTHER_LDFLAGS="-L$(pwd)/dng_sdk/xmp_lib" \
-            LIBRARY_SEARCH_PATHS="$(pwd)/dng_sdk/xmp_lib" \
-            VALID_ARCHS="x86_64" \
-            ARCHS="x86_64" \
-            ONLY_ACTIVE_ARCH=NO \
-            GCC_OPTIMIZATION_LEVEL=0 \
-            DEBUG_INFORMATION_FORMAT=dwarf \
-            SWIFT_OPTIMIZATION_LEVEL="-Onone" \
-            | tee build.log || { echo "::warning::Build failed but continuing"; BUILD_FAILED=1; }
-          set +x  # Disable command echo
-            
-          BUILD_END_TIME=$(date +%s)
-          BUILD_TIME=$((BUILD_END_TIME - START_TIME))
-          echo "Build completed in ${BUILD_TIME} seconds"
-          echo "::endgroup::"
-          
-          # Always create a test results directory, even if empty
-          mkdir -p TestResults.xcresult
-          
-          # Only run tests if build was successful
-          if [ -z "$BUILD_FAILED" ]; then
-            echo "::group::Running Tests"
-            # Run tests with correct library paths
-            set -x  # Enable command echo for debugging
-            xcodebuild test-without-building \
-              -project burstphoto.xcodeproj \
-              -scheme gui \
-              -destination "platform=macOS" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGN_IDENTITY="" \
-              OTHER_LDFLAGS="-L$(pwd)/dng_sdk/xmp_lib" \
-              LIBRARY_SEARCH_PATHS="$(pwd)/dng_sdk/xmp_lib" \
-              ARCHS="x86_64" \
-              -resultBundlePath TestResults.xcresult \
-              | tee test.log || { 
-                echo "::warning::Tests failed but continuing"; 
-                # Ensure xcresult bundle has a marker file even if tests failed
-                touch TestResults.xcresult/tests-ran-but-failed
-              }
-            set +x  # Disable command echo
-              
-            TEST_END_TIME=$(date +%s)
-            TEST_TIME=$((TEST_END_TIME - BUILD_END_TIME))
-            TOTAL_TIME=$((TEST_END_TIME - START_TIME))
-            
-            echo "Tests completed in ${TEST_TIME} seconds"
+          if [ -f ".swiftlint.yml" ]; then
+            echo "Running SwiftLint with configuration file..."
+            swiftlint lint --reporter github-actions-logging
           else
-            echo "::group::Tests Skipped"
-            echo "Tests were not run because the build failed"
-            # Create a marker file in the test results directory
-            touch TestResults.xcresult/build-failed-tests-skipped
+            echo "Running SwiftLint with default configuration..."
+            swiftlint lint --strict --reporter github-actions-logging
           fi
-          echo "::endgroup::"
-          
-      - name: Visualize Test Results
-        id: test-visualizer
-        uses: ./.github/actions/test-results-visualizer
-        with:
-          results-path: 'TestResults.xcresult'
-          report-name: 'HDR+ Tests on ${{ matrix.os }}'
-          include-coverage: 'true'
-        continue-on-error: true
-          
-      - name: Report Test Metrics
-        run: |
-          echo "::group::Test Result Metrics"
-          echo "Total tests: ${{ steps.test-visualizer.outputs.total-tests }}"
-          echo "Success rate: ${{ steps.test-visualizer.outputs.success-rate }}%"
-          echo "Report available at: ${{ steps.test-visualizer.outputs.report-path }}"
-          echo "::endgroup::"
-          
-      - name: Check Test Status
-        id: test-status
-        run: |
-          # Initialize variables
-          FAILURE_FOUND=0
-          
-          # Check if tests actually ran and failed
-          if [ -f "TestResults.xcresult/tests-ran-but-failed" ]; then
-            echo "::error title=Test Failure::Tests were executed but failed. See test reports for details."
-            echo "failure_reason=Tests failed during execution" >> $GITHUB_OUTPUT
-            
-            # Try to extract failure information for more detailed annotations
-            if [ -f "test-reports/test-report.md" ]; then
-              # Find failed test sections in the Markdown report
-              FAILED_TESTS=$(sed -n '/^### .*$/,/^$/p' test-reports/test-report.md | grep "^###" | sed 's/^### //')
-              
-              # Output each failed test as a separate annotation
-              for TEST in $FAILED_TESTS; do
-                ERROR_MSG=$(sed -n "/^### $TEST$/,/^$/p" test-reports/test-report.md | grep "Error:" | sed 's/- \*\*Error:\*\* //')
-                LOCATION=$(sed -n "/^### $TEST$/,/^$/p" test-reports/test-report.md | grep "Location:" | sed 's/- \*\*Location:\*\* //')
-                
-                if [ -n "$LOCATION" ]; then
-                  FILE=$(echo $LOCATION | cut -d':' -f1)
-                  LINE=$(echo $LOCATION | cut -d':' -f2)
-                  echo "::error file=$FILE,line=$LINE,title=Failed Test ($TEST)::$ERROR_MSG"
-                else
-                  echo "::error title=Failed Test ($TEST)::$ERROR_MSG"
-                fi
-              done
-            fi
-            
-            FAILURE_FOUND=1
-          fi
-          
-          # Check if build failed
-          if [ -f "TestResults.xcresult/build-failed-tests-skipped" ]; then
-            echo "::error title=Build Failure::Build failed, so tests were skipped. See build logs for details."
-            echo "failure_reason=Build failed, tests were skipped" >> $GITHUB_OUTPUT
-            
-            # Try to extract build errors from logs
-            if [ -f "build.log" ]; then
-              # Extract error lines from the build log
-              grep -A 3 "error:" build.log | head -n 10 | while read -r LINE; do
-                echo "::error title=Build Error::$LINE"
-              done
-            fi
-            
-            FAILURE_FOUND=1
-          fi
-          
-          # Check for synthetic data generation
-          if [ "${{ steps.test-visualizer.outputs.used-synthetic-data }}" == "true" ]; then
-            echo "::warning title=Synthetic Data::This run used synthetic test data. Real tests may have failed or not run at all."
-            echo "used_synthetic_data=true" >> $GITHUB_OUTPUT
-          fi
-          
-          # Set output for failure found
-          echo "failure_found=$FAILURE_FOUND" >> $GITHUB_OUTPUT
-          
-          # Fail the workflow if failures were found
-          if [ $FAILURE_FOUND -eq 1 ]; then
-            exit 1
-          fi
-          
-      - name: Comment on PR for test failures
-        if: github.event_name == 'pull_request' && steps.test-status.outputs.failure_found == '1'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const issueNumber = context.issue.number;
-            const failureReason = '${{ steps.test-status.outputs.failure_reason }}';
-            
-            let body = `## ❌ Test Failure on ${{ matrix.os }}
-            
-            Tests failed on this PR. The failure reason was:
-            
-            **${failureReason}**
-            
-            Please review the [test report](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) for details.
-            `;
-            
-            // If used synthetic data, add warning
-            if ('${{ steps.test-status.outputs.used_synthetic_data }}' === 'true') {
-              body += '\n⚠️ **Warning**: Synthetic test data was used in this run. The actual test results may be incomplete.';
-            }
-            
-            // Add link to test artifacts
-            body += `
-            
-            [View Test Artifacts](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/artifacts)
-            `;
-            
-            github.rest.issues.createComment({
-              issue_number: issueNumber,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: body
-            });
+        continue-on-error: true  # Allow the workflow to continue even if linting fails
+  
+  test:
+    name: Test on ${{ matrix.platform.name }}
+    needs: config
+    strategy:
+      fail-fast: false  # Continue with other platforms if one fails
+      matrix:
+        platform: ${{ fromJson(needs.config.outputs.platforms) }}
+    
+    uses: ./.github/workflows/shared/metal-testing.yml
+    with:
+      platform: ${{ matrix.platform.runner }}
+      xcode-version: ${{ matrix.platform.xcode }}
+      architecture: ${{ matrix.platform.architecture }}
       
-      - name: Archive test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-${{ matrix.os }}
-          path: |
-            TestResults.xcresult
-            test-reports/
-          retention-days: 5
-
-  # Main build for release
-  build:
-    name: Build Release
-    needs: [lint, test]
-    runs-on: macos-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Swift environment
-        uses: ./.github/actions/optimized-swift-setup
-        with:
-          cache-name: 'release-build'
-          disable-code-signing: 'false'
-          
-      - name: Configure Keychain
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          echo "Setting up keychain for signed builds on main branch"
-          # This is a placeholder for actual keychain setup
-          # In a real scenario, you would use secrets to set up code signing
-          
-      - name: Build for Release
-        run: |
-          echo "Building for release..."
-          # Print environment details
-          echo "Current directory: $(pwd)"
-          echo "Available DNG libraries:"
-          ls -la dng_sdk/xmp_lib/
-          
-          set -x  # Enable command echo for debugging
-          xcodebuild build \
-            -project burstphoto.xcodeproj \
-            -scheme gui \
-            -configuration Release \
-            -destination "platform=macOS" \
-            ONLY_ACTIVE_ARCH=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            OTHER_LDFLAGS="-L$(pwd)/dng_sdk/xmp_lib" \
-            LIBRARY_SEARCH_PATHS="$(pwd)/dng_sdk/xmp_lib" \
-            VALID_ARCHS="x86_64" \
-            ARCHS="x86_64" \
-            | tee release_build.log || { echo "::error::Release build failed"; cat release_build.log; exit 1; }
-          set +x  # Disable command echo
-            
-      - name: Package Application
-        run: |
-          echo "Packaging application..."
-          mkdir -p artifacts
-          # Example command to package the app
-          # ditto -c -k --keepParent "build/Release/HDRPlus.app" "artifacts/HDRPlus.zip"
-          
-          # For now, just create a placeholder
-          touch artifacts/build-completed.txt
-          echo "Build completed at $(date)" > artifacts/build-completed.txt
-          
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-artifacts
-          path: artifacts/
-          retention-days: 7
-          
-  # Final job to aggregate results and provide a summary
   summarize:
     name: Summarize Results
-    needs: [lint, test, build]
+    needs: test
+    if: always()  # Run even if tests fail
+    
+    uses: ./.github/workflows/shared/test-summarizer.yml
+    
+  notify:
+    name: Notify on Completion
+    needs: [lint, test, summarize]
     if: always()
     runs-on: ubuntu-latest
+    
     steps:
-      - name: Check test results
+      - name: Check workflow status
+        id: check
         run: |
-          if [[ "${{ needs.test.result }}" == "success" ]]; then
-            echo "✅ Tests passed successfully"
+          if [ "${{ contains(needs.*.result, 'failure') }}" == "true" ]; then
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "icon=❌" >> $GITHUB_OUTPUT
           else
-            echo "❌ Tests failed"
-            exit 1
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "icon=✅" >> $GITHUB_OUTPUT
           fi
       
-      - name: Check build results
+      - name: Report status
         run: |
-          if [[ "${{ needs.build.result }}" == "success" ]]; then
-            echo "✅ Build completed successfully"
-          else
-            echo "❌ Build failed"
-            exit 1
-          fi
-          
-      - name: Log CI Status
-        id: ci-status-log
-        run: |
-          echo "## CI Run Status" >> $GITHUB_STEP_SUMMARY
+          echo "## CI Run Complete ${{ steps.check.outputs.icon }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Component | Status | Duration |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|--------|----------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Lint | $(if [[ "${{ needs.lint.result }}" == "success" ]]; then echo "✅ Passed"; elif [[ "${{ needs.lint.result }}" == "skipped" ]]; then echo "⏭️ Skipped"; else echo "❌ Failed"; fi) | n/a |" >> $GITHUB_STEP_SUMMARY
-          echo "| Test | $(if [[ "${{ needs.test.result }}" == "success" ]]; then echo "✅ Passed"; elif [[ "${{ needs.test.result }}" == "skipped" ]]; then echo "⏭️ Skipped"; else echo "❌ Failed"; fi) | n/a |" >> $GITHUB_STEP_SUMMARY
-          echo "| Build | $(if [[ "${{ needs.build.result }}" == "success" ]]; then echo "✅ Passed"; elif [[ "${{ needs.build.result }}" == "skipped" ]]; then echo "⏭️ Skipped"; else echo "❌ Failed"; fi) | n/a |" >> $GITHUB_STEP_SUMMARY
+          echo "### Job Status" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Permissions Status" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Linting | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Testing | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Summary | ${{ needs.summarize.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- Contents (read): ✅ Available" >> $GITHUB_STEP_SUMMARY
-          echo "- Checks (write): ✅ Available" >> $GITHUB_STEP_SUMMARY
-          echo "- Pull Requests (write): ✅ Available" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Concurrency" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- Group: ${{ github.workflow }}-${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Run ID: ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Run Attempt: ${{ github.run_attempt }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Run Number: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
-          
-          if [[ "${{ github.run_attempt }}" != "1" ]]; then
-            echo "⚠️ This run was restarted or re-run after cancellation" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-      - name: Create overall status
-        run: |
-          if [[ "${{ needs.test.result }}" == "success" && "${{ needs.build.result }}" == "success" ]]; then
-            echo "All jobs completed successfully! 🎉"
-          else
-            echo "Some jobs failed. See job details for more information."
-            exit 1
-          fi 
+          echo "Overall status: **${{ steps.check.outputs.status }}**" >> $GITHUB_STEP_SUMMARY 

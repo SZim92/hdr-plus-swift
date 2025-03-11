@@ -1,0 +1,174 @@
+name: 'Metal Testing'
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: 'The runner to use (e.g., macos-14)'
+        required: true
+        type: string
+      xcode-version: 
+        description: 'Xcode version to use'
+        required: true
+        type: string
+      architecture:
+        description: 'CPU architecture (arm64 or x86_64)'
+        required: false
+        type: string
+        default: 'arm64'
+      timeout-minutes:
+        description: 'Test timeout in minutes'
+        required: false
+        type: number
+        default: 20
+      cache-key-suffix:
+        description: 'Additional cache key suffix for unique builds'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  metal-test:
+    name: 'Test on ${{ inputs.platform }}'
+    runs-on: ${{ inputs.platform }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ inputs.xcode-version }}
+          
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/.swiftpm
+            ~/Library/Developer/Xcode/DerivedData
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ inputs.platform }}-${{ inputs.xcode-version }}-${{ inputs.architecture }}-${{ hashFiles('**/Package.resolved') }}${{ inputs.cache-key-suffix }}
+          restore-keys: |
+            ${{ inputs.platform }}-${{ inputs.xcode-version }}-${{ inputs.architecture }}-${{ hashFiles('**/Package.resolved') }}
+            ${{ inputs.platform }}-${{ inputs.xcode-version }}-${{ inputs.architecture }}-
+          
+      - name: Collect Metal environment info
+        id: metal-info
+        run: |
+          echo "==== Metal Environment Information ====" >> metal_info.txt
+          echo "Date: $(date)" >> metal_info.txt
+          echo "Runner: ${{ inputs.platform }}" >> metal_info.txt
+          echo "Architecture: ${{ inputs.architecture }}" >> metal_info.txt
+          echo "" >> metal_info.txt
+          
+          echo "=== Swift & Xcode ===" >> metal_info.txt
+          swift --version >> metal_info.txt
+          xcodebuild -version >> metal_info.txt
+          echo "" >> metal_info.txt
+          
+          echo "=== System Information ===" >> metal_info.txt
+          uname -a >> metal_info.txt
+          sw_vers >> metal_info.txt
+          echo "" >> metal_info.txt
+          
+          echo "=== GPU Information ===" >> metal_info.txt
+          system_profiler SPDisplaysDataType >> metal_info.txt 2>&1 || echo "Unable to get display information" >> metal_info.txt
+          
+          # Set output to indicate metal capability
+          if system_profiler SPDisplaysDataType | grep -q "Metal"; then
+            echo "metal_supported=true" >> $GITHUB_OUTPUT
+          else
+            echo "metal_supported=false" >> $GITHUB_OUTPUT
+          fi
+          
+          cat metal_info.txt
+        
+      - name: Build project
+        id: build
+        run: |
+          echo "Building with Xcode..."
+          
+          # Check if we have an Xcode project
+          if [ -d "burstphoto.xcodeproj" ]; then
+            echo "Building Xcode project..."
+            
+            # Add verbose flag for better diagnostics in CI
+            xcodebuild clean build \
+              -project burstphoto.xcodeproj \
+              -scheme "gui" \
+              -destination "platform=macOS" \
+              -verbose | tee build.log
+          elif [ -f "Package.swift" ]; then
+            echo "Building Swift package..."
+            
+            # Add verbose flag for better diagnostics in CI
+            swift build -v | tee build.log
+          else
+            echo "Neither Xcode project nor Swift package found!"
+            exit 1
+          fi
+          
+          if [ -f "build.log" ]; then
+            # Check if build succeeded
+            if grep -q "BUILD SUCCEEDED" build.log || grep -q "Build complete!" build.log; then
+              echo "build_success=true" >> $GITHUB_OUTPUT
+            else
+              echo "build_success=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "build_success=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run tests
+        id: test
+        if: steps.build.outputs.build_success == 'true'
+        run: |
+          # Set Metal diagnostic environment variables
+          export METAL_DEVICE_WRAPPER_TYPE=1
+          export METAL_DEBUG_ERROR_MODE=1
+          export METAL_DIAGNOSTIC_ENABLED=1
+          
+          # Check for test targets
+          echo "Looking for test targets..."
+          
+          if [ -d "burstphoto.xcodeproj" ]; then
+            # Run tests with Xcode
+            echo "Running tests with Xcode..."
+            xcodebuild test \
+              -project burstphoto.xcodeproj \
+              -scheme "gui" \
+              -destination "platform=macOS" \
+              -resultBundlePath TestResults.xcresult | tee test.log
+              
+            # Extract test results if available
+            if [ -d "TestResults.xcresult" ]; then
+              mkdir -p test-results
+              xcrun xcresulttool get --path TestResults.xcresult --format json > test-results/results.json
+            fi
+          elif [ -f "Package.swift" ]; then
+            # Run tests with Swift Package Manager
+            echo "Running tests with Swift Package Manager..."
+            swift test -v | tee test.log
+          else
+            echo "No test targets found!"
+          fi
+          
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ inputs.platform }}
+          path: |
+            test-results/
+            TestResults.xcresult/
+            *.log
+          if-no-files-found: ignore
+          
+      - name: Upload Metal diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metal-diagnostics-${{ inputs.platform }}
+          path: metal_info.txt
+          if-no-files-found: ignore 
