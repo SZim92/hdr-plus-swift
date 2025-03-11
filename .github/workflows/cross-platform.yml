@@ -147,11 +147,139 @@ jobs:
     
     uses: ./.github/workflows/shared/test-summarizer.yml
   
+  # Add GPU family shader testing matrix
+  shader-compatibility:
+    name: Metal Shader Compatibility
+    runs-on: macos-latest
+    # Only run this job if Metal files are changed or on scheduled runs
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'area/metal')
+    needs: [config]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Swift environment
+        run: |
+          chmod +x .github/scripts/setup-swift-env.sh
+          ./.github/scripts/setup-swift-env.sh 'metal-shader-testing' 'false' 'true' 'false' 'validation'
+      
+      - name: Find Metal shader files
+        id: find-shaders
+        run: |
+          # Find all Metal shader files in the repo
+          SHADER_FILES=$(find . -name "*.metal" -type f | sort)
+          
+          if [ -z "$SHADER_FILES" ]; then
+            echo "No Metal shader files found. Skipping compatibility tests."
+            echo "has_shaders=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "Found $(echo "$SHADER_FILES" | wc -l | xargs) Metal shader files"
+          
+          # Save list of shader files for test matrix
+          mkdir -p shader-compatibility
+          echo "$SHADER_FILES" > shader-compatibility/shader-files.txt
+          
+          echo "has_shaders=true" >> $GITHUB_OUTPUT
+      
+      - name: Run shader compatibility tests
+        if: steps.find-shaders.outputs.has_shaders == 'true'
+        run: |
+          echo "Testing Metal shader compatibility across GPU families..."
+          
+          # Shader test results directory
+          mkdir -p shader-compatibility/results
+          
+          # Metal GPU families to test
+          GPU_FAMILIES=("mac1" "mac2" "apple1" "apple2" "apple3" "apple4" "apple5" "apple6" "apple7")
+          
+          # Read shader files
+          SHADER_FILES=$(cat shader-compatibility/shader-files.txt)
+          
+          # Track overall test results
+          TOTAL_SHADERS=0
+          FULLY_COMPATIBLE_SHADERS=0
+          ISSUES_DETECTED=0
+          
+          # For each shader file, compile for each GPU family
+          for shader in $SHADER_FILES; do
+            shader_name=$(basename "$shader")
+            echo "Testing shader: $shader_name"
+            mkdir -p "shader-compatibility/results/$shader_name"
+            
+            TOTAL_SHADERS=$((TOTAL_SHADERS + 1))
+            SHADER_COMPATIBLE=true
+            COMPATIBLE_FAMILIES=()
+            INCOMPATIBLE_FAMILIES=()
+            
+            for family in "${GPU_FAMILIES[@]}"; do
+              echo "  Testing compatibility with GPU family: $family"
+              
+              # Compile the shader with target GPU family (redirecting stderr to capture errors)
+              if xcrun -sdk macosx metal -c "$shader" -o /tmp/temp.air -std=metal2.0 -mmacos-version-min=10.13 -target "air64-${family}" 2> "shader-compatibility/results/$shader_name/${family}.log"; then
+                echo "✓ Compatible with $family" >> "shader-compatibility/results/$shader_name/summary.txt"
+                COMPATIBLE_FAMILIES+=("$family")
+              else
+                echo "✗ Not compatible with $family" >> "shader-compatibility/results/$shader_name/summary.txt"
+                INCOMPATIBLE_FAMILIES+=("$family")
+                SHADER_COMPATIBLE=false
+              fi
+            done
+            
+            # Add compatibility summary for this shader
+            if [ "$SHADER_COMPATIBLE" == "true" ]; then
+              echo "✅ $shader_name is compatible with all tested GPU families" >> shader-compatibility/results/summary.md
+              FULLY_COMPATIBLE_SHADERS=$((FULLY_COMPATIBLE_SHADERS + 1))
+            else
+              echo "⚠️ $shader_name has compatibility issues with some GPU families" >> shader-compatibility/results/summary.md
+              echo "  ✓ Compatible families: ${COMPATIBLE_FAMILIES[*]}" >> shader-compatibility/results/summary.md
+              echo "  ✗ Incompatible families: ${INCOMPATIBLE_FAMILIES[*]}" >> shader-compatibility/results/summary.md
+              ISSUES_DETECTED=$((ISSUES_DETECTED + 1))
+            fi
+          done
+          
+          # Generate overall summary
+          echo "# Metal Shader Compatibility Summary" > shader-compatibility/summary.md
+          echo "" >> shader-compatibility/summary.md
+          echo "Test executed on: $(date)" >> shader-compatibility/summary.md
+          echo "" >> shader-compatibility/summary.md
+          echo "## Results" >> shader-compatibility/summary.md
+          echo "" >> shader-compatibility/summary.md
+          echo "| Metric | Count |" >> shader-compatibility/summary.md
+          echo "|--------|-------|" >> shader-compatibility/summary.md
+          echo "| Total shaders tested | $TOTAL_SHADERS |" >> shader-compatibility/summary.md
+          echo "| Fully compatible shaders | $FULLY_COMPATIBLE_SHADERS |" >> shader-compatibility/summary.md
+          echo "| Shaders with compatibility issues | $ISSUES_DETECTED |" >> shader-compatibility/summary.md
+          echo "" >> shader-compatibility/summary.md
+          
+          if [ $ISSUES_DETECTED -gt 0 ]; then
+            echo "## Compatibility Issues" >> shader-compatibility/summary.md
+            echo "" >> shader-compatibility/summary.md
+            cat shader-compatibility/results/summary.md >> shader-compatibility/summary.md
+            
+            echo "⚠️ Detected compatibility issues with $ISSUES_DETECTED shaders"
+            echo "See shader-compatibility/summary.md for details"
+          else
+            echo "✅ All $TOTAL_SHADERS shaders are compatible with all tested GPU families"
+          fi
+          
+          # Add summary to GitHub step summary
+          cat shader-compatibility/summary.md >> $GITHUB_STEP_SUMMARY
+      
+      - name: Upload shader compatibility results
+        if: steps.find-shaders.outputs.has_shaders == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shader-compatibility-results
+          path: shader-compatibility/
+          retention-days: 14
+  
   # Add PR feedback only for pull requests
   pr-feedback:
     name: PR Feedback
     if: github.event_name == 'pull_request'
-    needs: [summarize]
+    needs: [summarize, shader-compatibility]
     uses: ./.github/workflows/shared/enhanced-pr-feedback.yml
     with:
       pr-number: ${{ github.event.pull_request.number }}

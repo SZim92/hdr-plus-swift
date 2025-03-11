@@ -448,31 +448,81 @@ jobs:
                 UNSAFE_ATTRS=$(grep -r "[[device]]" --include="*.metal" . | wc -l)
                 echo "- Found $UNSAFE_ATTRS use(s) of [[device]] attribute (ensure proper synchronization)" >> macos-security-reports/metal-security.md
                 
-                # Try to compile shaders with validation enabled
+                # Enhanced shader compilation validation with detailed output
                 echo "" >> macos-security-reports/metal-security.md
-                echo "#### Shader Compilation Validation" >> macos-security-reports/metal-security.md
+                echo "#### Enhanced Shader Compilation Validation" >> macos-security-reports/metal-security.md
                 echo "" >> macos-security-reports/metal-security.md
                 
+                echo "| Shader | Status | Warning Count | Error Count | Issues |" >> macos-security-reports/metal-security.md
+                echo "|--------|--------|---------------|-------------|--------|" >> macos-security-reports/metal-security.md
+                
                 # Iterate through each shader and attempt compilation with validation
-                VALIDATION_ERRORS=0
+                TOTAL_VALIDATION_ERRORS=0
+                TOTAL_VALIDATION_WARNINGS=0
+                SHADERS_WITH_ISSUES=0
+                
                 while read shader_file; do
-                  echo "Validating $shader_file..." >> macos-security-reports/metal-shader-validation.log
+                  shader_name=$(basename "$shader_file")
+                  VALIDATION_LOG="macos-security-reports/metal-shaders/${shader_name}.validation.log"
                   
-                  # Metal validation compilation (ignoring errors as we're just collecting them)
-                  xcrun -sdk macosx metal -c "$shader_file" -o /tmp/temp.air \
+                  # Run enhanced Metal validation compilation with detailed flags
+                  xcrun -sdk macosx metal -c "$shader_file" -o "/tmp/${shader_name}.air" \
                     -std=metal2.0 \
                     -fno-fast-math \
                     -gline-tables-only \
                     -MO \
-                    2>> macos-security-reports/metal-shader-validation.log || ((VALIDATION_ERRORS++))
+                    -Werror=implicit-function-declaration \
+                    -Werror=non-void-function-returns-void \
+                    -Werror=array-bounds \
+                    -Werror=address \
+                    -Werror=uninitialized \
+                    -Werror=return-stack-address \
+                    2> "$VALIDATION_LOG"
+                  
+                  COMPILE_STATUS=$?
+                  
+                  # Count warnings and errors
+                  WARNING_COUNT=$(grep -c "warning:" "$VALIDATION_LOG" || echo "0")
+                  ERROR_COUNT=$(grep -c "error:" "$VALIDATION_LOG" || echo "0")
+                  
+                  TOTAL_VALIDATION_WARNINGS=$((TOTAL_VALIDATION_WARNINGS + WARNING_COUNT))
+                  TOTAL_VALIDATION_ERRORS=$((TOTAL_VALIDATION_ERRORS + ERROR_COUNT))
+                  
+                  if [ $COMPILE_STATUS -ne 0 ] || [ $WARNING_COUNT -gt 0 ] || [ $ERROR_COUNT -gt 0 ]; then
+                    SHADERS_WITH_ISSUES=$((SHADERS_WITH_ISSUES + 1))
+                    STATUS="❌ Failed"
+                    
+                    # Extract the first issue to show in the table
+                    FIRST_ISSUE=$(grep -m 1 -E "warning:|error:" "$VALIDATION_LOG" | sed 's/.*:[0-9]*:[0-9]*: \(warning\|error\): //' || echo "Unknown issue")
+                    ISSUE_PREVIEW="${FIRST_ISSUE:0:50}..."
+                    
+                    echo "| $shader_name | $STATUS | $WARNING_COUNT | $ERROR_COUNT | $ISSUE_PREVIEW |" >> macos-security-reports/metal-security.md
+                    
+                    # Create a detailed per-shader report
+                    echo "# Validation Report for $shader_name" > "macos-security-reports/metal-shaders/${shader_name}.report.md"
+                    echo "" >> "macos-security-reports/metal-shaders/${shader_name}.report.md"
+                    echo "## Issues" >> "macos-security-reports/metal-shaders/${shader_name}.report.md"
+                    echo "" >> "macos-security-reports/metal-shaders/${shader_name}.report.md"
+                    
+                    if [ -s "$VALIDATION_LOG" ]; then
+                      cat "$VALIDATION_LOG" >> "macos-security-reports/metal-shaders/${shader_name}.report.md"
+                    else
+                      echo "No detailed output available" >> "macos-security-reports/metal-shaders/${shader_name}.report.md"
+                    fi
+                  else
+                    STATUS="✅ Passed"
+                    echo "| $shader_name | $STATUS | 0 | 0 | - |" >> macos-security-reports/metal-security.md
+                  fi
                 done < macos-security-reports/metal-shader-files.txt
                 
-                echo "- Found $VALIDATION_ERRORS shader(s) with validation errors" >> macos-security-reports/metal-security.md
+                # Summary of validation results
+                echo "" >> macos-security-reports/metal-security.md
+                echo "**Validation Summary:** $SHADERS_WITH_ISSUES out of $SHADER_COUNT shaders have issues" >> macos-security-reports/metal-security.md
+                echo "**Total Warnings:** $TOTAL_VALIDATION_WARNINGS" >> macos-security-reports/metal-security.md
+                echo "**Total Errors:** $TOTAL_VALIDATION_ERRORS" >> macos-security-reports/metal-security.md
                 
-                if [ $VALIDATION_ERRORS -gt 0 ]; then
-                  echo "- ⚠️ See metal-shader-validation.log for details" >> macos-security-reports/metal-security.md
-                else
-                  echo "- ✅ All shaders passed basic validation" >> macos-security-reports/metal-security.md
+                if [ $TOTAL_VALIDATION_ERRORS -gt 0 ]; then
+                  echo "⚠️ **Critical Security Concern:** Shader validation detected $TOTAL_VALIDATION_ERRORS errors which may indicate security issues" >> macos-security-reports/metal-security.md
                 fi
               else
                 echo "No Metal shader files (.metal) found in the project." >> macos-security-reports/metal-security.md
@@ -510,10 +560,6 @@ jobs:
               
               if [ $WAIT_CALLS -gt 0 ]; then
                 echo "- Review usage of waitUntilCompleted to avoid blocking the main thread" >> macos-security-reports/metal-security.md
-              fi
-              
-              if [ $VALIDATION_ERRORS -gt 0 ]; then
-                echo "- Fix validation errors in Metal shaders" >> macos-security-reports/metal-security.md
               fi
               
               # General recommendations for Metal security
