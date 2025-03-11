@@ -41,7 +41,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        
+      
       - name: Load CI configuration
         id: matrix-setup
         run: |
@@ -295,13 +295,13 @@ jobs:
       fail-fast: false  # Don't fail the entire matrix if one GPU family fails
       matrix:
         gpu-family: ["mac1", "apple7"]  # Test on both older and newer GPU architectures
-        
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
+      
       # Add Metal shader compilation cache
       - name: Cache Metal shaders
         uses: actions/cache@v4
