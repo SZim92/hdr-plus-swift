@@ -165,45 +165,52 @@ jobs:
               return {files: []};
             }
       
-      - name: Provide test suggestions
-        if: ${{ github.event_name == 'pull_request' && (steps.pr_files.outputs.has_swift_files || '') == 'true' && (steps.pr_files.outputs.has_test_files || '') != 'true' }}
+      - name: Check code and provide suggestions
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '## Test Coverage Reminder\n\n' +
-                   'This PR modifies Swift code but doesn\'t appear to include test updates.\n' +
-                   'Consider adding tests to cover the new functionality or modifications.\n\n' +
-                   'Good test coverage helps ensure:\n' +
-                   '- Your code works as expected\n' +
-                   '- Future changes don\'t break your implementation\n' +
-                   '- Others understand how to use your code\n\n' +
-                   'If you believe tests aren\'t needed for this change, please comment explaining why.'
-            });
-      
-      - name: Provide documentation suggestions
-        if: ${{ github.event_name == 'pull_request' && (steps.pr_files.outputs.has_swift_files || '') == 'true' && (steps.pr_files.outputs.has_doc_files || '') != 'true' }}
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '## Documentation Reminder\n\n' +
-                   'This PR modifies Swift code but doesn\'t appear to include documentation updates.\n' +
-                   'Consider updating documentation if your changes:\n' +
-                   '- Modify public interfaces\n' +
-                   '- Change behavior that users rely on\n' +
-                   '- Add new features\n' +
-                   '- Fix notable bugs\n\n' +
-                   'Good documentation helps other developers understand how to use your code effectively.'
-            });
+            // Check if the PR has Swift files but no test files
+            const hasSwiftFiles = ${{ steps.pr_files.outputs.has_swift_files == 'true' }};
+            const hasTestFiles = ${{ steps.pr_files.outputs.has_test_files == 'true' }};
+            const hasDocFiles = ${{ steps.pr_files.outputs.has_doc_files == 'true' }};
+            
+            // If we have Swift changes but no test updates, suggest adding tests
+            if (hasSwiftFiles && !hasTestFiles) {
+              console.log('PR has Swift changes but no test updates. Adding test suggestion.');
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: '## Test Coverage Reminder\n\n' +
+                     'This PR modifies Swift code but doesn\'t appear to include test updates.\n' +
+                     'Consider adding tests to cover the new functionality or modifications.\n\n' +
+                     'Good test coverage helps ensure:\n' +
+                     '- Your code works as expected\n' +
+                     '- Future changes don\'t break your implementation\n' +
+                     '- Others understand how to use your code\n\n' +
+                     'If you believe tests aren\'t needed for this change, please comment explaining why.'
+              });
+            }
+            
+            // If we have Swift changes but no documentation updates, suggest updating docs
+            if (hasSwiftFiles && !hasDocFiles) {
+              console.log('PR has Swift changes but no documentation updates. Adding documentation suggestion.');
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: '## Documentation Reminder\n\n' +
+                     'This PR modifies Swift code but doesn\'t appear to include documentation updates.\n' +
+                     'Consider updating documentation if your changes:\n' +
+                     '- Modify public interfaces\n' +
+                     '- Change behavior that users rely on\n' +
+                     '- Add new features\n' +
+                     '- Fix notable bugs\n\n' +
+                     'Good documentation helps other developers understand how to use your code effectively.'
+              });
+            }
   
   # Comment on pull requests with build status
   pr-comment:
