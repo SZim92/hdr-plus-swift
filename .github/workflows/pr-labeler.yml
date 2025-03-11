@@ -16,153 +16,37 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          
-      - name: Check file changes
-        id: file-changes
-        run: |
-          echo "Analyzing PR changes..."
-          
-          # This workflow is triggered only on pull_request events, so we can safely use these contexts
-          # But wrapping in a check to satisfy workflow linting
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # Get changed files
-            PR_BRANCH="${{ github.event.pull_request.head.ref }}"
-            BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
-            
-            echo "PR branch: $PR_BRANCH"
-            echo "Base branch: $BASE_BRANCH"
-            
-            # Get file changes
-            ADDED_FILES=$(git diff --name-only --diff-filter=A origin/$BASE_BRANCH...origin/$PR_BRANCH || echo "")
-            MODIFIED_FILES=$(git diff --name-only --diff-filter=M origin/$BASE_BRANCH...origin/$PR_BRANCH || echo "")
-            ALL_CHANGED_FILES=$(git diff --name-only origin/$BASE_BRANCH...origin/$PR_BRANCH || echo "")
-          else
-            echo "Not running in a pull request context"
-            exit 1
-          fi
-          
-          # Initialize variables for labels
-          HAS_UI_CHANGES=false
-          HAS_CORE_CHANGES=false
-          HAS_TEST_CHANGES=false
-          HAS_DOC_CHANGES=false
-          HAS_CI_CHANGES=false
-          HAS_DEPENDENCIES_CHANGES=false
-          HAS_METAL_CHANGES=false
-          CHANGE_SIZE="size/small"
-          
-          # Set file count for size labeling
-          FILE_COUNT=$(echo "$ALL_CHANGED_FILES" | wc -l)
-          if [ $FILE_COUNT -gt 10 ]; then
-            CHANGE_SIZE="size/medium"
-          fi
-          if [ $FILE_COUNT -gt 30 ]; then
-            CHANGE_SIZE="size/large"
-          fi
-          
-          # Check for specific types of changes
-          echo "$ALL_CHANGED_FILES" | while read file; do
-            if [[ "$file" == *.swift && "$file" == */ui/* || "$file" == */view/* || "$file" == */ViewController* ]]; then
-              HAS_UI_CHANGES=true
-            fi
-            
-            if [[ "$file" == *.swift && "$file" == */core/* || "$file" == */model/* || "$file" == */util/* ]]; then
-              HAS_CORE_CHANGES=true
-            fi
-            
-            if [[ "$file" == */test/* || "$file" == *Test* || "$file" == *test_* ]]; then
-              HAS_TEST_CHANGES=true
-            fi
-            
-            if [[ "$file" == *.md || "$file" == */docs/* || "$file" == *.rst || "$file" == */doc/* ]]; then
-              HAS_DOC_CHANGES=true
-            fi
-            
-            if [[ "$file" == */.github/* || "$file" == *workflow* || "$file" == *CI* || "$file" == *ci* ]]; then
-              HAS_CI_CHANGES=true
-            fi
-            
-            if [[ "$file" == */Podfile* || "$file" == *.podspec || "$file" == */Package.swift || "$file" == */Package.resolved ]]; then
-              HAS_DEPENDENCIES_CHANGES=true
-            fi
-            
-            # Check for Metal-related files
-            if [[ "$file" == *.metal || "$file" == *Metal* || "$file" == *MTL* || "$file" == *.air ]]; then
-              HAS_METAL_CHANGES=true
-            fi
-          done
-          
-          # Create labels array
-          LABELS=($CHANGE_SIZE)
-          
-          if [ "$HAS_UI_CHANGES" = true ]; then
-            LABELS+=("area/ui")
-          fi
-          
-          if [ "$HAS_CORE_CHANGES" = true ]; then
-            LABELS+=("area/core")
-          fi
-          
-          if [ "$HAS_TEST_CHANGES" = true ]; then
-            LABELS+=("area/testing")
-          fi
-          
-          if [ "$HAS_DOC_CHANGES" = true ]; then
-            LABELS+=("area/documentation")
-          fi
-          
-          if [ "$HAS_CI_CHANGES" = true ]; then
-            LABELS+=("area/ci")
-          fi
-          
-          if [ "$HAS_DEPENDENCIES_CHANGES" = true ]; then
-            LABELS+=("area/dependencies")
-          fi
-          
-          if [ "$HAS_METAL_CHANGES" = true ]; then
-            LABELS+=("area/metal")
-          fi
-          
-          # Output labels as JSON array for the next step
-          echo "labels=$(echo "${LABELS[@]}" | jq -R -s -c 'split(" ")')" >> $GITHUB_OUTPUT
-          
-          echo "Detected labels: ${LABELS[@]}"
-      
+      - name: Run PR Labeler
+        id: prlabeler
+        uses: ./.github/actions/pr-labeler
       - name: Apply Labels
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const labels = ${{ steps.file-changes.outputs.labels }};
-            
+            const labels = JSON.parse('${{ steps.prlabeler.outputs.labels }}');
             if (!labels || labels.length === 0) {
               console.log('No labels to apply');
               return;
             }
-            
             console.log(`Applying labels: ${labels.join(', ')}`);
-            
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
               labels: labels
             });
-            
             console.log('Labels applied successfully');
-            
       - name: Add PR Comment with Analysis
         if: success()
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const labels = ${{ steps.file-changes.outputs.labels }};
-            
+            const labels = JSON.parse('${{ steps.prlabeler.outputs.labels }}');
             if (!labels || labels.length === 0) {
               return;
             }
-            
             const labelDescriptions = {
               'area/ui': 'UI changes that might require visual review',
               'area/core': 'Core functionality changes',
@@ -175,21 +59,11 @@ jobs:
               'size/medium': 'Medium sized PR with broader changes',
               'size/large': 'Large PR with significant changes'
             };
-            
-            let body = `## PR Analysis
-            
-            This PR has been automatically labeled based on file changes:
-            
-            `;
-            
+            let body = `## PR Analysis\n\nThis PR has been automatically labeled based on file changes:\n\n`;
             labels.forEach(label => {
               body += `- **${label}**: ${labelDescriptions[label] || 'No description available'}\n`;
             });
-            
-            body += `
-            
-            *Note: This is an automated analysis. Please verify the labels are correct.*`;
-            
+            body += `\n*Note: This is an automated analysis. Please verify the labels are correct.*`;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
