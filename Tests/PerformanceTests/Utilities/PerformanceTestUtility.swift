@@ -1,147 +1,203 @@
 import XCTest
 import Foundation
 
-/// A utility class for performance testing
-class PerformanceTestUtility {
+/// A utility class for performance testing and benchmarking
+public class PerformanceTestUtility {
     
-    /// Performance metric tracking results
-    struct PerformanceMetric {
-        /// The name of the metric
-        let name: String
+    // MARK: - Types
+    
+    /// Represents a performance metric with metadata
+    public struct PerformanceMetric {
+        /// Name of the metric
+        public let name: String
         
-        /// The value of the metric
-        let value: Double
+        /// Value of the metric
+        public let value: Double
         
-        /// The unit of the metric
-        let unit: String
+        /// Unit of measurement
+        public let unit: String
         
-        /// Whether lower values are better (default: true)
-        let lowerIsBetter: Bool
+        /// Whether lower values are better for this metric (true for time, memory, etc.)
+        public let lowerIsBetter: Bool
         
-        /// Baseline value for comparison
-        let baseline: Double?
+        /// The baseline value for comparison, if any
+        public let baseline: Double?
         
-        /// Whether the metric is within acceptable range of baseline
-        var isAcceptable: Bool {
+        /// Acceptable range as a percentage of baseline (0.0-1.0)
+        public let acceptableRange: Double
+        
+        /// Whether the metric is within acceptable range
+        public var isAcceptable: Bool {
             guard let baseline = baseline else { return true }
             
-            let percentChange = ((value - baseline) / baseline) * 100.0
-            let acceptableRange = 10.0 // 10% change is acceptable
-            
-            if lowerIsBetter {
-                return percentChange <= acceptableRange
-            } else {
-                return percentChange >= -acceptableRange
+            let difference = abs(value - baseline) / baseline
+            return difference <= acceptableRange
+        }
+        
+        /// Formatted string representation of the value with unit
+        public var formattedValue: String {
+            switch unit {
+            case "ms":
+                return String(format: "%.2f ms", value)
+            case "s":
+                return String(format: "%.3f s", value)
+            case "MB":
+                return String(format: "%.2f MB", value)
+            case "KB":
+                return String(format: "%.1f KB", value)
+            case "%":
+                return String(format: "%.1f%%", value * 100)
+            default:
+                return String(format: "%.3f %@", value, unit)
             }
         }
         
-        /// String representation of the metric
-        var description: String {
-            let baselineStr = baseline != nil ? " (baseline: \(String(format: "%.2f", baseline!)) \(unit))" : ""
-            return "\(name): \(String(format: "%.2f", value)) \(unit)\(baselineStr)"
+        /// Formatted comparison with baseline
+        public var comparisonString: String {
+            guard let baseline = baseline else {
+                return "No baseline"
+            }
+            
+            let difference = value - baseline
+            let percentChange = (difference / baseline) * 100
+            
+            let changeSymbol = difference > 0 ? "+" : ""
+            let betterWorse = (difference > 0 && lowerIsBetter) || (difference < 0 && !lowerIsBetter) ? "worse" : "better"
+            
+            return "\(changeSymbol)\(String(format: "%.1f%%", percentChange)) \(betterWorse) than baseline"
         }
     }
     
-    /// Performance test result
-    struct TestResult {
-        /// The name of the test
-        let testName: String
+    /// Represents the result of a performance test
+    public struct TestResult {
+        /// Name of the test
+        public let testName: String
         
-        /// Performance metrics collected
-        let metrics: [PerformanceMetric]
+        /// Collected metrics
+        public let metrics: [PerformanceMetric]
         
-        /// Date when the test was run
-        let date: Date
+        /// Date the test was run
+        public let date: Date
         
         /// Environment information
-        let environment: [String: String]
+        public let environment: [String: String]
         
         /// Whether all metrics are acceptable
-        var isAcceptable: Bool {
-            return metrics.allSatisfy { $0.isAcceptable }
+        public var isAcceptable: Bool {
+            metrics.allSatisfy { $0.isAcceptable }
         }
     }
     
-    /// Singleton instance
-    static let shared = PerformanceTestUtility()
+    // MARK: - Properties
     
-    /// Array of test results
-    private(set) var results: [TestResult] = []
+    /// Results collected during the test run
+    private static var results: [TestResult] = []
     
-    /// Directory for storing performance results
-    private let resultDirectory = "PerformanceResults"
+    /// History file for persisting performance metrics
+    private static let historyFilename = "performance_history.csv"
     
-    /// CSV file for storing historical data
-    private let historyFile = "performance_history.csv"
-    
-    /**
-     Measure execution time of a block
-     
-     - Parameters:
-        - name: The name of the measured operation
-        - iterations: Number of iterations to average
-        - block: The block to measure
-     - Returns: A PerformanceMetric for the measured operation
-     */
-    func measureExecutionTime(name: String, iterations: Int = 10, _ block: () -> Void) -> PerformanceMetric {
-        var times: [TimeInterval] = []
+    /// Directory where results are stored
+    private static var resultsDirectory: URL {
+        let fileManager = FileManager.default
+        let tmpDir = NSTemporaryDirectory()
+        let dirPath = tmpDir + "/PerformanceResults"
         
-        // Warm-up run (not counted)
+        // Check if running in CI
+        if let ciDir = ProcessInfo.processInfo.environment["CI_PERFORMANCE_RESULTS_DIR"] {
+            return URL(fileURLWithPath: ciDir)
+        }
+        
+        // Try to find a better location if available
+        if let buildDir = ProcessInfo.processInfo.environment["BUILT_PRODUCTS_DIR"] {
+            return URL(fileURLWithPath: buildDir).appendingPathComponent("PerformanceResults")
+        }
+        
+        return URL(fileURLWithPath: dirPath)
+    }
+    
+    // MARK: - Public Methods
+    
+    /// Measures the execution time of a block
+    ///
+    /// - Parameters:
+    ///   - name: Name of the metric
+    ///   - baselineValue: Optional baseline for comparison
+    ///   - acceptableRange: Acceptable deviation from baseline (percentage, 0.0-1.0)
+    ///   - block: The block to measure
+    /// - Returns: A performance metric with the execution time
+    public static func measureExecutionTime(
+        name: String,
+        baselineValue: Double? = nil,
+        acceptableRange: Double = 0.1, // 10% deviation allowed by default
+        block: () -> Void
+    ) -> PerformanceMetric {
+        let start = CFAbsoluteTimeGetCurrent()
+        
         block()
         
-        // Measured runs
-        for _ in 0..<iterations {
-            let start = Date()
-            block()
-            let end = Date()
-            times.append(end.timeIntervalSince(start))
-        }
+        let end = CFAbsoluteTimeGetCurrent()
+        let timeInSeconds = end - start
+        let timeInMs = timeInSeconds * 1000
         
-        // Calculate average time in milliseconds
-        let averageTime = times.reduce(0.0, +) / Double(times.count) * 1000.0
-        
-        // Get baseline if available
-        let baseline = getBaseline(for: name)
-        
-        return PerformanceMetric(name: name, value: averageTime, unit: "ms", lowerIsBetter: true, baseline: baseline)
+        return PerformanceMetric(
+            name: name,
+            value: timeInMs,
+            unit: "ms",
+            lowerIsBetter: true,
+            baseline: baselineValue,
+            acceptableRange: acceptableRange
+        )
     }
     
-    /**
-     Measure memory usage of a block
-     
-     - Parameters:
-        - name: The name of the measured operation
-        - block: The block to measure
-     - Returns: A PerformanceMetric for memory usage
-     */
-    func measureMemoryUsage(name: String, _ block: () -> Void) -> PerformanceMetric {
-        // Get initial memory usage
-        let initialUsage = getCurrentMemoryUsage()
+    /// Measures the memory usage of a block
+    ///
+    /// - Parameters:
+    ///   - name: Name of the metric
+    ///   - baselineValue: Optional baseline for comparison
+    ///   - acceptableRange: Acceptable deviation from baseline (percentage, 0.0-1.0)
+    ///   - block: The block to measure
+    /// - Returns: A performance metric with the memory usage
+    public static func measureMemoryUsage(
+        name: String,
+        baselineValue: Double? = nil,
+        acceptableRange: Double = 0.15, // 15% deviation allowed by default
+        block: () -> Void
+    ) -> PerformanceMetric {
+        // Get initial memory info
+        let initialMemory = reportMemoryUsage()
         
         // Run the block
         block()
         
-        // Get final memory usage
-        let finalUsage = getCurrentMemoryUsage()
+        // Get final memory info
+        let finalMemory = reportMemoryUsage()
         
-        // Calculate the difference in megabytes
-        let usageMB = Double(finalUsage - initialUsage) / 1024.0 / 1024.0
+        // Calculate difference
+        let memoryUsed = finalMemory - initialMemory
+        let memoryInMB = Double(memoryUsed) / (1024 * 1024)
         
-        // Get baseline if available
-        let baseline = getBaseline(for: "\(name)_memory")
-        
-        return PerformanceMetric(name: "\(name) Memory", value: usageMB, unit: "MB", lowerIsBetter: true, baseline: baseline)
+        return PerformanceMetric(
+            name: name,
+            value: memoryInMB,
+            unit: "MB",
+            lowerIsBetter: true,
+            baseline: baselineValue,
+            acceptableRange: acceptableRange
+        )
     }
     
-    /**
-     Record a test result
-     
-     - Parameters:
-        - testName: The name of the test
-        - metrics: The metrics to record
-     */
-    func recordResult(testName: String, metrics: [PerformanceMetric]) {
+    /// Records the result of a performance test
+    ///
+    /// - Parameters:
+    ///   - testName: Name of the test
+    ///   - metrics: Array of metrics collected
+    /// - Returns: The test result
+    @discardableResult
+    public static func recordResult(testName: String, metrics: [PerformanceMetric]) -> TestResult {
+        // Collect environment info
         let environment = collectEnvironmentInfo()
+        
+        // Create result
         let result = TestResult(
             testName: testName,
             metrics: metrics,
@@ -149,215 +205,373 @@ class PerformanceTestUtility {
             environment: environment
         )
         
+        // Save result
         results.append(result)
-        saveResult(result)
+        
+        // Save to history file
+        saveResultToHistory(result)
+        
+        return result
     }
     
-    /**
-     Report performance test results
-     
-     - Parameter testCase: The XCTestCase instance
-     */
-    func reportResults(in testCase: XCTestCase) {
-        for result in results {
+    /// Reports the results of performance tests
+    ///
+    /// - Parameters:
+    ///   - testCase: The test case to report for
+    ///   - metrics: Array of metrics to report
+    ///   - failIfUnacceptable: Whether to fail the test if metrics are unacceptable
+    public static func reportResults(
+        in testCase: XCTestCase,
+        metrics: [PerformanceMetric]? = nil,
+        failIfUnacceptable: Bool = true
+    ) {
+        // If specific metrics are provided, use those, otherwise use last result
+        let metricsToReport: [PerformanceMetric]
+        
+        if let metrics = metrics {
+            metricsToReport = metrics
+        } else if let lastResult = results.last {
+            metricsToReport = lastResult.metrics
+        } else {
+            return // Nothing to report
+        }
+        
+        // Report each metric
+        for metric in metricsToReport {
+            // Format basic information
+            let metricInfo = "\(metric.name): \(metric.formattedValue)"
+            
+            // Add baseline comparison if available
+            let comparison = metric.baseline != nil ? " (\(metric.comparisonString))" : ""
+            
+            // Decide if this is passing or failing
+            let passed = !failIfUnacceptable || metric.isAcceptable
+            
+            if passed {
+                print("✅ \(metricInfo)\(comparison)")
+                XCTAssertTrue(true, "\(metricInfo)\(comparison)")
+            } else {
+                print("❌ \(metricInfo)\(comparison) - Outside acceptable range")
+                XCTFail("\(metricInfo)\(comparison) - Outside acceptable range")
+            }
+        }
+    }
+
+    /// Measures the performance of a block with multiple iterations
+    ///
+    /// - Parameters:
+    ///   - name: Name of the benchmark
+    ///   - iterations: Number of iterations to run
+    ///   - setup: Optional setup closure run once before measurements
+    ///   - block: The block to measure
+    public static func measurePerformance(
+        name: String,
+        iterations: Int = 10,
+        setup: (() -> Void)? = nil,
+        block: @escaping () -> Void
+    ) {
+        // Run optional setup
+        setup?()
+        
+        var times = [Double]()
+        times.reserveCapacity(iterations)
+        
+        // Warmup run (to minimize JIT compilation effects)
+        block()
+        
+        // Actual measured runs
+        for _ in 1...iterations {
+            let start = CFAbsoluteTimeGetCurrent()
+            block()
+            let end = CFAbsoluteTimeGetCurrent()
+            times.append((end - start) * 1000) // Convert to ms
+        }
+        
+        // Calculate statistics
+        let totalTime = times.reduce(0, +)
+        let averageTime = totalTime / Double(times.count)
+        
+        // Sort times for percentile calculations
+        let sortedTimes = times.sorted()
+        let medianTime = calculateMedian(sortedTimes)
+        let p95Time = calculatePercentile(sortedTimes, percentile: 0.95)
+        
+        // Create metrics
+        let metrics = [
+            PerformanceMetric(
+                name: "\(name) (avg)",
+                value: averageTime,
+                unit: "ms",
+                lowerIsBetter: true,
+                baseline: getBaseline(for: "\(name) (avg)"),
+                acceptableRange: 0.1
+            ),
+            PerformanceMetric(
+                name: "\(name) (median)",
+                value: medianTime,
+                unit: "ms",
+                lowerIsBetter: true,
+                baseline: getBaseline(for: "\(name) (median)"),
+                acceptableRange: 0.1
+            ),
+            PerformanceMetric(
+                name: "\(name) (p95)",
+                value: p95Time,
+                unit: "ms",
+                lowerIsBetter: true,
+                baseline: getBaseline(for: "\(name) (p95)"),
+                acceptableRange: 0.15
+            )
+        ]
+        
+        // Record the result
+        recordResult(testName: name, metrics: metrics)
+    }
+    
+    // MARK: - Private Helper Methods
+    
+    /// Gets the baseline value for a metric from history
+    private static func getBaseline(for metricName: String) -> Double? {
+        // Try to load from environment (useful in CI)
+        if let baselineEnv = ProcessInfo.processInfo.environment["PERF_BASELINE_\(metricName.replacingOccurrences(of: " ", with: "_"))"],
+           let baseline = Double(baselineEnv) {
+            return baseline
+        }
+        
+        // Otherwise try to load from history file
+        let historyURL = resultsDirectory.appendingPathComponent(historyFilename)
+        
+        guard FileManager.default.fileExists(atPath: historyURL.path),
+              let csv = try? String(contentsOf: historyURL, encoding: .utf8) else {
+            return nil
+        }
+        
+        let rows = csv.split(separator: "\n").map { String($0) }
+        guard rows.count > 1 else { return nil }
+        
+        // Parse header to find column index for this metric
+        let header = rows[0].split(separator: ",").map { String($0) }
+        guard let metricIndex = header.firstIndex(of: metricName) else { return nil }
+        
+        // Get values from last 5 rows (or fewer if not available)
+        let startRow = max(1, rows.count - 5)
+        var values = [Double]()
+        
+        for i in startRow..<rows.count {
+            let columns = rows[i].split(separator: ",").map { String($0) }
+            guard columns.count > metricIndex, let value = Double(columns[metricIndex]) else { continue }
+            values.append(value)
+        }
+        
+        // Return median of values as baseline
+        return values.isEmpty ? nil : calculateMedian(values.sorted())
+    }
+    
+    /// Saves a test result to the history file
+    private static func saveResultToHistory(_ result: TestResult) {
+        ensureDirectoryExists()
+        
+        let historyURL = resultsDirectory.appendingPathComponent(historyFilename)
+        let fileManager = FileManager.default
+        
+        // Create or append to history file
+        if !fileManager.fileExists(atPath: historyURL.path) {
+            // Create new file with header
+            var header = "Date,Environment"
             for metric in result.metrics {
-                let acceptableStr = metric.isAcceptable ? "✅" : "❌"
-                print("\(result.testName) - \(metric.description) \(acceptableStr)")
-                
-                if !metric.isAcceptable, let baseline = metric.baseline {
-                    let percentChange = ((metric.value - baseline) / baseline) * 100.0
-                    let changeStr = String(format: "%.1f%%", abs(percentChange))
-                    let direction = percentChange > 0 ? "increased" : "decreased"
-                    let impact = metric.lowerIsBetter == (percentChange > 0) ? "worse" : "better"
-                    
-                    let message = "\(metric.name) has \(direction) by \(changeStr) (\(impact) than baseline)"
-                    XCTFail(message)
-                }
-            }
-        }
-    }
-    
-    /**
-     Get baseline value for a metric
-     
-     - Parameter name: The name of the metric
-     - Returns: The baseline value, or nil if no baseline exists
-     */
-    private func getBaseline(for name: String) -> Double? {
-        // Check if history file exists
-        let fileManager = FileManager.default
-        ensureDirectoryExists(resultDirectory)
-        
-        let historyPath = "\(resultDirectory)/\(historyFile)"
-        guard fileManager.fileExists(atPath: historyPath) else {
-            return nil
-        }
-        
-        do {
-            let data = try String(contentsOfFile: historyPath, encoding: .utf8)
-            let lines = data.components(separatedBy: .newlines)
-            
-            // Parse CSV header to find column for the metric
-            guard let header = lines.first else { return nil }
-            let columns = header.components(separatedBy: ",")
-            
-            guard let nameIndex = columns.firstIndex(of: "Metric") else { return nil }
-            guard let valueIndex = columns.firstIndex(of: "Value") else { return nil }
-            
-            // Find the most recent value for the metric
-            for line in lines.dropFirst().reversed() {
-                let parts = line.components(separatedBy: ",")
-                guard parts.count > max(nameIndex, valueIndex) else { continue }
-                
-                if parts[nameIndex] == name, let value = Double(parts[valueIndex]) {
-                    return value
-                }
+                header += ",\(metric.name)"
             }
             
-            return nil
-        } catch {
-            print("Error reading performance history: \(error)")
-            return nil
-        }
-    }
-    
-    /**
-     Save a test result to the history file
-     
-     - Parameter result: The test result to save
-     */
-    private func saveResult(_ result: TestResult) {
-        ensureDirectoryExists(resultDirectory)
-        
-        let historyPath = "\(resultDirectory)/\(historyFile)"
-        let fileManager = FileManager.default
-        
-        // Create the file with header if it doesn't exist
-        if !fileManager.fileExists(atPath: historyPath) {
-            let header = "Date,Test,Metric,Value,Unit,Platform,Swift Version\n"
-            try? header.write(toFile: historyPath, atomically: true, encoding: .utf8)
+            try? header.write(to: historyURL, atomically: true, encoding: .utf8)
         }
         
-        // Get existing content
-        var content = (try? String(contentsOfFile: historyPath, encoding: .utf8)) ?? ""
-        
-        // Format date
+        // Format row to append
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        let dateStr = dateFormatter.string(from: result.date)
+        let dateString = dateFormatter.string(from: result.date)
         
-        // Add new results
-        for metric in result.metrics {
-            let platform = result.environment["platform"] ?? "unknown"
-            let swiftVersion = result.environment["swiftVersion"] ?? "unknown"
+        let envString = "Swift-\(result.environment["swift_version"] ?? "unknown")"
+        
+        var row = "\n\(dateString),\(envString)"
+        
+        // Get existing header to ensure columns match
+        if let existingContent = try? String(contentsOf: historyURL, encoding: .utf8),
+           let headerLine = existingContent.split(separator: "\n").first {
             
-            let line = "\(dateStr),\(result.testName),\(metric.name),\(metric.value),\(metric.unit),\(platform),\(swiftVersion)\n"
-            content.append(line)
+            let headerColumns = String(headerLine).split(separator: ",").map { String($0) }
+            
+            // Skip Date and Environment
+            for i in 2..<headerColumns.count {
+                let metricName = headerColumns[i]
+                if let metric = result.metrics.first(where: { $0.name == metricName }) {
+                    row += ",\(metric.value)"
+                } else {
+                    row += "," // Empty value for missing metric
+                }
+            }
+        } else {
+            // Just append all metrics in order
+            for metric in result.metrics {
+                row += ",\(metric.value)"
+            }
         }
         
-        // Write updated content
-        try? content.write(toFile: historyPath, atomically: true, encoding: .utf8)
+        // Append to file
+        if let fileHandle = FileHandle(forWritingAtPath: historyURL.path) {
+            fileHandle.seekToEndOfFile()
+            if let data = row.data(using: .utf8) {
+                fileHandle.write(data)
+            }
+            fileHandle.closeFile()
+        }
     }
     
-    /**
-     Collect environment information
-     
-     - Returns: Dictionary of environment information
-     */
-    private func collectEnvironmentInfo() -> [String: String] {
-        var info: [String: String] = [:]
+    /// Collects environment information
+    private static func collectEnvironmentInfo() -> [String: String] {
+        var info = [String: String]()
         
-        // Get platform
-        #if os(macOS)
-        info["platform"] = "macOS"
-        info["osVersion"] = ProcessInfo.processInfo.operatingSystemVersionString
-        #elseif os(iOS)
-        info["platform"] = "iOS"
-        #endif
+        // Swift version
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["swift", "--version"]
         
-        // Get Swift version
-        #if swift(>=5.9)
-        info["swiftVersion"] = "5.9+"
-        #elseif swift(>=5.8)
-        info["swiftVersion"] = "5.8"
-        #elseif swift(>=5.7)
-        info["swiftVersion"] = "5.7"
-        #else
-        info["swiftVersion"] = "5.6 or earlier"
-        #endif
+        let pipe = Pipe()
+        process.standardOutput = pipe
         
-        // Get CPU info
-        let processInfo = ProcessInfo.processInfo
-        info["processorCount"] = "\(processInfo.processorCount)"
-        info["physicalMemory"] = "\(processInfo.physicalMemory / 1024 / 1024) MB"
+        do {
+            try process.run()
+            process.waitUntilExit()
+            
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let output = String(data: data, encoding: .utf8) {
+                // Extract Swift version
+                if let range = output.range(of: "Swift version ([0-9\\.]+)", options: .regularExpression) {
+                    let versionFull = String(output[range])
+                    if let versionNumberRange = versionFull.range(of: "[0-9\\.]+", options: .regularExpression) {
+                        info["swift_version"] = String(versionFull[versionNumberRange])
+                    } else {
+                        info["swift_version"] = "unknown"
+                    }
+                } else {
+                    info["swift_version"] = "unknown"
+                }
+            }
+        } catch {
+            info["swift_version"] = "unknown"
+        }
+        
+        // OS version
+        info["os"] = ProcessInfo.processInfo.operatingSystemVersionString
+        
+        // Device model
+        if let model = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] {
+            info["device"] = "Simulator-\(model)"
+        } else {
+            var size: Int = 0
+            var hwModel = [CChar](repeating: 0, count: 100)
+            var mib = [CTL_HW, HW_MODEL]
+            
+            size = hwModel.count
+            let result = sysctl(&mib, u_int(mib.count), &hwModel, &size, nil, 0)
+            if result == 0 {
+                info["device"] = String(cString: hwModel)
+            } else {
+                info["device"] = "unknown"
+            }
+        }
+        
+        // CI information
+        if let ciSystem = ProcessInfo.processInfo.environment["CI"] {
+            info["ci"] = ciSystem
+        }
         
         return info
     }
     
-    /**
-     Get current memory usage
-     
-     - Returns: Current memory usage in bytes
-     */
-    private func getCurrentMemoryUsage() -> UInt64 {
-        var taskInfo = task_vm_info_data_t()
-        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info>.size) / 4
-        let result: kern_return_t = withUnsafeMutablePointer(to: &taskInfo) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
-                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
-            }
-        }
-        
-        if result == KERN_SUCCESS {
-            return taskInfo.phys_footprint
-        }
-        
-        return 0
-    }
-    
-    /**
-     Ensure a directory exists, creating it if necessary
-     
-     - Parameter path: The directory path
-     */
-    private func ensureDirectoryExists(_ path: String) {
+    /// Ensures the results directory exists
+    private static func ensureDirectoryExists() {
         let fileManager = FileManager.default
         
-        if !fileManager.fileExists(atPath: path) {
+        if !fileManager.fileExists(atPath: resultsDirectory.path) {
             do {
-                try fileManager.createDirectory(atPath: path, withIntermediateDirectories: true, attributes: nil)
+                try fileManager.createDirectory(at: resultsDirectory, withIntermediateDirectories: true)
             } catch {
-                print("Error creating directory: \(error)")
+                print("Error creating results directory: \(error)")
             }
         }
+    }
+    
+    /// Reports the current memory usage in bytes
+    private static func reportMemoryUsage() -> UInt64 {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout.size(ofValue: info) / MemoryLayout<integer_t>.size)
+        
+        let result = withUnsafeMutablePointer(to: &info) { infoPtr in
+            infoPtr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { intPtr in
+                task_info(
+                    mach_task_self_,
+                    task_flavor_t(MACH_TASK_BASIC_INFO),
+                    intPtr,
+                    &count
+                )
+            }
+        }
+        
+        guard result == KERN_SUCCESS else {
+            return 0
+        }
+        
+        return info.resident_size
+    }
+    
+    /// Calculates the median value of a sorted array
+    private static func calculateMedian(_ sortedArray: [Double]) -> Double {
+        guard !sortedArray.isEmpty else { return 0 }
+        
+        if sortedArray.count % 2 == 0 {
+            let midIndex = sortedArray.count / 2
+            return (sortedArray[midIndex-1] + sortedArray[midIndex]) / 2
+        } else {
+            return sortedArray[sortedArray.count / 2]
+        }
+    }
+    
+    /// Calculates a percentile value from a sorted array
+    private static func calculatePercentile(_ sortedArray: [Double], percentile: Double) -> Double {
+        guard !sortedArray.isEmpty else { return 0 }
+        
+        let index = Int((Double(sortedArray.count) * percentile).rounded(.down))
+        return sortedArray[min(max(0, index), sortedArray.count - 1)]
     }
 }
 
 // MARK: - XCTestCase Extension
 
 extension XCTestCase {
-    /**
-     Measure performance with automatic reporting
-     
-     - Parameters:
-        - name: The name of the operation
-        - iterations: Number of iterations to average
-        - block: The block to measure
-     */
-    func measurePerformance(name: String, iterations: Int = 10, _ block: () -> Void) {
-        let executionMetric = PerformanceTestUtility.shared.measureExecutionTime(name: name, iterations: iterations, block)
-        let memoryMetric = PerformanceTestUtility.shared.measureMemoryUsage(name: name, block)
-        
-        PerformanceTestUtility.shared.recordResult(
-            testName: self.name, 
-            metrics: [executionMetric, memoryMetric]
+    
+    /// Measures and reports performance of a block
+    ///
+    /// - Parameters:
+    ///   - name: Name of the benchmark
+    ///   - iterations: Number of iterations to run
+    ///   - setup: Optional setup closure run once before measurements
+    ///   - block: The block to measure
+    public func measurePerformance(
+        name: String,
+        iterations: Int = 10,
+        setup: (() -> Void)? = nil,
+        block: @escaping () -> Void
+    ) {
+        PerformanceTestUtility.measurePerformance(
+            name: name,
+            iterations: iterations,
+            setup: setup,
+            block: block
         )
     }
     
-    /**
-     Report all performance metrics from the test case
-     */
-    func reportPerformanceResults() {
-        PerformanceTestUtility.shared.reportResults(in: self)
+    /// Reports all performance results collected during this test
+    public func reportPerformanceResults() {
+        PerformanceTestUtility.reportResults(in: self)
     }
 } 

@@ -3,15 +3,15 @@ import Metal
 import Foundation
 
 /// A utility class for testing Metal shaders
-class MetalTestUtility {
+public class MetalTestUtility {
     
     /// Shared device instance
-    static let device = MTLCreateSystemDefaultDevice()
+    public static let device = MTLCreateSystemDefaultDevice()
     
     /// Shared command queue
-    static var commandQueue: MTLCommandQueue? {
+    private static var commandQueue: MTLCommandQueue? = {
         return device?.makeCommandQueue()
-    }
+    }()
     
     /// Metal testing not available error
     static let metalNotAvailableError = "Metal not available on this device"
@@ -21,7 +21,7 @@ class MetalTestUtility {
      
      - Returns: True if Metal is available, false otherwise
      */
-    static func isMetalAvailable() -> Bool {
+    public static var isMetalAvailable: Bool {
         return device != nil
     }
     
@@ -31,7 +31,7 @@ class MetalTestUtility {
      - Parameter testCase: The XCTestCase instance
      */
     static func skipIfMetalNotAvailable(testCase: XCTestCase) {
-        guard isMetalAvailable() else {
+        guard isMetalAvailable else {
             testCase.continueAfterFailure = true
             XCTFail(metalNotAvailableError)
             testCase.throwSkip("Skipping test: \(metalNotAvailableError)")
