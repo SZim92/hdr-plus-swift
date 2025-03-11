@@ -88,4 +88,19 @@ jobs:
 1. **Maintainability**: Isolating components makes them easier to update
 2. **Consistency**: Using shared workflows ensures consistent behavior
 3. **Flexibility**: Configuration-driven approach makes changes easier
-4. **Reliability**: Reusable components are battle-tested across workflows 
+4. **Reliability**: Reusable components are battle-tested across workflows
+
+## Features
+
+This section demonstrates proper Markdown formatting:
+
+- Items in lists should have blank lines before the first item 
+- And after the last item in the list
+
+Using proper formatting ensures:
+
+1. Better readability
+2. Consistent styling
+3. Passing linter checks
+
+No trailing spaces at the end of lines. 
