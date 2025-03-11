@@ -129,33 +129,44 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const { data: files } = await github.rest.pulls.listFiles({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number
-            });
+            // Always set defaults for all outputs to ensure they exist
+            core.setOutput('has_swift_files', 'false');
+            core.setOutput('has_test_files', 'false');
+            core.setOutput('has_doc_files', 'false');
             
-            const swiftFiles = files.filter(file => file.filename.endsWith('.swift'));
-            const hasSwiftFiles = swiftFiles.length > 0;
-            
-            core.setOutput('has_swift_files', hasSwiftFiles ? 'true' : 'false');
-            
-            // Check if any tests were modified
-            const testFiles = files.filter(file => file.filename.includes('test') || file.filename.includes('Test'));
-            core.setOutput('has_test_files', testFiles.length > 0 ? 'true' : 'false');
-            
-            // Check if documentation was updated
-            const docFiles = files.filter(file => 
-              file.filename.endsWith('.md') || 
-              file.filename.includes('doc') || 
-              file.filename.includes('Doc')
-            );
-            core.setOutput('has_doc_files', docFiles.length > 0 ? 'true' : 'false');
-            
-            return {files: files.map(f => f.filename)};
+            // Only process PR files if we're in a pull request context
+            if (context.eventName === 'pull_request') {
+              const { data: files } = await github.rest.pulls.listFiles({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number
+              });
+              
+              const swiftFiles = files.filter(file => file.filename.endsWith('.swift'));
+              const hasSwiftFiles = swiftFiles.length > 0;
+              
+              core.setOutput('has_swift_files', hasSwiftFiles ? 'true' : 'false');
+              
+              // Check if any tests were modified
+              const testFiles = files.filter(file => file.filename.includes('test') || file.filename.includes('Test'));
+              core.setOutput('has_test_files', testFiles.length > 0 ? 'true' : 'false');
+              
+              // Check if documentation was updated
+              const docFiles = files.filter(file => 
+                file.filename.endsWith('.md') || 
+                file.filename.includes('doc') || 
+                file.filename.includes('Doc')
+              );
+              core.setOutput('has_doc_files', docFiles.length > 0 ? 'true' : 'false');
+              
+              return {files: files.map(f => f.filename)};
+            } else {
+              console.log('Not running in pull request context - using default output values');
+              return {files: []};
+            }
       
       - name: Provide test suggestions
-        if: ${{ steps.pr_files.outputs.has_swift_files == 'true' && steps.pr_files.outputs.has_test_files == 'false' }}
+        if: ${{ github.event_name == 'pull_request' && steps.pr_files.outputs.has_swift_files == 'true' && steps.pr_files.outputs.has_test_files == 'false' }}
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -175,7 +186,7 @@ jobs:
             });
       
       - name: Provide documentation suggestions
-        if: ${{ steps.pr_files.outputs.has_swift_files == 'true' && steps.pr_files.outputs.has_doc_files == 'false' }}
+        if: ${{ github.event_name == 'pull_request' && steps.pr_files.outputs.has_swift_files == 'true' && steps.pr_files.outputs.has_doc_files == 'false' }}
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
