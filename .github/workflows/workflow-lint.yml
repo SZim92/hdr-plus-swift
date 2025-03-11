@@ -1,0 +1,65 @@
+name: Workflow Linting
+
+on:
+  push:
+    paths:
+      - '.github/workflows/**'
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+jobs:
+  actionlint:
+    name: Lint GitHub Actions Workflows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install actionlint
+        run: |
+          bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Run actionlint
+        id: actionlint
+        run: actionlint -color
+        continue-on-error: true
+
+      - name: Check actionlint result
+        if: steps.actionlint.outcome == 'failure'
+        run: |
+          echo "::error::Workflow lint check failed. See the job output for details."
+          echo "Common issues include context access notation and invalid expressions."
+          exit 1
+
+  workflow-checks:
+    name: Additional Workflow Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check condition syntax
+        run: |
+          echo "## Workflow Syntax Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Checking for missing expression syntax in conditions" >> $GITHUB_STEP_SUMMARY
+          # Look for if conditions that reference steps or env without proper expressions
+          SYNTAX_ISSUES=$(grep -r --include="*.yml" "if: steps\." .github/workflows/ | grep -v "if: \$" || echo "No issues found")
+          echo "Step references in conditions: " >> $GITHUB_STEP_SUMMARY
+          echo "```" >> $GITHUB_STEP_SUMMARY
+          echo "$SYNTAX_ISSUES" >> $GITHUB_STEP_SUMMARY
+          echo "```" >> $GITHUB_STEP_SUMMARY
+          
+          ENV_ISSUES=$(grep -r --include="*.yml" "if: env\." .github/workflows/ | grep -v "if: \$" || echo "No issues found")
+          echo "Environment variable references in conditions: " >> $GITHUB_STEP_SUMMARY
+          echo "```" >> $GITHUB_STEP_SUMMARY
+          echo "$ENV_ISSUES" >> $GITHUB_STEP_SUMMARY
+          echo "```" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "$SYNTAX_ISSUES" != *"No issues found"* ]] || [[ "$ENV_ISSUES" != *"No issues found"* ]]; then
+            echo "::warning::Found potential workflow syntax issues. Check workflow summary for details."
+          fi 

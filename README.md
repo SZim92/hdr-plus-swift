@@ -10,7 +10,6 @@ HDR+ Swift is a Swift implementation of Google's HDR+ burst photography algorith
 
 ## Features
 
-
 - Multi-frame burst photography processing
 - Automatic alignment of burst frames
 - Temporal merging for noise reduction
@@ -28,7 +27,6 @@ open burstphoto.xcodeproj
 ```
 
 ## Requirements
-
 
 - macOS 13.0+ (Ventura)
 - Xcode 15.0+
