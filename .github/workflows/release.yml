@@ -73,9 +73,10 @@ jobs:
           fi
       
       - name: Set up Swift environment
-        uses: ./.github/actions/optimized-swift-setup
-        with:
-          cache-name: 'release'
+        run: |
+          # Use our standardized Swift environment setup script
+          chmod +x .github/scripts/setup-swift-env.sh
+          ./.github/scripts/setup-swift-env.sh 'release' 'false' 'false'
           
       - name: Generate changelog
         id: changelog

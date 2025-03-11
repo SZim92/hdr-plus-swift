@@ -25,281 +25,136 @@ on:
       - 'burstphoto.xcodeproj/**'
       - '.github/workflows/cross-platform.yml'
 
+# Prevent concurrent runs on the same branch/PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  matrix-setup:
-    name: Set up test matrix
+  # Use the centralized configuration from our shared components
+  config:
+    name: Setup Test Matrix
     runs-on: ubuntu-latest
     outputs:
-      platforms: ${{ steps.set-matrix.outputs.platforms }}
+      platforms: ${{ steps.matrix-setup.outputs.platforms }}
     
     steps:
-      - name: Check out repository
+      - name: Checkout code
         uses: actions/checkout@v4
-      
-      - name: Set up matrix with compact JSON output
-        id: set-matrix
+        
+      - name: Load CI configuration
+        id: matrix-setup
         run: |
-          PLATFORM_FILTER="${{ github.event.inputs.platform_filter }}"
-          
-          # Ensure jq is available
+          # Check if jq is installed, install if needed
           if ! command -v jq &>/dev/null; then
-            echo "Warning: jq is not installed. Using fallback method."
-            FALLBACK=true
-          else
-            FALLBACK=false
+            echo "Installing jq..."
+            apt-get update && apt-get install -y jq
           fi
           
-          # Define the supported platforms (Apple platforms only)
-          PLATFORM_DEFINITIONS=$(cat <<'EOF'
-          [
-            {"os": "macos-14", "xcode": "15.2", "displayName": "macOS Sonoma (Apple Silicon)"},
-            {"os": "macos-13", "xcode": "15.0", "displayName": "macOS Ventura (Intel)"}
-          ]
-          EOF
-          )
-          
-          if [ "$FALLBACK" = "false" ]; then
-            if [ -z "$PLATFORM_FILTER" ] || [ "$PLATFORM_FILTER" = "all" ]; then
-              PLATFORMS="$PLATFORM_DEFINITIONS"
-            else
-              IFS=',' read -ra FILTER_ARRAY <<< "$PLATFORM_FILTER"
-              JQ_FILTER="["
-              for platform in "${FILTER_ARRAY[@]}"; do
-                case "$platform" in
-                  macos-14|sonoma)
-                    JQ_FILTER="$JQ_FILTER .[] | select(.os == \"macos-14\"),"
-                    ;;
-                  macos-13|ventura)
-                    JQ_FILTER="$JQ_FILTER .[] | select(.os == \"macos-13\"),"
-                    ;;
-                  *)
-                    ;;
-                esac
-              done
-              JQ_FILTER="${JQ_FILTER%,}]"
-              PLATFORMS=$(echo "$PLATFORM_DEFINITIONS" | jq "$JQ_FILTER")
-              if [ "$(echo "$PLATFORMS" | jq 'length')" -eq 0 ]; then
-                PLATFORMS="$PLATFORM_DEFINITIONS"
-              fi
-            fi
+          # Get the list of platforms from config file
+          if [ -f ".github/workflows/shared/ci-config.yml" ]; then
+            # Parse YAML with yq or another tool if available
+            # For now, using hardcoded values or manual parsing
             
-            # Validate JSON and ensure it's compact
-            if ! echo "$PLATFORMS" | jq empty; then
-              echo "Error: Generated platforms JSON is invalid."
-              echo "JSON: $PLATFORMS"
-              exit 1
-            fi
+            # Default platforms (if file parsing fails)
+            PLATFORM_DEFINITIONS=$(cat <<'EOF'
+            [
+              {"name": "macOS Sonoma (Apple Silicon)", "runner": "macos-14", "xcode": "15.2", "architecture": "arm64"},
+              {"name": "macOS Ventura (Intel)", "runner": "macos-13", "xcode": "15.0", "architecture": "x86_64"}
+            ]
+            EOF
+            )
           else
-            # Fallback: use all platforms
-            PLATFORMS="$PLATFORM_DEFINITIONS"
+            # Fallback platforms
+            PLATFORM_DEFINITIONS=$(cat <<'EOF'
+            [
+              {"name": "macOS Sonoma (Apple Silicon)", "runner": "macos-14", "xcode": "15.2", "architecture": "arm64"},
+              {"name": "macOS Ventura (Intel)", "runner": "macos-13", "xcode": "15.0", "architecture": "x86_64"}
+            ]
+            EOF
+            )
           fi
           
-          echo "Generated platforms JSON:"
+          # Apply platform filter if specified
+          PLATFORM_FILTER="${{ github.event.inputs.platform_filter }}"
+          if [ -n "$PLATFORM_FILTER" ] && [ "$PLATFORM_FILTER" != "all" ]; then
+            # Filter platforms based on input
+            FILTERED_PLATFORMS="["
+            IFS=',' read -ra FILTER_LIST <<< "$PLATFORM_FILTER"
+            
+            for platform in "${FILTER_LIST[@]}"; do
+              case "$platform" in
+                macos-14|sonoma)
+                  # Extract the macOS 14 entry from PLATFORM_DEFINITIONS
+                  echo "Including macOS Sonoma..."
+                  FILTERED_PLATFORMS+=$(echo "$PLATFORM_DEFINITIONS" | jq '.[] | select(.runner == "macos-14")')
+                  FILTERED_PLATFORMS+=","
+                  ;;
+                macos-13|ventura)
+                  # Extract the macOS 13 entry from PLATFORM_DEFINITIONS
+                  echo "Including macOS Ventura..."
+                  FILTERED_PLATFORMS+=$(echo "$PLATFORM_DEFINITIONS" | jq '.[] | select(.runner == "macos-13")')
+                  FILTERED_PLATFORMS+=","
+                  ;;
+                *)
+                  echo "Ignoring unknown platform: $platform"
+                  ;;
+              esac
+            done
+            
+            # Remove trailing comma and close array
+            FILTERED_PLATFORMS="${FILTERED_PLATFORMS%,}]"
+            
+            # Use filtered platforms if not empty, otherwise use all
+            if [ "$FILTERED_PLATFORMS" != "[]" ]; then
+              PLATFORMS=$FILTERED_PLATFORMS
+            else
+              echo "No valid platforms specified, using all platforms"
+              PLATFORMS=$PLATFORM_DEFINITIONS
+            fi
+          else
+            # Use all platforms
+            PLATFORMS=$PLATFORM_DEFINITIONS
+          fi
+          
+          echo "Generated platform configuration:"
           echo "$PLATFORMS" | jq .
           
-          # Output the compact JSON (single-line)
+          # Output as compact JSON
           echo "platforms=$(echo "$PLATFORMS" | jq -c .)" >> $GITHUB_OUTPUT
-        shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
-
-  test-apple-platforms:
-    name: Test on ${{ matrix.platform.displayName }}
-    needs: matrix-setup
-    runs-on: ${{ matrix.platform.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: ${{ fromJson(needs.matrix-setup.outputs.platforms) }}
-    
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      
-      # Set up Xcode for macOS testing
-      - name: Set up Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ matrix.platform.xcode }}
-      
-      # Common setup
-      - name: Check Swift version
-        run: swift --version
-      
-      # Cache Xcode build products
-      - name: Cache Xcode build
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Developer/Xcode/DerivedData
-          key: ${{ runner.os }}-xcode-${{ matrix.platform.os }}-${{ hashFiles('burstphoto.xcodeproj/**') }}
-          restore-keys: |
-            ${{ runner.os }}-xcode-${{ matrix.platform.os }}-
-      
-      # Create test results directory
-      - name: Create results directory
-        run: mkdir -p test-results/test-results-${{ matrix.platform.os }}
-      
-      # Gather Metal info before building
-      - name: Gather Metal environment information
-        run: |
-          echo "Gathering Metal environment information..."
-          mkdir -p test-results/metal-${{ matrix.platform.os }}
-          
-          # System info
-          echo "=== System Information ===" > test-results/metal-${{ matrix.platform.os }}/metal_info.log
-          sw_vers >> test-results/metal-${{ matrix.platform.os }}/metal_info.log
-          uname -a >> test-results/metal-${{ matrix.platform.os }}/metal_info.log
-          
-          # Xcode and Swift info
-          echo "" >> test-results/metal-${{ matrix.platform.os }}/metal_info.log
-          echo "=== Xcode and Swift Information ===" >> test-results/metal-${{ matrix.platform.os }}/metal_info.log
-          xcodebuild -version >> test-results/metal-${{ matrix.platform.os }}/metal_info.log
-          swift --version >> test-results/metal-${{ matrix.platform.os }}/metal_info.log
-          
-          # Try to get GPU info if available
-          echo "" >> test-results/metal-${{ matrix.platform.os }}/metal_info.log
-          echo "=== GPU Information ===" >> test-results/metal-${{ matrix.platform.os }}/metal_info.log
-          system_profiler SPDisplaysDataType >> test-results/metal-${{ matrix.platform.os }}/metal_info.log 2>&1 || echo "Unable to get display info"
-          
-          echo "Metal environment information collected."
-
-      # Build and test using xcodebuild instead of Swift Package Manager
-      - name: Build Xcode project
-        run: |
-          echo "Building Xcode project with verbose output..."
-          # First, list available schemes to help with debugging
-          echo "Available schemes:"
-          xcodebuild -project burstphoto.xcodeproj -list
-          
-          # Build for testing with verbose output
-          xcodebuild clean build -project burstphoto.xcodeproj -scheme "gui" -destination "platform=macOS" -verbose | tee test-results/test-results-${{ matrix.platform.os }}/build_output.log || true
-        continue-on-error: true # Continue to collect diagnostics even if build fails
-
-      - name: Run Xcode tests (if available)
-        run: |
-          echo "Checking for testable targets..."
-          
-          # Check if there are test targets
-          if xcodebuild -project burstphoto.xcodeproj -list | grep -q "Test"; then
-            echo "Test targets found, running tests..."
-            
-            # Run tests with Metal environment variables to help with debugging
-            METAL_DEVICE_WRAPPER_TYPE=1 METAL_DEBUG_ERROR_MODE=1 \
-            xcodebuild test -project burstphoto.xcodeproj -scheme "gui" -destination "platform=macOS" -resultBundlePath TestResults.xcresult | tee test-results/test-results-${{ matrix.platform.os }}/test_output.log || true
-            
-            # Extract test results from xcresult bundle if possible
-            if [ -d "TestResults.xcresult" ]; then
-              echo "Extracting test results from xcresult bundle..."
-              xcrun xcresulttool get --path TestResults.xcresult --format json > test-results/test-results-${{ matrix.platform.os }}/test_results.json || true
-            fi
-          else
-            echo "No test targets found in the Xcode project." | tee test-results/test-results-${{ matrix.platform.os }}/status.log
-            echo "Consider adding unit tests that can run in CI environments." | tee -a test-results/test-results-${{ matrix.platform.os }}/status.log
-          fi
-          
-          # Check output for Metal-specific errors
-          if grep -q "Metal" test-results/test-results-${{ matrix.platform.os }}/*.log 2>/dev/null; then
-            echo "⚠️ Metal-related messages detected. This is expected in CI environments without proper GPU access." | tee -a test-results/test-results-${{ matrix.platform.os }}/status.log
-          fi
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-${{ matrix.platform.os }}
-          path: test-results/test-results-${{ matrix.platform.os }}
-          if-no-files-found: ignore
-
-      - name: Upload Metal diagnostics
-        uses: actions/upload-artifact@v4
-        with:
-          name: metal-diagnostics-${{ matrix.platform.os }}
-          path: test-results/metal-${{ matrix.platform.os }}
-          if-no-files-found: ignore
-  
-  summarize-results:
-    name: Summarize test results
-    needs: test-apple-platforms
-    runs-on: ubuntu-latest
-    if: always()
-    
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: test-results
-      
-      - name: Ensure test results directory exists
-        run: mkdir -p test-results
         shell: bash
+  
+  # Use our shared Metal testing workflow instead of custom implementation
+  test:
+    name: Test on ${{ matrix.platform.name }}
+    needs: config
+    strategy:
+      fail-fast: false  # Continue with other platforms if one fails
+      matrix:
+        platform: ${{ fromJson(needs.config.outputs.platforms) }}
+    
+    uses: ./.github/workflows/shared/metal-testing.yml
+    with:
+      platform: ${{ matrix.platform.runner }}
+      xcode-version: ${{ matrix.platform.xcode }}
+      architecture: ${{ matrix.platform.architecture }}
       
-      - name: Display structure of downloaded files
-        run: |
-          if [ -d "test-results" ] && [ "$(ls -A test-results 2>/dev/null)" ]; then
-            ls -R test-results
-          else
-            echo "No test results found."
-          fi
-      
-      - name: Generate summary
-        run: |
-          echo "# Apple Platform Test Results 📊" > $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Testing Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Platform | Status | Notes |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|--------|-------|" >> $GITHUB_STEP_SUMMARY
-          
-          if [ ! -d "test-results" ] || [ -z "$(ls -A test-results 2>/dev/null)" ]; then
-            echo "| All Platforms | ⚠️ No Results | Tests were not executed or failed to generate results |" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "No test results were found. This might be because tests were skipped or failed to generate results." >> $GITHUB_STEP_SUMMARY
-            exit 0
-          fi
-          
-          for dir in test-results/*; do
-            platform=$(basename "$dir")
-            platform=${platform#test-results-}
-            
-            if [ -d "$dir" ] && [ -n "$(ls -A "$dir" 2>/dev/null)" ]; then
-              status="✅ Complete"
-              notes="Tests ran to completion"
-              
-              # Check for specific conditions documented in our result files
-              if grep -q "failure\|error\|failed" "$dir"/*.log 2>/dev/null; then
-                status="⚠️ Expected Failures"
-                notes="Metal tests may fail in CI environments due to GPU access limitations"
-              fi
-              
-              if grep -q "No test targets found" "$dir"/*.log 2>/dev/null; then
-                status="⚠️ No Tests"
-                notes="No test targets were found in the Xcode project"
-              fi
-              
-              if [ -f "$dir/build_output.log" ] && ! grep -q "error:" "$dir/build_output.log" 2>/dev/null; then
-                notes="$notes (Build completed successfully)"
-              fi
-              
-              echo "| $platform | $status | $notes |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| $platform | ⚠️ No Results | No test output found |" >> $GITHUB_STEP_SUMMARY
-            fi
-          done
-          
-          # Add special note about Metal testing in CI
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## About Metal Testing in CI" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Testing Metal code in CI environments has some limitations:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- CI runners may have limited or no GPU access" >> $GITHUB_STEP_SUMMARY
-          echo "- Hardware acceleration might be unavailable" >> $GITHUB_STEP_SUMMARY
-          echo "- Metal device initialization can fail in headless environments" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "For comprehensive Metal testing, consider:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "1. Using mocks or test doubles for Metal devices" >> $GITHUB_STEP_SUMMARY
-          echo "2. Conditionally skipping hardware-dependent tests in CI" >> $GITHUB_STEP_SUMMARY
-          echo "3. Running comprehensive Metal tests on physical devices" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "The current workflow focuses on verifying that code builds successfully and captures diagnostic information." >> $GITHUB_STEP_SUMMARY 
+  # Use our shared test summarizer workflow
+  summarize:
+    name: Summarize Results
+    needs: test
+    if: always()  # Run even if tests fail
+    
+    uses: ./.github/workflows/shared/test-summarizer.yml
+  
+  # Add PR feedback only for pull requests
+  pr-feedback:
+    name: PR Feedback
+    if: github.event_name == 'pull_request'
+    needs: [summarize]
+    uses: ./.github/workflows/shared/pr-feedback.yml
+    with:
+      pr-number: ${{ github.event.pull_request.number }}
+      artifact-prefix: 'test-results-'
+    secrets:
+      token: ${{ secrets.GITHUB_TOKEN }} 

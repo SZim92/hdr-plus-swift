@@ -342,12 +342,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      - name: Set up Swift
-        uses: ./.github/actions/optimized-swift-setup
-        with:
-          cache-name: 'security-scan'
-          use-retry: 'true'
-          disable-code-signing: 'true'
+      - name: Set up Swift environment
+        run: |
+          # Use our standardized Swift environment setup script
+          chmod +x .github/scripts/setup-swift-env.sh
+          ./.github/scripts/setup-swift-env.sh 'security-scan' 'true' 'true'
+      
+      - name: Check Metal support
+        id: metal-check
+        run: |
+          # Use our Metal detection script to check for Metal capabilities
+          chmod +x .github/scripts/check-metal-support.sh
+          ./.github/scripts/check-metal-support.sh metal-diagnostics
+          
+          # Output Metal support status for subsequent steps
+          if [ -f "metal-diagnostics/metal_support_summary.md" ]; then
+            echo "Found Metal diagnostics"
+            METAL_SUPPORTED=$(grep "Metal Supported" metal-diagnostics/metal_support_summary.md | grep -q "true" && echo "true" || echo "false")
+            echo "metal_supported=$METAL_SUPPORTED" >> $GITHUB_OUTPUT
+          else
+            echo "No Metal diagnostics found"
+            echo "metal_supported=false" >> $GITHUB_OUTPUT
+          fi
       
       - name: Run static analysis
         id: security-scan
@@ -368,6 +384,35 @@ jobs:
           else
             echo "{}" > macos-security-reports/swiftlint-output.json
             echo "SwiftLint not available, skipping linting step"
+          fi
+          
+          # Add Metal security check if Metal is supported
+          if [ "${{ steps.metal-check.outputs.metal_supported }}" == "true" ]; then
+            echo "## Metal Security Check" > macos-security-reports/metal-security.md
+            echo "" >> macos-security-reports/metal-security.md
+            echo "Metal is supported on this runner. Running additional security checks for Metal code." >> macos-security-reports/metal-security.md
+            echo "" >> macos-security-reports/metal-security.md
+            
+            # Check for use of Metal API in Swift code
+            if grep -r "import Metal" --include="*.swift" . > /dev/null; then
+              echo "Metal API usage detected in Swift code. Checking for security issues..." >> macos-security-reports/metal-security.md
+              
+              # Look for common Metal security issues (this is a basic example)
+              echo "### Potential Issues" >> macos-security-reports/metal-security.md
+              echo "" >> macos-security-reports/metal-security.md
+              
+              # Check for GPU memory management issues
+              MEMORY_ISSUES=$(grep -r "MTLBuffer" --include="*.swift" . | wc -l)
+              echo "- Found $MEMORY_ISSUES uses of MTLBuffer (check for proper memory management)" >> macos-security-reports/metal-security.md
+              
+              # Check for shader validation
+              SHADER_VALIDATION=$(grep -r "MTLCompileOptions" --include="*.swift" . | grep -c "preprocessorMacros" || echo "0")
+              echo "- Found $SHADER_VALIDATION shader compile options (verify proper validation)" >> macos-security-reports/metal-security.md
+            else
+              echo "No Metal API usage detected in Swift code." >> macos-security-reports/metal-security.md
+            fi
+          else
+            echo "Metal is not supported on this runner. Skipping Metal-specific security checks." > macos-security-reports/metal-security.md
           fi
           
           # Basic summary
@@ -392,7 +437,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-security-reports
-          path: macos-security-reports/
+          path: |
+            macos-security-reports/
+            metal-diagnostics/
           retention-days: 30
       
       - name: Add scan results to summary
@@ -404,6 +451,14 @@ jobs:
             cat macos-security-reports/summary.md >> $GITHUB_STEP_SUMMARY
           else
             echo "Summary report not found" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Include Metal diagnostics if available
+          if [ -f "metal-diagnostics/metal_support_summary.md" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## Metal Environment" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat metal-diagnostics/metal_support_summary.md >> $GITHUB_STEP_SUMMARY
           fi
       
       - name: Check issues
