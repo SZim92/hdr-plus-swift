@@ -84,24 +84,31 @@ jobs:
           output-file: 'CHANGELOG.md'
           include-commit-body: 'true'
           
-      - name: Build release artifacts
-        id: build
+      - name: Extract version components
+        id: version
         run: |
-          echo "Building release artifacts for v${{ github.event.inputs.version }}"
-          
-          # Create temp directory for artifacts
-          mkdir -p artifacts
-          
+          VERSION="${{ github.event.inputs.version }}"
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f2)
+          PATCH=$(echo $VERSION | cut -d. -f3)
+          echo "MAJOR=$MAJOR" >> $GITHUB_OUTPUT
+          echo "MINOR=$MINOR" >> $GITHUB_OUTPUT
+          echo "PATCH=$PATCH" >> $GITHUB_OUTPUT
+          echo "BUILD_VERSION=${MAJOR}${MINOR}${PATCH}" >> $GITHUB_OUTPUT
+      
+      - name: Build for Release
+        run: |
           # Build for release
           xcodebuild build \
             -scheme HDRPlus \
             -configuration Release \
             -destination "platform=macOS" \
             MARKETING_VERSION="${{ github.event.inputs.version }}" \
-            CURRENT_PROJECT_VERSION="${{ env.MAJOR }}${{ env.MINOR }}${{ env.PATCH }}" \
+            CURRENT_PROJECT_VERSION="${{ steps.version.outputs.BUILD_VERSION }}" \
             CODE_SIGNING_REQUIRED=NO
             
-          # Package the application
+      - name: Package the application
+        run: |
           APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "*.app" -not -path "*/Archive/*" | head -1)
           
           if [[ -z "$APP_PATH" ]]; then

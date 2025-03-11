@@ -406,7 +406,7 @@ jobs:
           fi
       
       - name: Check issues
-        if: steps.security-scan.outputs.issues-found == 'true'
+        if: ${{ steps.security-scan.outputs.issues-found == 'true' }}
         run: |
           echo "::warning::Found potential security issues in macOS code. See the artifact 'macos-security-reports' for details."
           # Don't fail the build, just warn about issues

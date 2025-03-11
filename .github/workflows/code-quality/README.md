@@ -10,7 +10,6 @@ This workflow analyzes test results across multiple CI runs to identify tests th
 
 ### Features
 
-
 - Automatically detects tests that pass in some runs but fail in others
 - Generates detailed reports with failure information
 - Comments on PRs when flaky tests are detected
@@ -27,7 +26,6 @@ This workflow runs automatically after each CI run. No manual action is required
 This workflow tracks Swift compiler warnings over time, helping to reduce technical debt.
 
 ### Features
-
 
 - Identifies all compiler warnings in the codebase
 - Groups warnings by file and type
@@ -46,7 +44,6 @@ This workflow runs automatically on PRs and pushes to main. You can also trigger
 This workflow analyzes Swift compilation times and provides optimization suggestions.
 
 ### Features
-
 
 - Identifies the slowest files and functions to compile
 - Provides specific optimization suggestions for improving build times
