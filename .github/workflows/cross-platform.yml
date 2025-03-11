@@ -158,6 +158,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
+      # Add Metal shader compilation cache
+      - name: Cache Metal shaders
+        uses: actions/cache@v4
+        with:
+          path: .metal-cache
+          key: metal-${{ runner.os }}-${{ hashFiles('**/*.metal') }}
+          restore-keys: |
+            metal-${{ runner.os }}-
+      
       - name: Set up Swift environment
         run: |
           chmod +x .github/scripts/setup-swift-env.sh
