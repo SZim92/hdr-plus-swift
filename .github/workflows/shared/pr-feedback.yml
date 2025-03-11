@@ -1,0 +1,241 @@
+name: PR Feedback
+
+on:
+  workflow_call:
+    inputs:
+      pr-number:
+        required: true
+        type: string
+        description: 'The PR number to comment on'
+      artifact-prefix:
+        required: false
+        type: string
+        description: 'Prefix for test result artifacts'
+        default: 'test-results-'
+    secrets:
+      token:
+        required: true
+        description: 'GitHub token for commenting on PRs'
+
+jobs:
+  process-results:
+    name: Process Test Results
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Download test result artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: "${{ inputs.artifact-prefix }}*"
+          merge-multiple: true
+      
+      - name: Ensure artifacts directory exists
+        run: mkdir -p artifacts
+      
+      - name: Analyze test results
+        id: analyze
+        run: |
+          echo "Analyzing test results from artifacts..."
+          
+          # Check if we have any artifacts
+          if [ ! -d "artifacts" ] || [ -z "$(ls -A artifacts 2>/dev/null)" ]; then
+            echo "No test result artifacts found."
+            echo "has_results=false" >> $GITHUB_OUTPUT
+            echo "status=unknown" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Initialize counters
+          TOTAL_TESTS=0
+          PASSED_TESTS=0
+          FAILED_TESTS=0
+          PLATFORMS=0
+          
+          # Process each platform's results
+          for dir in artifacts/*/; do
+            if [ -d "$dir" ]; then
+              PLATFORMS=$((PLATFORMS + 1))
+              
+              # Extract platform name from directory
+              PLATFORM=$(basename "$dir" | sed "s/^${{ inputs.artifact-prefix }}//" || echo "unknown")
+              
+              # Look for test results in each directory
+              if [ -f "$dir/test_results.json" ]; then
+                # Parse test results JSON (simplified)
+                TESTS_IN_PLATFORM=$(grep -c "\"identifier\"" "$dir/test_results.json" || echo "0")
+                FAILED_IN_PLATFORM=$(grep -c "\"status\" : \"Failure\"" "$dir/test_results.json" || echo "0")
+                
+                TOTAL_TESTS=$((TOTAL_TESTS + TESTS_IN_PLATFORM))
+                FAILED_TESTS=$((FAILED_TESTS + FAILED_IN_PLATFORM))
+                PASSED_TESTS=$((PASSED_TESTS + TESTS_IN_PLATFORM - FAILED_IN_PLATFORM))
+                
+                echo "Platform $PLATFORM: $TESTS_IN_PLATFORM tests, $FAILED_IN_PLATFORM failures"
+              elif [ -f "$dir/status.log" ]; then
+                # Extract basic info from status log
+                echo "Platform $PLATFORM: Using status log"
+                if grep -q "failure\|error\|failed" "$dir/status.log"; then
+                  FAILED_TESTS=$((FAILED_TESTS + 1))
+                fi
+              else
+                echo "Platform $PLATFORM: No results found"
+              fi
+              
+              # Look for Metal issues
+              if grep -q "Metal" "$dir"/*.log 2>/dev/null; then
+                echo "Metal-related issues detected on $PLATFORM"
+                echo "has_metal_issues_$PLATFORM=true" >> $GITHUB_OUTPUT
+              else
+                echo "has_metal_issues_$PLATFORM=false" >> $GITHUB_OUTPUT
+              fi
+            fi
+          done
+          
+          # Determine overall status
+          if [ $FAILED_TESTS -eq 0 ] && [ $TOTAL_TESTS -gt 0 ]; then
+            STATUS="success"
+          elif [ $FAILED_TESTS -gt 0 ]; then
+            STATUS="failure"
+          else
+            STATUS="unknown"
+          fi
+          
+          # Output results for next steps
+          echo "has_results=true" >> $GITHUB_OUTPUT
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          echo "total_tests=$TOTAL_TESTS" >> $GITHUB_OUTPUT
+          echo "passed_tests=$PASSED_TESTS" >> $GITHUB_OUTPUT
+          echo "failed_tests=$FAILED_TESTS" >> $GITHUB_OUTPUT
+          echo "platforms=$PLATFORMS" >> $GITHUB_OUTPUT
+      
+      - name: Generate PR comment
+        id: comment
+        if: steps.analyze.outputs.has_results == 'true'
+        run: |
+          # Create comment body
+          STATUS="${{ steps.analyze.outputs.status }}"
+          ICON="⚠️"
+          
+          if [ "$STATUS" == "success" ]; then
+            ICON="✅"
+          elif [ "$STATUS" == "failure" ]; then
+            ICON="❌"
+          fi
+          
+          # Create the comment file
+          cat > comment.md << EOF
+          ## Test Results $ICON
+          
+          | Metric | Value |
+          | ------ | ----- |
+          | Status | $STATUS |
+          | Total Tests | ${{ steps.analyze.outputs.total_tests }} |
+          | Passed | ${{ steps.analyze.outputs.passed_tests }} |
+          | Failed | ${{ steps.analyze.outputs.failed_tests }} |
+          | Platforms | ${{ steps.analyze.outputs.platforms }} |
+          
+          EOF
+          
+          # Add Metal information if relevant
+          if grep -q "Metal" artifacts/*/*.log 2>/dev/null; then
+            cat >> comment.md << EOF
+          
+          ### Metal Testing Notes
+          
+          Some Metal-related issues were detected during testing. This is normal in CI environments without proper GPU access.
+          
+          - Metal tests may fail in CI environments due to limited GPU support
+          - These failures don't necessarily indicate issues with your code
+          - See the workflow logs for detailed diagnostics
+          EOF
+          fi
+          
+          # Add relevant links
+          cat >> comment.md << EOF
+          
+          [View detailed test logs](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})
+          EOF
+      
+      - name: Comment on PR
+        if: steps.analyze.outputs.has_results == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.token }}
+          script: |
+            const fs = require('fs');
+            
+            // Read the generated comment
+            const commentBody = fs.readFileSync('comment.md', 'utf8');
+            
+            // Post comment on PR
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ inputs.pr-number }},
+              body: commentBody
+            });
+            
+            console.log("Comment posted to PR #${{ inputs.pr-number }}");
+            
+      - name: Set PR status
+        if: steps.analyze.outputs.has_results == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.token }}
+          script: |
+            const status = "${{ steps.analyze.outputs.status }}";
+            let state, description;
+            
+            switch(status) {
+              case "success":
+                state = "success";
+                description = "All tests passed successfully";
+                break;
+              case "failure":
+                state = "failure";
+                description = "Some tests failed";
+                break;
+              default:
+                state = "pending";
+                description = "Test results are inconclusive";
+            }
+            
+            // Get PR SHA
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: ${{ inputs.pr-number }}
+            });
+            
+            // Set status check
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: pr.head.sha,
+              state: state,
+              description: description,
+              context: "Metal Testing / All Platforms",
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+            
+            console.log(`Set status ${state} on PR #${{ inputs.pr-number }}`);
+      
+      - name: Generate workflow summary
+        run: |
+          echo "## PR Feedback Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.analyze.outputs.has_results }}" == "true" ]; then
+            echo "Successfully analyzed test results and provided feedback on PR #${{ inputs.pr-number }}." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "| ------ | ----- |" >> $GITHUB_STEP_SUMMARY
+            echo "| Status | ${{ steps.analyze.outputs.status }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Total Tests | ${{ steps.analyze.outputs.total_tests }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Passed | ${{ steps.analyze.outputs.passed_tests }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Failed | ${{ steps.analyze.outputs.failed_tests }} |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No test results were found to analyze." >> $GITHUB_STEP_SUMMARY
+          fi 
