@@ -1,0 +1,570 @@
+name: Test Dashboard
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types:
+      - completed
+  workflow_dispatch:
+
+# Set explicit permissions
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Prevent concurrent dashboard generation
+concurrency:
+  group: "test-dashboard"
+  cancel-in-progress: true
+
+jobs:
+  build-dashboard:
+    name: Build Test Dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download test results
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          workflow: CI
+          workflow_conclusion: any
+          name: test-results-*
+          path: test-results
+      
+      - name: Download visual test artifacts
+        continue-on-error: true
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          workflow: CI
+          workflow_conclusion: any
+          name: visual-test-*
+          path: visual-results
+      
+      - name: Download performance metrics
+        continue-on-error: true
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          workflow: CI
+          workflow_conclusion: any
+          name: performance-*
+          path: performance-results
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install matplotlib pandas jinja2
+      
+      - name: Generate test report
+        run: |
+          mkdir -p dashboard
+          
+          # Create the dashboard generator script
+          cat > generate_dashboard.py << 'EOF'
+          import os
+          import re
+          import json
+          import glob
+          import pandas as pd
+          import matplotlib.pyplot as plt
+          from datetime import datetime
+          from jinja2 import Template
+
+          # Create directories
+          os.makedirs('dashboard/images', exist_ok=True)
+          os.makedirs('dashboard/data', exist_ok=True)
+          
+          # Process test results
+          def process_test_results():
+              print("Processing test results...")
+              test_stats = {
+                  'total': 0,
+                  'passed': 0,
+                  'failed': 0,
+                  'skipped': 0,
+                  'categories': {
+                      'unit': {'total': 0, 'passed': 0, 'failed': 0, 'skipped': 0},
+                      'integration': {'total': 0, 'passed': 0, 'failed': 0, 'skipped': 0},
+                      'visual': {'total': 0, 'passed': 0, 'failed': 0, 'skipped': 0},
+                      'performance': {'total': 0, 'passed': 0, 'failed': 0, 'skipped': 0},
+                      'metal': {'total': 0, 'passed': 0, 'failed': 0, 'skipped': 0}
+                  },
+                  'failed_tests': []
+              }
+              
+              # Find all test report files
+              report_files = glob.glob('test-results/**/test-report.md', recursive=True)
+              for report_file in report_files:
+                  platform = os.path.basename(os.path.dirname(report_file))
+                  with open(report_file, 'r') as f:
+                      content = f.read()
+                  
+                  # Parse basic stats
+                  total_match = re.search(r'Total tests: (\d+)', content)
+                  passed_match = re.search(r'Tests passed: (\d+)', content)
+                  failed_match = re.search(r'Tests failed: (\d+)', content)
+                  skipped_match = re.search(r'Tests skipped: (\d+)', content)
+                  
+                  if total_match and passed_match and failed_match and skipped_match:
+                      total = int(total_match.group(1))
+                      passed = int(passed_match.group(1))
+                      failed = int(failed_match.group(1))
+                      skipped = int(skipped_match.group(1))
+                      
+                      test_stats['total'] += total
+                      test_stats['passed'] += passed
+                      test_stats['failed'] += failed
+                      test_stats['skipped'] += skipped
+                      
+                      # Categorize tests based on report file path
+                      category = 'unit'  # Default
+                      if 'integration' in report_file.lower():
+                          category = 'integration'
+                      elif 'visual' in report_file.lower():
+                          category = 'visual'
+                      elif 'performance' in report_file.lower():
+                          category = 'performance'
+                      elif 'metal' in report_file.lower():
+                          category = 'metal'
+                      
+                      test_stats['categories'][category]['total'] += total
+                      test_stats['categories'][category]['passed'] += passed
+                      test_stats['categories'][category]['failed'] += failed
+                      test_stats['categories'][category]['skipped'] += skipped
+                  
+                  # Extract failed tests
+                  failed_sections = re.findall(r'### (.*?)\n.*?Error: (.*?)(?=\n\n|\Z)', content, re.DOTALL)
+                  for test_name, error in failed_sections:
+                      test_stats['failed_tests'].append({
+                          'name': test_name.strip(),
+                          'error': error.strip(),
+                          'platform': platform
+                      })
+              
+              # Generate charts
+              if test_stats['total'] > 0:
+                  # Overall stats pie chart
+                  plt.figure(figsize=(8, 6))
+                  labels = ['Passed', 'Failed', 'Skipped']
+                  sizes = [test_stats['passed'], test_stats['failed'], test_stats['skipped']]
+                  colors = ['#4CAF50', '#F44336', '#FFC107']
+                  plt.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
+                  plt.axis('equal')
+                  plt.title('Overall Test Results')
+                  plt.savefig('dashboard/images/overall_results.png')
+                  plt.close()
+                  
+                  # Category breakdown
+                  categories = list(test_stats['categories'].keys())
+                  passed_values = [test_stats['categories'][cat]['passed'] for cat in categories]
+                  failed_values = [test_stats['categories'][cat]['failed'] for cat in categories]
+                  skipped_values = [test_stats['categories'][cat]['skipped'] for cat in categories]
+                  
+                  plt.figure(figsize=(10, 6))
+                  bar_width = 0.25
+                  index = range(len(categories))
+                  
+                  plt.bar([i for i in index], passed_values, bar_width, label='Passed', color='#4CAF50')
+                  plt.bar([i + bar_width for i in index], failed_values, bar_width, label='Failed', color='#F44336')
+                  plt.bar([i + 2 * bar_width for i in index], skipped_values, bar_width, label='Skipped', color='#FFC107')
+                  
+                  plt.xlabel('Test Category')
+                  plt.ylabel('Number of Tests')
+                  plt.title('Test Results by Category')
+                  plt.xticks([i + bar_width for i in index], [cat.title() for cat in categories])
+                  plt.legend()
+                  plt.savefig('dashboard/images/category_breakdown.png')
+                  plt.close()
+              
+              # Save test stats
+              with open('dashboard/data/test_stats.json', 'w') as f:
+                  json.dump(test_stats, f)
+              
+              return test_stats
+          
+          # Process visual test results
+          def process_visual_tests():
+              print("Processing visual test results...")
+              visual_test_results = []
+              
+              diff_images = glob.glob('visual-results/**/*_diff.png', recursive=True)
+              for diff_image in diff_images:
+                  filename = os.path.basename(diff_image)
+                  test_name = filename.replace('_diff.png', '')
+                  
+                  # Find related files
+                  failed_image = diff_image.replace('_diff.png', '_failed.png')
+                  reference_image = diff_image.replace('_diff.png', '_reference.png')
+                  
+                  # Ensure images exist
+                  if os.path.exists(failed_image) and os.path.exists(reference_image):
+                      # Copy images to dashboard
+                      os.system(f'cp "{diff_image}" dashboard/images/{filename}')
+                      os.system(f'cp "{failed_image}" dashboard/images/{os.path.basename(failed_image)}')
+                      os.system(f'cp "{reference_image}" dashboard/images/{os.path.basename(reference_image)}')
+                      
+                      visual_test_results.append({
+                          'test_name': test_name,
+                          'diff_image': f'images/{filename}',
+                          'failed_image': f'images/{os.path.basename(failed_image)}',
+                          'reference_image': f'images/{os.path.basename(reference_image)}'
+                      })
+              
+              # Save visual test results
+              with open('dashboard/data/visual_tests.json', 'w') as f:
+                  json.dump(visual_test_results, f)
+              
+              return visual_test_results
+          
+          # Process performance metrics
+          def process_performance_metrics():
+              print("Processing performance metrics...")
+              performance_data = {
+                  'metrics': [],
+                  'history': []
+              }
+              
+              # Find all performance CSV files
+              csv_files = glob.glob('performance-results/**/performance_history.csv', recursive=True)
+              for csv_file in csv_files:
+                  try:
+                      df = pd.read_csv(csv_file)
+                      if not df.empty:
+                          # Extract latest metrics
+                          latest = df.iloc[-1]
+                          metrics = []
+                          for col in df.columns:
+                              if col not in ['Date', 'Environment']:
+                                  metrics.append({
+                                      'name': col,
+                                      'value': latest[col],
+                                      'history': df[col].tolist()
+                                  })
+                          
+                          performance_data['metrics'].extend(metrics)
+                          
+                          # Generate trend charts for each metric
+                          for metric in metrics:
+                              plt.figure(figsize=(10, 4))
+                              plt.plot(range(len(metric['history'])), metric['history'], marker='o')
+                              plt.title(f'{metric["name"]} Trend')
+                              plt.xlabel('Test Run')
+                              plt.ylabel('Value')
+                              plt.grid(True)
+                              plt.tight_layout()
+                              chart_filename = f'perf_{metric["name"].replace(" ", "_")}.png'
+                              plt.savefig(f'dashboard/images/{chart_filename}')
+                              plt.close()
+                              
+                              metric['chart'] = f'images/{chart_filename}'
+                          
+                  except Exception as e:
+                      print(f"Error processing {csv_file}: {e}")
+              
+              # Save performance data
+              with open('dashboard/data/performance_data.json', 'w') as f:
+                  json.dump(performance_data, f)
+              
+              return performance_data
+          
+          # Generate HTML dashboard
+          def generate_html(test_stats, visual_test_results, performance_data):
+              print("Generating HTML dashboard...")
+              
+              template = """
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>HDR+ Swift Test Dashboard</title>
+              <style>
+                  body {
+                      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                      line-height: 1.6;
+                      color: #333;
+                      max-width: 1200px;
+                      margin: 0 auto;
+                      padding: 20px;
+                  }
+                  header {
+                      text-align: center;
+                      margin-bottom: 30px;
+                      border-bottom: 1px solid #eee;
+                      padding-bottom: 20px;
+                  }
+                  section {
+                      margin-bottom: 40px;
+                  }
+                  h1, h2, h3 {
+                      color: #2c3e50;
+                  }
+                  .summary-cards {
+                      display: flex;
+                      justify-content: space-between;
+                      flex-wrap: wrap;
+                      gap: 20px;
+                      margin-bottom: 30px;
+                  }
+                  .card {
+                      background: white;
+                      border-radius: 5px;
+                      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+                      padding: 20px;
+                      flex: 1;
+                      min-width: 200px;
+                  }
+                  .card h3 {
+                      margin-top: 0;
+                      border-bottom: 1px solid #eee;
+                      padding-bottom: 10px;
+                  }
+                  .chart-container {
+                      margin: 20px 0;
+                      text-align: center;
+                  }
+                  table {
+                      width: 100%;
+                      border-collapse: collapse;
+                  }
+                  th, td {
+                      padding: 12px 15px;
+                      text-align: left;
+                      border-bottom: 1px solid #ddd;
+                  }
+                  th {
+                      background-color: #f8f9fa;
+                  }
+                  tr:hover {
+                      background-color: #f5f5f5;
+                  }
+                  .label {
+                      display: inline-block;
+                      padding: 5px 10px;
+                      border-radius: 3px;
+                      font-size: 12px;
+                      font-weight: bold;
+                  }
+                  .label-success { background-color: #d4edda; color: #155724; }
+                  .label-danger { background-color: #f8d7da; color: #721c24; }
+                  .label-warning { background-color: #fff3cd; color: #856404; }
+                  .visual-diff {
+                      display: flex;
+                      flex-wrap: wrap;
+                      gap: 20px;
+                      margin-bottom: 30px;
+                  }
+                  .visual-diff-item {
+                      border: 1px solid #ddd;
+                      border-radius: 5px;
+                      padding: 15px;
+                      background: white;
+                  }
+                  .visual-diff-images {
+                      display: flex;
+                      gap: 10px;
+                      flex-wrap: wrap;
+                  }
+                  .visual-diff-images img {
+                      max-width: 200px;
+                      height: auto;
+                      border: 1px solid #eee;
+                  }
+                  .perf-metrics {
+                      display: flex;
+                      flex-wrap: wrap;
+                      gap: 20px;
+                  }
+                  .perf-metric {
+                      flex: 1;
+                      min-width: 300px;
+                      border: 1px solid #ddd;
+                      border-radius: 5px;
+                      padding: 15px;
+                      background: white;
+                  }
+                  footer {
+                      text-align: center;
+                      margin-top: 50px;
+                      padding-top: 20px;
+                      border-top: 1px solid #eee;
+                      color: #7f8c8d;
+                      font-size: 0.9em;
+                  }
+              </style>
+          </head>
+          <body>
+              <header>
+                  <h1>HDR+ Swift Test Dashboard</h1>
+                  <p>Generated on {{ current_time }}</p>
+              </header>
+              
+              <section id="summary">
+                  <h2>Test Summary</h2>
+                  <div class="summary-cards">
+                      <div class="card">
+                          <h3>Overall Status</h3>
+                          <p><strong>Total Tests:</strong> {{ test_stats.total }}</p>
+                          <p><strong>Passed:</strong> {{ test_stats.passed }}</p>
+                          <p><strong>Failed:</strong> {{ test_stats.failed }}</p>
+                          <p><strong>Skipped:</strong> {{ test_stats.skipped }}</p>
+                          <p><strong>Success Rate:</strong> {{ "%.1f"|format(test_stats.passed / test_stats.total * 100 if test_stats.total > 0 else 0) }}%</p>
+                      </div>
+                      {% for cat_name, cat_data in test_stats.categories.items() %}
+                      {% if cat_data.total > 0 %}
+                      <div class="card">
+                          <h3>{{ cat_name|title }} Tests</h3>
+                          <p><strong>Total:</strong> {{ cat_data.total }}</p>
+                          <p><strong>Passed:</strong> {{ cat_data.passed }}</p>
+                          <p><strong>Failed:</strong> {{ cat_data.failed }}</p>
+                          <p><strong>Skipped:</strong> {{ cat_data.skipped }}</p>
+                          <p><strong>Success Rate:</strong> {{ "%.1f"|format(cat_data.passed / cat_data.total * 100 if cat_data.total > 0 else 0) }}%</p>
+                      </div>
+                      {% endif %}
+                      {% endfor %}
+                  </div>
+                  
+                  <div class="chart-container">
+                      <img src="images/overall_results.png" alt="Overall Test Results" style="max-width: 500px;">
+                  </div>
+                  
+                  <div class="chart-container">
+                      <img src="images/category_breakdown.png" alt="Test Results by Category" style="max-width: 800px;">
+                  </div>
+              </section>
+              
+              {% if test_stats.failed_tests %}
+              <section id="failed-tests">
+                  <h2>Failed Tests</h2>
+                  <table>
+                      <thead>
+                          <tr>
+                              <th>Test Name</th>
+                              <th>Platform</th>
+                              <th>Error</th>
+                          </tr>
+                      </thead>
+                      <tbody>
+                          {% for test in test_stats.failed_tests %}
+                          <tr>
+                              <td>{{ test.name }}</td>
+                              <td>{{ test.platform }}</td>
+                              <td>{{ test.error }}</td>
+                          </tr>
+                          {% endfor %}
+                      </tbody>
+                  </table>
+              </section>
+              {% endif %}
+              
+              {% if visual_test_results %}
+              <section id="visual-tests">
+                  <h2>Visual Test Results</h2>
+                  {% for test in visual_test_results %}
+                  <div class="visual-diff-item">
+                      <h3>{{ test.test_name }}</h3>
+                      <div class="visual-diff-images">
+                          <div>
+                              <p>Reference</p>
+                              <img src="{{ test.reference_image }}" alt="Reference Image">
+                          </div>
+                          <div>
+                              <p>Test Output</p>
+                              <img src="{{ test.failed_image }}" alt="Test Output">
+                          </div>
+                          <div>
+                              <p>Difference</p>
+                              <img src="{{ test.diff_image }}" alt="Difference">
+                          </div>
+                      </div>
+                  </div>
+                  {% endfor %}
+              </section>
+              {% endif %}
+              
+              {% if performance_data.metrics %}
+              <section id="performance">
+                  <h2>Performance Metrics</h2>
+                  <div class="perf-metrics">
+                      {% for metric in performance_data.metrics %}
+                      <div class="perf-metric">
+                          <h3>{{ metric.name }}</h3>
+                          <p><strong>Current Value:</strong> {{ metric.value }}</p>
+                          <img src="{{ metric.chart }}" alt="{{ metric.name }} Trend">
+                      </div>
+                      {% endfor %}
+                  </div>
+              </section>
+              {% endif %}
+              
+              <footer>
+                  <p>HDR+ Swift Project Test Dashboard</p>
+              </footer>
+          </body>
+          </html>
+          """
+              
+              # Create context for template
+              context = {
+                  'current_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                  'test_stats': test_stats,
+                  'visual_test_results': visual_test_results,
+                  'performance_data': performance_data
+              }
+              
+              # Render HTML
+              html = Template(template).render(**context)
+              
+              # Write HTML file
+              with open('dashboard/index.html', 'w') as f:
+                  f.write(html)
+              
+              print("Dashboard generated successfully!")
+
+          if __name__ == "__main__":
+              # Process all test data
+              test_stats = process_test_results()
+              visual_test_results = process_visual_tests()
+              performance_data = process_performance_metrics()
+              
+              # Generate HTML dashboard
+              generate_html(test_stats, visual_test_results, performance_data)
+          EOF
+          
+          # Execute the script
+          python generate_dashboard.py
+      
+      - name: Upload dashboard artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-dashboard
+          path: dashboard/
+          retention-days: 14
+      
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+      
+      - name: Upload to GitHub Pages
+        uses: actions/upload-pages-artifact@v2
+        with:
+          path: './dashboard'
+      
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v2
+      
+      - name: Create summary with dashboard link
+        run: |
+          echo "## Test Dashboard Generated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The test dashboard has been generated with the latest test results." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Dashboard URL" >> $GITHUB_STEP_SUMMARY
+          echo "🔗 [View Test Dashboard](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }})" >> $GITHUB_STEP_SUMMARY 
