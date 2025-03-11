@@ -7,6 +7,7 @@ on:
       - '**.h'
       - '**.m'
       - '**.mm'
+      - '**.metal'
       - '**/*.xcodeproj/**'
       - 'Package.swift'
       - '.github/workflows/binary-size.yml'
@@ -18,6 +19,7 @@ on:
       - '**.h'
       - '**.m'
       - '**.mm'
+      - '**.metal'
       - '**/*.xcodeproj/**'
       - 'Package.swift'
       - '.github/workflows/binary-size.yml'
@@ -190,6 +192,7 @@ jobs:
           echo "| Swift | $(find . -name "*.swift" | wc -l) |" >> $GITHUB_STEP_SUMMARY
           echo "| Objective-C | $(find . -name "*.m" -o -name "*.mm" | wc -l) |" >> $GITHUB_STEP_SUMMARY
           echo "| Headers | $(find . -name "*.h" | wc -l) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Metal | $(find . -name "*.metal" | wc -l) |" >> $GITHUB_STEP_SUMMARY
       
       - name: Check size threshold
         run: |
@@ -212,4 +215,201 @@ jobs:
           echo "Comparing app size with base branch..."
           # This would ideally compare with a previous build size stored as an artifact
           # For now, we just report the current size
-          echo "Note: Size comparison with previous build not implemented yet." 
+          echo "Note: Size comparison with previous build not implemented yet."
+
+  # New job to analyze Metal shader performance
+  metal-performance:
+    name: Metal Shader Metrics
+    runs-on: macos-latest
+    # Only run if Metal files are changed or on manual trigger
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'area/metal')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Swift environment
+        run: |
+          chmod +x .github/scripts/setup-swift-env.sh
+          ./.github/scripts/setup-swift-env.sh 'metal-performance' 'false' 'true' 'false' 'performance'
+      
+      - name: Find Metal shader files
+        id: find-shaders
+        run: |
+          # Find all Metal shader files in the repo
+          SHADER_FILES=$(find . -name "*.metal" -type f | sort)
+          
+          if [ -z "$SHADER_FILES" ]; then
+            echo "No Metal shader files found. Skipping performance analysis."
+            echo "has_shaders=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "Found $(echo "$SHADER_FILES" | wc -l | xargs) Metal shader files"
+          
+          # Save list of shader files for performance analysis
+          mkdir -p metal-performance
+          echo "$SHADER_FILES" > metal-performance/shader-files.txt
+          
+          echo "has_shaders=true" >> $GITHUB_OUTPUT
+      
+      - name: Analyze Metal shader size and compilation time
+        if: steps.find-shaders.outputs.has_shaders == 'true'
+        run: |
+          echo "Analyzing Metal shader size and compilation metrics..."
+          
+          # Create results directories
+          mkdir -p metal-performance/results
+          
+          # Read shader files
+          SHADER_FILES=$(cat metal-performance/shader-files.txt)
+          
+          # Create results table header
+          echo "| Shader | Source Size (KB) | AIR Size (KB) | Compilation Time (ms) |" > metal-performance/results/metrics.md
+          echo "|--------|-----------------|--------------|---------------------|" >> metal-performance/results/metrics.md
+          
+          # Track overall metrics
+          TOTAL_SOURCE_SIZE=0
+          TOTAL_AIR_SIZE=0
+          TOTAL_COMPILE_TIME=0
+          MAX_COMPILE_TIME=0
+          MAX_COMPILE_SHADER=""
+          
+          # For each shader file, measure size and compilation time
+          for shader in $SHADER_FILES; do
+            shader_name=$(basename "$shader")
+            echo "Analyzing shader: $shader_name"
+            
+            # Get shader source size
+            SOURCE_SIZE=$(du -k "$shader" | cut -f1)
+            TOTAL_SOURCE_SIZE=$((TOTAL_SOURCE_SIZE + SOURCE_SIZE))
+            
+            # Measure compilation time (in milliseconds)
+            START_TIME=$(($(date +%s%N)/1000000))
+            
+            # Compile the shader to AIR file
+            xcrun -sdk macosx metal -c "$shader" -o "metal-performance/results/${shader_name}.air" -std=metal2.0
+            
+            END_TIME=$(($(date +%s%N)/1000000))
+            COMPILE_TIME=$((END_TIME - START_TIME))
+            TOTAL_COMPILE_TIME=$((TOTAL_COMPILE_TIME + COMPILE_TIME))
+            
+            # Track maximum compilation time
+            if [ $COMPILE_TIME -gt $MAX_COMPILE_TIME ]; then
+              MAX_COMPILE_TIME=$COMPILE_TIME
+              MAX_COMPILE_SHADER="$shader_name"
+            fi
+            
+            # Get compiled AIR file size
+            if [ -f "metal-performance/results/${shader_name}.air" ]; then
+              AIR_SIZE=$(du -k "metal-performance/results/${shader_name}.air" | cut -f1)
+              TOTAL_AIR_SIZE=$((TOTAL_AIR_SIZE + AIR_SIZE))
+            else
+              AIR_SIZE="N/A"
+            fi
+            
+            # Add to results table
+            echo "| $shader_name | $SOURCE_SIZE | $AIR_SIZE | $COMPILE_TIME |" >> metal-performance/results/metrics.md
+          done
+          
+          # Create summary
+          SHADER_COUNT=$(echo "$SHADER_FILES" | wc -l)
+          SHADER_COUNT=$(echo $SHADER_COUNT | xargs)  # Trim whitespace
+          AVG_COMPILE_TIME=$(echo "scale=2; $TOTAL_COMPILE_TIME / $SHADER_COUNT" | bc)
+          
+          echo "# Metal Shader Performance Metrics" > metal-performance/summary.md
+          echo "" >> metal-performance/summary.md
+          echo "Analysis performed on: $(date)" >> metal-performance/summary.md
+          echo "" >> metal-performance/summary.md
+          echo "## Summary" >> metal-performance/summary.md
+          echo "" >> metal-performance/summary.md
+          echo "| Metric | Value |" >> metal-performance/summary.md
+          echo "|--------|-------|" >> metal-performance/summary.md
+          echo "| Total Shaders | $SHADER_COUNT |" >> metal-performance/summary.md
+          echo "| Total Source Size | $TOTAL_SOURCE_SIZE KB |" >> metal-performance/summary.md
+          echo "| Total Compiled Size | $TOTAL_AIR_SIZE KB |" >> metal-performance/summary.md
+          echo "| Average Compilation Time | $AVG_COMPILE_TIME ms |" >> metal-performance/summary.md
+          echo "| Slowest Shader | $MAX_COMPILE_SHADER ($MAX_COMPILE_TIME ms) |" >> metal-performance/summary.md
+          echo "" >> metal-performance/summary.md
+          
+          # Add detailed metrics
+          echo "## Detailed Metrics" >> metal-performance/summary.md
+          echo "" >> metal-performance/summary.md
+          cat metal-performance/results/metrics.md >> metal-performance/summary.md
+          
+          # Add performance optimization recommendations
+          echo "" >> metal-performance/summary.md
+          echo "## Optimization Recommendations" >> metal-performance/summary.md
+          echo "" >> metal-performance/summary.md
+          
+          if [ $MAX_COMPILE_TIME -gt 1000 ]; then
+            echo "🔍 **Review $MAX_COMPILE_SHADER** - This shader takes over 1 second to compile and may impact build times" >> metal-performance/summary.md
+          fi
+          
+          # Add shader complexity recommendation if any AIR file is much larger than source
+          for shader in $SHADER_FILES; do
+            shader_name=$(basename "$shader")
+            if [ -f "metal-performance/results/${shader_name}.air" ]; then
+              SOURCE_SIZE=$(du -k "$shader" | cut -f1)
+              AIR_SIZE=$(du -k "metal-performance/results/${shader_name}.air" | cut -f1)
+              
+              # If AIR is more than 5x the source size, flag it
+              if [ $AIR_SIZE -gt $((SOURCE_SIZE * 5)) ] && [ $SOURCE_SIZE -gt 0 ]; then
+                echo "⚠️ **$shader_name complexity** - The compiled AIR file is $(echo "scale=1; $AIR_SIZE / $SOURCE_SIZE" | bc)x larger than the source, indicating high complexity" >> metal-performance/summary.md
+              fi
+            fi
+          done
+          
+          # Add general recommendations
+          echo "- Consider precompiling shaders for release builds to improve app startup time" >> metal-performance/summary.md
+          echo "- Use shader function specialization for frequently used shaders with constant parameters" >> metal-performance/summary.md
+          echo "- If possible, combine similar shaders using #if directives instead of maintaining separate shader files" >> metal-performance/summary.md
+          
+          # Add summary to GitHub step summary
+          cat metal-performance/summary.md >> $GITHUB_STEP_SUMMARY
+      
+      - name: Upload Metal performance results
+        if: steps.find-shaders.outputs.has_shaders == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: metal-performance-metrics
+          path: metal-performance/
+          retention-days: 14
+          
+      - name: Comment on PR with performance metrics
+        if: github.event_name == 'pull_request' && steps.find-shaders.outputs.has_shaders == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            
+            try {
+              const summaryContent = fs.readFileSync('metal-performance/summary.md', 'utf8');
+              
+              // Create comment body
+              let body = `## Metal Shader Performance Analysis\n\n`;
+              
+              // Extract just the Summary section to keep the comment concise
+              const summarySection = summaryContent.split('## Summary')[1].split('##')[0].trim();
+              body += summarySection + '\n\n';
+              
+              // Add a note about the slowest shader if it's mentioned in the recommendations
+              if (summaryContent.includes('shader takes over 1 second to compile')) {
+                const slowestShaderLine = summaryContent.split('🔍 **Review')[1].split('\n')[0].trim();
+                body += `### Performance Concern\n\n🔍 **Review${slowestShaderLine}\n\n`;
+              }
+              
+              body += `*See the "metal-performance-metrics" artifact for full details.*`;
+              
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+              
+              console.log('Posted Metal performance metrics to PR');
+            } catch (error) {
+              console.error('Error posting Metal performance metrics:', error);
+            } 

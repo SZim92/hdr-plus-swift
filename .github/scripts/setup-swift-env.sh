@@ -9,6 +9,7 @@ CACHE_KEY="${1:-default}"
 INSTALL_SWIFTLINT="${2:-false}"
 DISABLE_CODE_SIGNING="${3:-true}"
 ENABLE_RETRY="${4:-false}"
+METAL_CONFIG="${5:-standard}"  # New parameter for Metal configuration
 
 # Output directory for diagnostics
 DIAGNOSTICS_DIR="swift-setup-logs"
@@ -120,6 +121,68 @@ fi
 if command -v swift &> /dev/null; then
   log "Verifying Swift Package Manager..."
   swift package --version > "$DIAGNOSTICS_DIR/swiftpm-version.log" 2>&1 || echo "SwiftPM might not be available"
+fi
+
+# Configure Metal environment if requested
+if [[ "$CACHE_KEY" == *"metal"* || "$CACHE_KEY" == "performance" || "$CACHE_KEY" == "security-scan" ]]; then
+  log "Configuring Metal environment for $CACHE_KEY..."
+  
+  # Create a Metal diagnostics directory
+  METAL_DIAGNOSTICS_DIR="metal-setup-diagnostics"
+  mkdir -p "$METAL_DIAGNOSTICS_DIR"
+  
+  # Set Metal environment variables based on the build type
+  case "$METAL_CONFIG" in
+    "performance")
+      # Performance-focused configuration with minimal validation
+      export METAL_DEVICE_WRAPPER_TYPE="default"
+      export METAL_DEBUG_ERROR_MODE="silent"
+      export METAL_SHADER_VALIDATION="false"
+      export METAL_RUNTIME_VALIDATION="false"
+      log "Metal configured for performance (minimal validation)"
+      ;;
+      
+    "validation")
+      # Maximum validation for security and correctness testing
+      export METAL_DEVICE_WRAPPER_TYPE="validation"
+      export METAL_DEBUG_ERROR_MODE="report"
+      export METAL_SHADER_VALIDATION="true"
+      export METAL_RUNTIME_VALIDATION="true"
+      export MTL_SHADER_OPTIONS="debuggingEnabled=1 libraryValidation=1"
+      log "Metal configured for maximum validation"
+      ;;
+      
+    "standard"|*)
+      # Standard configuration with reasonable validation
+      export METAL_DEVICE_WRAPPER_TYPE="default"
+      export METAL_DEBUG_ERROR_MODE="report"
+      export METAL_SHADER_VALIDATION="true"
+      export METAL_RUNTIME_VALIDATION="true"
+      log "Metal configured with standard settings"
+      ;;
+  esac
+  
+  # Log Metal configuration
+  env | grep -E "METAL_|MTL_" > "$METAL_DIAGNOSTICS_DIR/metal-environment.log" 2>&1 || true
+  
+  # Check if Metal framework is available
+  if [ -d "/System/Library/Frameworks/Metal.framework" ]; then
+    log "Metal framework detected on system"
+    echo "METAL_FRAMEWORK_AVAILABLE=true" >> $GITHUB_OUTPUT
+  else
+    log "Metal framework not found"
+    echo "METAL_FRAMEWORK_AVAILABLE=false" >> $GITHUB_OUTPUT
+  fi
+  
+  # Additional Metal debug utilities if running on macOS
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    # Try to get GPU information
+    system_profiler SPDisplaysDataType > "$METAL_DIAGNOSTICS_DIR/gpu-info.log" 2>&1 || true
+    
+    # Note the Metal configuration in the outputs
+    echo "METAL_CONFIG=$METAL_CONFIG" >> $GITHUB_OUTPUT
+    echo "METAL_DIAGNOSTICS_DIR=$METAL_DIAGNOSTICS_DIR" >> $GITHUB_OUTPUT
+  fi
 fi
 
 # Set output variables

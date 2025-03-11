@@ -48,6 +48,7 @@ jobs:
           HAS_DOC_CHANGES=false
           HAS_CI_CHANGES=false
           HAS_DEPENDENCIES_CHANGES=false
+          HAS_METAL_CHANGES=false
           CHANGE_SIZE="size/small"
           
           # Set file count for size labeling
@@ -84,6 +85,11 @@ jobs:
             if [[ "$file" == */Podfile* || "$file" == *.podspec || "$file" == */Package.swift || "$file" == */Package.resolved ]]; then
               HAS_DEPENDENCIES_CHANGES=true
             fi
+            
+            # Check for Metal-related files
+            if [[ "$file" == *.metal || "$file" == *Metal* || "$file" == *MTL* || "$file" == *.air ]]; then
+              HAS_METAL_CHANGES=true
+            fi
           done
           
           # Create labels array
@@ -111,6 +117,10 @@ jobs:
           
           if [ "$HAS_DEPENDENCIES_CHANGES" = true ]; then
             LABELS+=("area/dependencies")
+          fi
+          
+          if [ "$HAS_METAL_CHANGES" = true ]; then
+            LABELS+=("area/metal")
           fi
           
           # Output labels as JSON array for the next step
@@ -160,6 +170,7 @@ jobs:
               'area/documentation': 'Documentation updates',
               'area/ci': 'CI/CD workflow changes',
               'area/dependencies': 'Dependency updates',
+              'area/metal': 'Metal shader or GPU-accelerated code changes that may require specialized review',
               'size/small': 'Small PR with limited scope',
               'size/medium': 'Medium sized PR with broader changes',
               'size/large': 'Large PR with significant changes'
