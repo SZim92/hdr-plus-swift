@@ -1,0 +1,268 @@
+name: Reference Image Library Maintenance
+
+on:
+  workflow_dispatch:
+    inputs:
+      image-count:
+        description: 'Number of reference images to generate'
+        required: false
+        default: '10'
+      force-update:
+        description: 'Force update of reference images'
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 0 * * 0'  # Run every Sunday at midnight UTC
+
+# Set explicit permissions
+permissions:
+  contents: write  # Needed to commit updated reference images
+
+jobs:
+  update-reference-images:
+    name: Update Reference Image Library
+    runs-on: macos-14  # Use Apple Silicon for best Metal performance
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Swift environment
+        run: |
+          chmod +x .github/scripts/setup-swift-env.sh
+          ./.github/scripts/setup-swift-env.sh 'reference-images' 'false' 'true' 'false' 'standard'
+      
+      - name: Check Metal support
+        id: metal-check
+        run: |
+          # Use Metal detection script
+          chmod +x .github/scripts/check-metal-support.sh
+          ./.github/scripts/check-metal-support.sh metal-diagnostics
+          
+          # Extract Metal support status
+          if [ -f "metal-diagnostics/metal_support_summary.md" ]; then
+            echo "Found Metal diagnostics"
+            METAL_SUPPORTED=$(grep "Metal Supported" metal-diagnostics/metal_support_summary.md | grep -q "true" && echo "true" || echo "false")
+            echo "metal_supported=$METAL_SUPPORTED" >> $GITHUB_OUTPUT
+          else
+            echo "No Metal diagnostics found"
+            echo "metal_supported=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Check existing reference images
+        id: check-refs
+        run: |
+          # Set defaults
+          echo "update_needed=false" >> $GITHUB_OUTPUT
+          echo "existing_count=0" >> $GITHUB_OUTPUT
+          
+          # Check if reference images directory exists
+          if [ -d "reference-images" ]; then
+            # Count existing reference images
+            EXISTING_COUNT=$(find reference-images -name "*.png" | wc -l | xargs)
+            echo "Found $EXISTING_COUNT existing reference images"
+            echo "existing_count=$EXISTING_COUNT" >> $GITHUB_OUTPUT
+            
+            # Check if force update is requested
+            if [ "${{ github.event.inputs.force-update }}" == "true" ]; then
+              echo "Force update requested"
+              echo "update_needed=true" >> $GITHUB_OUTPUT
+            else
+              # Determine if update is needed based on age of reference images
+              OLDEST_IMAGE=$(find reference-images -name "*.png" -type f -printf '%T@ %p\n' 2>/dev/null | sort | head -1 | cut -d' ' -f2)
+              
+              if [ -n "$OLDEST_IMAGE" ]; then
+                # Get modification time in days
+                OLDEST_MOD_TIME=$(stat -c %Y "$OLDEST_IMAGE" 2>/dev/null || stat -f %m "$OLDEST_IMAGE")
+                CURRENT_TIME=$(date +%s)
+                DAYS_OLD=$(( ($CURRENT_TIME - $OLDEST_MOD_TIME) / 86400 ))
+                
+                echo "Oldest reference image is $DAYS_OLD days old"
+                
+                # Update if older than 30 days
+                if [ $DAYS_OLD -gt 30 ]; then
+                  echo "Reference images are more than 30 days old, update needed"
+                  echo "update_needed=true" >> $GITHUB_OUTPUT
+                else
+                  echo "Reference images are recent enough, no update needed"
+                fi
+              else
+                echo "Could not determine age of reference images"
+                echo "update_needed=true" >> $GITHUB_OUTPUT
+              fi
+            fi
+          else
+            echo "No existing reference images found, update needed"
+            echo "update_needed=true" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Generate reference images
+        if: steps.metal-check.outputs.metal_supported == 'true' && (steps.check-refs.outputs.update_needed == 'true' || github.event_name == 'workflow_dispatch')
+        run: |
+          echo "Generating reference images for visual regression testing..."
+          
+          # Create or ensure the reference images directory exists
+          mkdir -p reference-images
+          
+          # Determine number of images to generate
+          IMAGE_COUNT="${{ github.event.inputs.image-count }}"
+          if [ -z "$IMAGE_COUNT" ]; then
+            IMAGE_COUNT=10
+          fi
+          
+          # Generate reference images using our test scene renderer
+          chmod +x tools/render-test-scenes.sh
+          ./tools/render-test-scenes.sh --count $IMAGE_COUNT --output reference-images --verbose
+          
+          # Verify the generated images exist
+          NEW_COUNT=$(find reference-images -name "*.png" | wc -l | xargs)
+          echo "Generated $NEW_COUNT reference images"
+          
+          if [ $NEW_COUNT -eq 0 ]; then
+            echo "::error::Failed to generate reference images"
+            exit 1
+          fi
+      
+      - name: Generate metadata for reference images
+        if: steps.metal-check.outputs.metal_supported == 'true' && (steps.check-refs.outputs.update_needed == 'true' || github.event_name == 'workflow_dispatch')
+        run: |
+          echo "Generating metadata for reference images..."
+          
+          # Create metadata file
+          cat > reference-images/metadata.json << EOF
+          {
+            "generatedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "generatedBy": "reference-image-library workflow",
+            "commitSha": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "imageCount": $(find reference-images -name "*.png" | wc -l | xargs),
+            "metalDiagnostics": {
+              "gpuModel": "$(grep "GPU Model" metal-diagnostics/metal_support_summary.md 2>/dev/null | cut -d':' -f2 | xargs || echo "Unknown")",
+              "architecture": "$(grep "Architecture" metal-diagnostics/metal_support_summary.md 2>/dev/null | cut -d':' -f2 | xargs || echo "Unknown")",
+              "metalVersion": "$(grep "Metal Version" metal-diagnostics/metal_support_summary.md 2>/dev/null | cut -d':' -f2 | xargs || echo "Unknown")"
+            }
+          }
+          EOF
+          
+          # Also create a human-readable markdown file
+          cat > reference-images/README.md << EOF
+          # HDR+ Swift Reference Images
+          
+          Reference images for visual regression testing.
+          
+          - **Generated**: $(date)
+          - **Total Images**: $(find reference-images -name "*.png" | wc -l | xargs)
+          - **Commit**: ${{ github.sha }}
+          - **Branch**: ${{ github.ref_name }}
+          
+          ## Usage
+          
+          These images are used by the visual regression testing workflow to compare against
+          rendered output from pull requests, ensuring visual quality is maintained.
+          
+          ## Image Types
+          
+          | Scene Type | Purpose |
+          |------------|---------|
+          | High Dynamic Range | Verify HDR processing capabilities |
+          | Low Light | Check noise reduction and detail preservation |
+          | Portrait Mode | Verify subject isolation and bokeh quality |
+          | Bright Outdoor | Check highlight recovery and natural colors |
+          | Night Mode | Verify long exposure quality |
+          
+          ## Maintenance
+          
+          Reference images are automatically updated on a monthly basis or when manually
+          triggered via the reference-image-library workflow.
+          EOF
+      
+      - name: Commit updated reference images
+        if: steps.metal-check.outputs.metal_supported == 'true' && (steps.check-refs.outputs.update_needed == 'true' || github.event_name == 'workflow_dispatch')
+        run: |
+          echo "Committing updated reference images to repository..."
+          
+          # Configure git
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # Determine if this is an update or initial creation
+          if [ "${{ steps.check-refs.outputs.existing_count }}" -eq "0" ]; then
+            COMMIT_MSG="chore: create initial reference image library"
+          else
+            COMMIT_MSG="chore: update reference image library"
+          fi
+          
+          # Commit changes
+          git add reference-images/
+          git commit -m "$COMMIT_MSG" -m "Generated by reference-image-library workflow" || echo "No changes to commit"
+          
+          # Create or update reference-images branch
+          git push origin HEAD:reference-images -f
+      
+      - name: Create pull request for reference image update
+        if: steps.metal-check.outputs.metal_supported == 'true' && (steps.check-refs.outputs.update_needed == 'true' || github.event_name == 'workflow_dispatch')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Check if PR already exists and avoid creating duplicate
+          PR_EXISTS=$(gh pr list --head reference-images --base main --json number | jq 'length')
+          
+          if [ "$PR_EXISTS" -eq "0" ]; then
+            echo "Creating pull request for reference image updates..."
+            
+            # Create pull request
+            gh pr create \
+              --title "Update reference image library" \
+              --body "This PR updates the reference images used for visual regression testing.
+              
+              - Generated: $(date)
+              - Total Images: $(find reference-images -name "*.png" | wc -l | xargs)
+              
+              These reference images are used by the visual testing workflow to compare against 
+              rendered output from pull requests, ensuring visual quality is maintained.
+              
+              This update was generated by the \`reference-image-library\` workflow." \
+              --base main \
+              --head reference-images \
+              --label "area/testing" \
+              --label "area/metal" \
+              --label "automated"
+          else
+            echo "Pull request already exists for reference image updates"
+          fi
+      
+      - name: Upload reference images as artifacts
+        if: steps.metal-check.outputs.metal_supported == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: reference-images
+          path: reference-images/
+          retention-days: 30
+      
+      - name: Add summary
+        run: |
+          echo "## Reference Image Library Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.metal-check.outputs.metal_supported }}" == "true" ]; then
+            if [ "${{ steps.check-refs.outputs.update_needed }}" == "true" ] || [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+              echo "✅ Reference images have been updated" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+              echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+              echo "| Previous Count | ${{ steps.check-refs.outputs.existing_count }} |" >> $GITHUB_STEP_SUMMARY
+              echo "| New Count | $(find reference-images -name "*.png" 2>/dev/null | wc -l | xargs || echo 0) |" >> $GITHUB_STEP_SUMMARY
+              echo "| Generated At | $(date) |" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "A pull request has been created to merge these changes." >> $GITHUB_STEP_SUMMARY
+            else
+              echo "ℹ️ Reference images are up to date, no update was needed" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "Current reference images are less than 30 days old." >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "⚠️ Metal is not supported on this runner. Reference images could not be generated." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Consider running this workflow on a macOS runner with Metal support." >> $GITHUB_STEP_SUMMARY
+          fi 

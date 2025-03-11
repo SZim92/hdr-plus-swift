@@ -284,16 +284,164 @@ jobs:
           path: shader-compatibility/
           retention-days: 14
   
+  # Add GPU family visual testing
+  visual-compatibility:
+    name: Visual Compatibility Across GPUs
+    runs-on: macos-latest
+    # Only run on scheduled events, manual triggers, or PRs labeled with metal
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'area/metal')
+    needs: [config]
+    strategy:
+      fail-fast: false  # Don't fail the entire matrix if one GPU family fails
+      matrix:
+        gpu-family: ["mac1", "apple7"]  # Test on both older and newer GPU architectures
+        
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Add Metal shader compilation cache
+      - name: Cache Metal shaders
+        uses: actions/cache@v4
+        with:
+          path: .metal-cache
+          key: metal-visual-${{ runner.os }}-${{ matrix.gpu-family }}-${{ hashFiles('**/*.metal') }}
+          restore-keys: |
+            metal-visual-${{ runner.os }}-${{ matrix.gpu-family }}-
+            metal-visual-${{ runner.os }}-
+      
+      - name: Set up Swift environment
+        run: |
+          chmod +x .github/scripts/setup-swift-env.sh
+          ./.github/scripts/setup-swift-env.sh 'metal-visual-${{ matrix.gpu-family }}' 'false' 'true' 'false' 'standard'
+      
+      - name: Check Metal support
+        id: metal-check
+        run: |
+          # Use Metal detection script
+          chmod +x .github/scripts/check-metal-support.sh
+          ./.github/scripts/check-metal-support.sh metal-diagnostics
+          
+          # Extract Metal support status
+          if [ -f "metal-diagnostics/metal_support_summary.md" ]; then
+            echo "Found Metal diagnostics"
+            METAL_SUPPORTED=$(grep "Metal Supported" metal-diagnostics/metal_support_summary.md | grep -q "true" && echo "true" || echo "false")
+            echo "metal_supported=$METAL_SUPPORTED" >> $GITHUB_OUTPUT
+          else
+            echo "No Metal diagnostics found"
+            echo "metal_supported=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Generate reference renders for GPU family
+        if: steps.metal-check.outputs.metal_supported == 'true'
+        run: |
+          echo "Generating reference renders for GPU family ${{ matrix.gpu-family }}..."
+          
+          # Create output directory for renders
+          mkdir -p visual-compatibility/${{ matrix.gpu-family }}/reference
+          
+          # Set up environment for specific GPU family
+          export MTL_DEVICE_FAMILY=${{ matrix.gpu-family }}
+          
+          # Generate renders using our test scene renderer
+          chmod +x tools/render-test-scenes.sh
+          ./tools/render-test-scenes.sh --count 5 --output visual-compatibility/${{ matrix.gpu-family }}/reference
+          
+          # Verify the renders exist
+          RENDER_COUNT=$(find visual-compatibility/${{ matrix.gpu-family }}/reference -name "*.png" | wc -l | xargs)
+          echo "Generated $RENDER_COUNT reference renders for GPU family ${{ matrix.gpu-family }}"
+          
+          if [ $RENDER_COUNT -eq 0 ]; then
+            echo "::warning::No renders were generated for GPU family ${{ matrix.gpu-family }}"
+          fi
+      
+      - name: Analyze GPU family rendering characteristics
+        if: steps.metal-check.outputs.metal_supported == 'true'
+        run: |
+          echo "Analyzing rendering characteristics for GPU family ${{ matrix.gpu-family }}..."
+          
+          # Create output directory for analysis
+          mkdir -p visual-compatibility/${{ matrix.gpu-family }}/analysis
+          
+          # Create summary file
+          SUMMARY_FILE="visual-compatibility/${{ matrix.gpu-family }}/summary.md"
+          echo "# Metal Rendering Analysis for GPU Family ${{ matrix.gpu-family }}" > $SUMMARY_FILE
+          echo "" >> $SUMMARY_FILE
+          echo "Analysis executed on: $(date)" >> $SUMMARY_FILE
+          echo "" >> $SUMMARY_FILE
+          
+          # Add GPU family information
+          echo "## GPU Family Information" >> $SUMMARY_FILE
+          echo "" >> $SUMMARY_FILE
+          echo "| Property | Value |" >> $SUMMARY_FILE
+          echo "|----------|-------|" >> $SUMMARY_FILE
+          echo "| Family | ${{ matrix.gpu-family }} |" >> $SUMMARY_FILE
+          
+          # Extract additional info from Metal diagnostics if available
+          if [ -f "metal-diagnostics/metal_support_summary.md" ]; then
+            GPU_MODEL=$(grep "GPU Model" metal-diagnostics/metal_support_summary.md | cut -d':' -f2 | xargs || echo "Unknown")
+            ARCHITECTURE=$(grep "Architecture" metal-diagnostics/metal_support_summary.md | cut -d':' -f2 | xargs || echo "Unknown")
+            METAL_VERSION=$(grep "Metal Version" metal-diagnostics/metal_support_summary.md | cut -d':' -f2 | xargs || echo "Unknown")
+            
+            echo "| GPU Model | $GPU_MODEL |" >> $SUMMARY_FILE
+            echo "| Architecture | $ARCHITECTURE |" >> $SUMMARY_FILE
+            echo "| Metal Version | $METAL_VERSION |" >> $SUMMARY_FILE
+          fi
+          
+          echo "" >> $SUMMARY_FILE
+          
+          # Analyze rendering results
+          echo "## Rendering Analysis" >> $SUMMARY_FILE
+          echo "" >> $SUMMARY_FILE
+          
+          # If no renders were generated, indicate that
+          RENDER_COUNT=$(find visual-compatibility/${{ matrix.gpu-family }}/reference -name "*.png" | wc -l | xargs)
+          if [ $RENDER_COUNT -eq 0 ]; then
+            echo "⚠️ No renders were generated for this GPU family" >> $SUMMARY_FILE
+          else
+            echo "✅ Successfully generated $RENDER_COUNT renders for this GPU family" >> $SUMMARY_FILE
+            
+            # List renders with basic info
+            echo "" >> $SUMMARY_FILE
+            echo "| Scene | Resolution | File Size |" >> $SUMMARY_FILE
+            echo "|-------|------------|-----------|" >> $SUMMARY_FILE
+            
+            for render in $(find visual-compatibility/${{ matrix.gpu-family }}/reference -name "*.png" | sort); do
+              SCENE_NAME=$(basename "$render" .png)
+              
+              # Get dimensions using sips (built into macOS)
+              DIMENSIONS=$(sips -g pixelWidth -g pixelHeight "$render" | grep pixel | awk '{print $2}' | paste -sd "x" -)
+              
+              # Get file size
+              FILE_SIZE=$(du -h "$render" | cut -f1)
+              
+              echo "| $SCENE_NAME | $DIMENSIONS | $FILE_SIZE |" >> $SUMMARY_FILE
+            done
+          fi
+          
+          # Add summary to GitHub step summary
+          cat $SUMMARY_FILE >> $GITHUB_STEP_SUMMARY
+      
+      - name: Upload visual compatibility results
+        if: steps.metal-check.outputs.metal_supported == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-compatibility-${{ matrix.gpu-family }}
+          path: visual-compatibility/${{ matrix.gpu-family }}/
+          retention-days: 14
+  
   # Add PR feedback only for pull requests
   pr-feedback:
     name: PR Feedback
     if: github.event_name == 'pull_request'
-    needs: [summarize, shader-compatibility]
+    needs: [summarize, shader-compatibility, visual-compatibility]
     uses: ./.github/workflows/shared/enhanced-pr-feedback.yml
     with:
       pr-number: ${{ github.event.pull_request.number }}
       artifact-prefix: 'test-results-'
       include-metal-diagnostics: true
-      include-visual-comparisons: false
+      include-visual-comparisons: true  # Enable visual comparison feedback
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }} 
