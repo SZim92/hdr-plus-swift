@@ -162,6 +162,7 @@ Example implementation:
 ```yaml
 
 - name: Deploy directly to gh-pages branch
+
   run: |
     git config --global user.name "GitHub Actions"
     git config --global user.email "actions@github.com"
@@ -244,6 +245,7 @@ Flaky tests can be a significant problem in CI environments. We provide two appr
 ```yaml
 
 - name: Run tests with retry
+
   run: |
     MAX_ATTEMPTS=3
     ATTEMPT=1
@@ -366,6 +368,7 @@ For known flaky tests, you can use the `retry-utility.yml` workflow or implement
 ```yaml
 
 - name: Run tests with retry
+
   run: |
     MAX_ATTEMPTS=3
     ATTEMPT=1

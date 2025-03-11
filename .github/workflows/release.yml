@@ -108,6 +108,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO
             
       - name: Package the application
+        id: build-package
         run: |
           APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "*.app" -not -path "*/Archive/*" | head -1)
           
@@ -122,6 +123,7 @@ jobs:
           ZIP_NAME="HDRPlus-${{ github.event.inputs.version }}.zip"
           
           echo "Creating ZIP archive of $APP_NAME as $ZIP_NAME"
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
           ditto -c -k --keepParent "$APP_NAME" "$GITHUB_WORKSPACE/artifacts/$ZIP_NAME"
           
           cd "$GITHUB_WORKSPACE"
@@ -192,14 +194,14 @@ jobs:
           echo "Uploading assets to release $RELEASE_ID"
           
           # Upload the zip file
-          ZIP_PATH="${{ steps.build.outputs.zip_path }}"
+          ZIP_PATH="${{ steps.build-package.outputs.zip_path }}"
           ZIP_NAME=$(basename "$ZIP_PATH")
           
           echo "Uploading $ZIP_PATH"
           gh release upload "v${{ github.event.inputs.version }}" "$ZIP_PATH" --clobber
           
           # Upload checksum file
-          CHECKSUM_PATH="${{ steps.build.outputs.zip_path }}.sha256"
+          CHECKSUM_PATH="${{ steps.build-package.outputs.zip_path }}.sha256"
           if [ -f "$CHECKSUM_PATH" ]; then
             echo "Uploading $CHECKSUM_PATH"
             gh release upload "v${{ github.event.inputs.version }}" "$CHECKSUM_PATH" --clobber
