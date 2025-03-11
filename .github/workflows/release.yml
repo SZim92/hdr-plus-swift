@@ -250,6 +250,12 @@ jobs:
       - name: Create GitHub Release
         id: create-release
         uses: actions/github-script@v7
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+          IS_DRAFT: ${{ github.event.inputs.draft }}
+          IS_PRERELEASE: ${{ github.event.inputs.pre-release }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.repository.name }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -264,16 +270,18 @@ jobs:
               changelogContent = 'No changelog available';
             }
             
-            const version = '${{ github.event.inputs.version }}';
-            const isDraft = ${{ github.event.inputs.draft }};
-            const isPrerelease = ${{ github.event.inputs.pre-release }};
+            const version = process.env.VERSION;
+            const isDraft = process.env.IS_DRAFT === 'true';
+            const isPrerelease = process.env.IS_PRERELEASE === 'true';
+            const repoOwner = process.env.REPO_OWNER;
+            const repoName = process.env.REPO_NAME;
             
             // Create release
             console.log(`Creating ${isDraft ? 'draft ' : ''}${isPrerelease ? 'pre-release' : 'release'} v${version}`);
             
             const release = await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
+              owner: repoOwner,
+              repo: repoName,
               tag_name: `v${version}`,
               name: `v${version}`,
               body: changelogContent,
