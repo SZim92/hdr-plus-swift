@@ -397,17 +397,129 @@ jobs:
             if grep -r "import Metal" --include="*.swift" . > /dev/null; then
               echo "Metal API usage detected in Swift code. Checking for security issues..." >> macos-security-reports/metal-security.md
               
-              # Look for common Metal security issues (this is a basic example)
+              # Look for common Metal security issues
               echo "### Potential Issues" >> macos-security-reports/metal-security.md
               echo "" >> macos-security-reports/metal-security.md
               
-              # Check for GPU memory management issues
-              MEMORY_ISSUES=$(grep -r "MTLBuffer" --include="*.swift" . | wc -l)
-              echo "- Found $MEMORY_ISSUES uses of MTLBuffer (check for proper memory management)" >> macos-security-reports/metal-security.md
+              # Enhanced Metal security checks
               
-              # Check for shader validation
-              SHADER_VALIDATION=$(grep -r "MTLCompileOptions" --include="*.swift" . | grep -c "preprocessorMacros" || echo "0")
-              echo "- Found $SHADER_VALIDATION shader compile options (verify proper validation)" >> macos-security-reports/metal-security.md
+              # 1. Check for GPU memory management issues
+              echo "#### GPU Memory Management" >> macos-security-reports/metal-security.md
+              echo "" >> macos-security-reports/metal-security.md
+              
+              # Find potential memory leaks with MTLBuffer
+              BUFFER_LEAKS=$(grep -r "MTLBuffer" --include="*.swift" . | grep -v "release\|autorelease\|autoreleasepool" | wc -l)
+              echo "- Found $BUFFER_LEAKS potential MTLBuffer allocation(s) without explicit release" >> macos-security-reports/metal-security.md
+              
+              # Check for purgeableState usage for large buffers
+              PURGEABLE_USAGE=$(grep -r "purgeableState" --include="*.swift" . | wc -l)
+              echo "- Found $PURGEABLE_USAGE use(s) of purgeableState for memory management" >> macos-security-reports/metal-security.md
+              
+              # 2. Check for shader security vulnerabilities
+              echo "" >> macos-security-reports/metal-security.md
+              echo "#### Shader Security Analysis" >> macos-security-reports/metal-security.md
+              echo "" >> macos-security-reports/metal-security.md
+              
+              # Create a directory for Metal shader analysis
+              mkdir -p macos-security-reports/metal-shaders
+              
+              # Find all Metal shader files
+              find . -name "*.metal" -type f > macos-security-reports/metal-shader-files.txt
+              SHADER_COUNT=$(cat macos-security-reports/metal-shader-files.txt | wc -l)
+              
+              if [ $SHADER_COUNT -gt 0 ]; then
+                echo "Analyzing $SHADER_COUNT Metal shader file(s)..." >> macos-security-reports/metal-security.md
+                
+                # Check shaders for common issues
+                # 1. Unbounded loops
+                UNBOUNDED_LOOPS=$(grep -r "for\s*(" --include="*.metal" . | grep -v "limit\|bound\|<\s*[0-9]" | wc -l)
+                echo "- Found $UNBOUNDED_LOOPS potential unbounded loop(s) in Metal shaders" >> macos-security-reports/metal-security.md
+                
+                # 2. Check for proper bounds checking in array access
+                ARRAY_ACCESS=$(grep -r "\[[^]]*\]" --include="*.metal" . | wc -l)
+                BOUNDS_CHECKS=$(grep -r "if\s*(.*<.*size\|length\|count\|bounds\|limit)" --include="*.metal" . | wc -l)
+                echo "- Found $ARRAY_ACCESS array access(es) with approximately $BOUNDS_CHECKS bounds check(s)" >> macos-security-reports/metal-security.md
+                
+                # 3. Check for buffer overflow vulnerabilities in compute kernels
+                THREAD_CHECKS=$(grep -r "threadgroup_position_in_grid\|thread_position_in_grid" --include="*.metal" . | grep -r "if\s*(.*<.*size\|length\|count\|bounds\|limit)" --include="*.metal" . | wc -l)
+                echo "- Found $THREAD_CHECKS thread position bound check(s) in compute kernels" >> macos-security-reports/metal-security.md
+                
+                # 4. Find any unsafe Metal function attributes
+                UNSAFE_ATTRS=$(grep -r "[[device]]" --include="*.metal" . | wc -l)
+                echo "- Found $UNSAFE_ATTRS use(s) of [[device]] attribute (ensure proper synchronization)" >> macos-security-reports/metal-security.md
+                
+                # Try to compile shaders with validation enabled
+                echo "" >> macos-security-reports/metal-security.md
+                echo "#### Shader Compilation Validation" >> macos-security-reports/metal-security.md
+                echo "" >> macos-security-reports/metal-security.md
+                
+                # Iterate through each shader and attempt compilation with validation
+                VALIDATION_ERRORS=0
+                while read shader_file; do
+                  echo "Validating $shader_file..." >> macos-security-reports/metal-shader-validation.log
+                  
+                  # Metal validation compilation (ignoring errors as we're just collecting them)
+                  xcrun -sdk macosx metal -c "$shader_file" -o /tmp/temp.air \
+                    -std=metal2.0 \
+                    -fno-fast-math \
+                    -gline-tables-only \
+                    -MO \
+                    2>> macos-security-reports/metal-shader-validation.log || ((VALIDATION_ERRORS++))
+                done < macos-security-reports/metal-shader-files.txt
+                
+                echo "- Found $VALIDATION_ERRORS shader(s) with validation errors" >> macos-security-reports/metal-security.md
+                
+                if [ $VALIDATION_ERRORS -gt 0 ]; then
+                  echo "- ⚠️ See metal-shader-validation.log for details" >> macos-security-reports/metal-security.md
+                else
+                  echo "- ✅ All shaders passed basic validation" >> macos-security-reports/metal-security.md
+                fi
+              else
+                echo "No Metal shader files (.metal) found in the project." >> macos-security-reports/metal-security.md
+              fi
+              
+              # 3. Check for proper synchronization in Metal code
+              echo "" >> macos-security-reports/metal-security.md
+              echo "#### Synchronization Analysis" >> macos-security-reports/metal-security.md
+              echo "" >> macos-security-reports/metal-security.md
+              
+              # Look for proper use of semaphores and synchronization
+              WAIT_CALLS=$(grep -r "waitUntilCompleted" --include="*.swift" . | wc -l)
+              SEMAPHORE_USAGE=$(grep -r "dispatchSemaphore" --include="*.swift" . | wc -l)
+              
+              echo "- Found $WAIT_CALLS use(s) of waitUntilCompleted (check for blocking main thread)" >> macos-security-reports/metal-security.md
+              echo "- Found $SEMAPHORE_USAGE use(s) of dispatch semaphores for synchronization" >> macos-security-reports/metal-security.md
+              
+              # 4. Summary and recommendations
+              echo "" >> macos-security-reports/metal-security.md
+              echo "### Recommendations" >> macos-security-reports/metal-security.md
+              echo "" >> macos-security-reports/metal-security.md
+              
+              # Add conditional recommendations based on findings
+              if [ $BUFFER_LEAKS -gt 0 ]; then
+                echo "- Review MTLBuffer management to prevent GPU memory leaks" >> macos-security-reports/metal-security.md
+              fi
+              
+              if [ $UNBOUNDED_LOOPS -gt 0 ]; then
+                echo "- Add explicit bounds to all loops in Metal shaders" >> macos-security-reports/metal-security.md
+              fi
+              
+              if [ $ARRAY_ACCESS -gt $BOUNDS_CHECKS ]; then
+                echo "- Add bounds checking for array access in Metal shaders" >> macos-security-reports/metal-security.md
+              fi
+              
+              if [ $WAIT_CALLS -gt 0 ]; then
+                echo "- Review usage of waitUntilCompleted to avoid blocking the main thread" >> macos-security-reports/metal-security.md
+              fi
+              
+              if [ $VALIDATION_ERRORS -gt 0 ]; then
+                echo "- Fix validation errors in Metal shaders" >> macos-security-reports/metal-security.md
+              fi
+              
+              # General recommendations for Metal security
+              echo "- Consider using MTLFence for better synchronization between GPU work" >> macos-security-reports/metal-security.md
+              echo "- Verify proper error handling for Metal API calls" >> macos-security-reports/metal-security.md
+              echo "- Test on multiple GPU architectures (Intel, AMD, Apple Silicon)" >> macos-security-reports/metal-security.md
             else
               echo "No Metal API usage detected in Swift code." >> macos-security-reports/metal-security.md
             fi

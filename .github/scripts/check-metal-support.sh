@@ -1,158 +1,184 @@
 #!/bin/bash
-# Script to check Metal support on macOS systems
-# This script outputs information about Metal support and GPU capabilities
+# Metal Support Detection and Diagnostics Script
+# 
+# This script checks if Metal is supported on the current system and provides
+# detailed diagnostics useful for debugging Metal-related issues.
+#
+# Usage:
+#   ./check-metal-support.sh [output_dir]
+#
+# If output_dir is provided, results are saved to that directory.
+# Otherwise, results are printed to stdout.
 
 set -e
 
-# Output directory for results
-OUTPUT_DIR="${1:-"metal-diagnostics"}"
-mkdir -p "$OUTPUT_DIR"
+OUTPUT_DIR=${1:-"metal-diagnostics"}
 
-# Function to log messages with timestamps
-log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
-}
-
-# Function to check if a command exists
-command_exists() {
-  command -v "$1" >/dev/null 2>&1
-}
-
-# Get basic system information
-log "Collecting system information..."
-system_info=$(system_profiler SPSoftwareDataType SPHardwareDataType 2>/dev/null || echo "System Profiler not available")
-echo "$system_info" > "$OUTPUT_DIR/system_info.txt"
-
-# Extract macOS version
-os_version=$(sw_vers -productVersion 2>/dev/null || echo "Unknown")
-echo "macOS Version: $os_version" >> "$OUTPUT_DIR/system_info.txt"
-
-# Get CPU architecture
-architecture=$(uname -m)
-echo "CPU Architecture: $architecture" >> "$OUTPUT_DIR/system_info.txt"
-
-# Check for Metal support
-log "Checking Metal support..."
-metal_supported=false
-metal_version="Unknown"
-gpu_info="Not available"
-
-# Check if we can get GPU information
-if command_exists "system_profiler"; then
-  gpu_info=$(system_profiler SPDisplaysDataType 2>/dev/null || echo "GPU information not available")
-  echo "$gpu_info" > "$OUTPUT_DIR/gpu_info.txt"
-  
-  # Check for Metal capability in GPU info
-  if echo "$gpu_info" | grep -i "metal:" > /dev/null; then
-    metal_supported=true
-    metal_version=$(echo "$gpu_info" | grep -i "metal:" | head -1 | sed 's/.*Metal: //')
-    log "Metal support detected: $metal_version"
-  else
-    log "Metal support not explicitly mentioned in system profile"
-  fi
-else
-  log "system_profiler command not available, cannot determine GPU details"
+# Create output directory if specified
+if [ -n "$OUTPUT_DIR" ]; then
+  mkdir -p "$OUTPUT_DIR"
+  echo "Metal diagnostics will be saved to: $OUTPUT_DIR"
 fi
 
-# Additional check using Metal framework if on macOS
-if command_exists "xcrun"; then
-  log "Checking Metal support using Metal framework..."
+# Function to output either to file or stdout
+output() {
+  local content="$1"
+  local filename="$2"
   
-  # Create a temporary Swift file to check Metal support
-  cat > "$OUTPUT_DIR/check_metal.swift" << 'EOF'
-import Metal
-import Foundation
-
-func checkMetalSupport() -> (supported: Bool, details: String) {
-    guard let devices = MTLCopyAllDevices() as? [MTLDevice], !devices.isEmpty else {
-        return (false, "No Metal devices found")
-    }
-    
-    var details = "Metal devices found:\n"
-    
-    for (index, device) in devices.enumerated() {
-        details += "Device \(index): \(device.name)\n"
-        details += "  - Headless: \(device.isHeadless)\n"
-        details += "  - Low Power: \(device.isLowPower)\n"
-        details += "  - Removable: \(device.isRemovable)\n"
-        
-        if #available(macOS 10.15, *) {
-            details += "  - Max Threads Per ThreadGroup: \(device.maxThreadsPerThreadgroup)\n"
-            details += "  - Max Transfer Rate: \(device.maxTransferRate) bytes/sec\n"
-        }
-        
-        if #available(macOS 11.0, *) {
-            details += "  - Has Unified Memory: \(device.hasUnifiedMemory)\n"
-        }
-        
-        if #available(macOS 13.0, *) {
-            details += "  - Supports Dynamic Libraries: \(device.supportsDynamicLibraries)\n"
-        }
-    }
-    
-    return (true, details)
+  if [ -n "$OUTPUT_DIR" ] && [ -n "$filename" ]; then
+    echo "$content" >> "$OUTPUT_DIR/$filename"
+  else
+    echo "$content"
+  fi
 }
 
-let (supported, details) = checkMetalSupport()
-print("METAL_SUPPORTED=\(supported)")
-print("METAL_DETAILS=<<EOF")
-print(details)
-print("EOF")
-EOF
+# Start summary file
+if [ -n "$OUTPUT_DIR" ]; then
+  echo "# Metal Environment Diagnostics" > "$OUTPUT_DIR/metal_support_summary.md"
+  echo "" >> "$OUTPUT_DIR/metal_support_summary.md"
+  echo "Generated on: $(date)" >> "$OUTPUT_DIR/metal_support_summary.md"
+  echo "" >> "$OUTPUT_DIR/metal_support_summary.md"
+fi
 
-  # Run the Swift code to check Metal support
-  if xcrun swift "$OUTPUT_DIR/check_metal.swift" > "$OUTPUT_DIR/metal_check_result.txt" 2>&1; then
-    # Extract results from the output
-    if grep -q "METAL_SUPPORTED=true" "$OUTPUT_DIR/metal_check_result.txt"; then
-      metal_supported=true
-      log "Metal framework check confirms Metal support"
-    else
-      log "Metal framework check indicates no Metal support"
+# Check operating system
+OS=$(uname -s)
+OS_VERSION=$(sw_vers -productVersion 2>/dev/null || echo "Unknown")
+output "OS: $OS $OS_VERSION" "metal_support_summary.md"
+
+# Check architecture
+ARCH=$(uname -m)
+output "Architecture: $ARCH" "metal_support_summary.md"
+
+# Get GPU information
+if [ "$OS" = "Darwin" ]; then
+  # Try system_profiler first for detailed info
+  if command -v system_profiler >/dev/null 2>&1; then
+    echo "Collecting GPU information..."
+    # Extract GPU info and format it for the summary
+    GPU_INFO=$(system_profiler SPDisplaysDataType 2>/dev/null | grep -A15 "Chipset Model:" | head -10)
+    
+    # Save full GPU info to separate file if output dir specified
+    if [ -n "$OUTPUT_DIR" ]; then
+      system_profiler SPDisplaysDataType > "$OUTPUT_DIR/gpu_details.txt"
     fi
     
-    # Extract detailed Metal information
-    sed -n '/METAL_DETAILS=<<EOF/,/EOF/p' "$OUTPUT_DIR/metal_check_result.txt" | \
-      grep -v "METAL_DETAILS=<<EOF" | grep -v "EOF" > "$OUTPUT_DIR/metal_details.txt"
+    # Extract GPU name for summary
+    GPU_NAME=$(echo "$GPU_INFO" | grep "Chipset Model:" | sed 's/.*Chipset Model: //' || echo "Unknown")
+    output "GPU: $GPU_NAME" "metal_support_summary.md"
+    
+    # Check if Metal is supported based on GPU info
+    if echo "$GPU_INFO" | grep -q "Metal:" && ! echo "$GPU_INFO" | grep -q "Metal: Not Supported"; then
+      METAL_SUPPORTED=true
+      METAL_INFO=$(echo "$GPU_INFO" | grep "Metal:" | sed 's/.*Metal: //' || echo "Supported")
+      output "Metal Support: $METAL_INFO" "metal_support_summary.md"
+    else
+      METAL_SUPPORTED=false
+      output "Metal Support: Not detected" "metal_support_summary.md"
+    fi
   else
-    log "Failed to run Metal support check using Swift"
-    echo "Error running Metal check script:" >> "$OUTPUT_DIR/metal_details.txt"
-    cat "$OUTPUT_DIR/metal_check_result.txt" >> "$OUTPUT_DIR/metal_details.txt"
+    # Fallback to more basic checks
+    output "GPU: Could not determine (system_profiler not available)" "metal_support_summary.md"
+    # Check macOS version - Metal requires 10.11+
+    if [[ "$OS_VERSION" = 10.* ]] && [[ ${OS_VERSION#10.} -lt 11 ]]; then
+      METAL_SUPPORTED=false
+      output "Metal Support: Not supported (macOS version too old)" "metal_support_summary.md"
+    else
+      # Assume modern Macs support Metal
+      METAL_SUPPORTED=true
+      output "Metal Support: Likely supported based on OS version" "metal_support_summary.md"
+    fi
   fi
 else
-  log "xcrun command not available, cannot check Metal support using framework"
+  # Non-macOS platform
+  output "GPU: Not applicable (non-macOS platform)" "metal_support_summary.md"
+  METAL_SUPPORTED=false
+  output "Metal Support: Not supported (non-macOS platform)" "metal_support_summary.md"
 fi
 
-# Write summary file
-log "Writing summary file..."
-cat > "$OUTPUT_DIR/metal_support_summary.md" << EOF
-# Metal Support Summary
+# Set the Metal supported flag for script output
+output "Metal Supported: $METAL_SUPPORTED" "metal_support_summary.md"
 
-## System Information
-- macOS Version: $os_version
-- Architecture: $architecture
+# Get additional Metal capabilities if supported
+if [ "$METAL_SUPPORTED" = true ]; then
+  echo "Checking Metal capabilities..."
+  
+  # Check if Metal tools are available
+  if xcrun --find metal >/dev/null 2>&1; then
+    METAL_VERSION=$(xcrun metal --version 2>/dev/null | head -1 || echo "Unknown version")
+    output "Metal Compiler: $METAL_VERSION" "metal_support_summary.md"
+    
+    # Capture Metal device info if output directory specified
+    if [ -n "$OUTPUT_DIR" ]; then
+      # Create a simple Metal program to query device capabilities
+      cat > "$OUTPUT_DIR/metal_device_query.metal" << 'EOF'
+#include <metal_stdlib>
+using namespace metal;
 
-## Metal Support
-- Metal Supported: $metal_supported
-- Metal Version: $metal_version
-
-## GPU Information
-$(cat "$OUTPUT_DIR/gpu_info.txt" 2>/dev/null || echo "GPU information not available")
-
-## Detailed Metal Check
-$(cat "$OUTPUT_DIR/metal_details.txt" 2>/dev/null || echo "Detailed Metal check not available")
+kernel void device_query(device uint *buffer [[buffer(0)]],
+                         uint id [[thread_position_in_grid]]) {
+    if (id == 0) {
+        buffer[0] = 1; // Just a simple test value
+    }
+}
 EOF
-
-# Output result for GitHub Actions
-echo "METAL_SUPPORTED=$metal_supported" >> $GITHUB_OUTPUT
-echo "METAL_VERSION=$metal_version" >> $GITHUB_OUTPUT
-echo "OS_VERSION=$os_version" >> $GITHUB_OUTPUT
-echo "ARCHITECTURE=$architecture" >> $GITHUB_OUTPUT
-
-log "Metal support check completed. Results saved to $OUTPUT_DIR/"
-if $metal_supported; then
-  log "✅ Metal is supported on this system"
-else
-  log "❌ Metal is not supported on this system"
+      
+      # Compile the Metal shader
+      xcrun -sdk macosx metal -c "$OUTPUT_DIR/metal_device_query.metal" -o "$OUTPUT_DIR/metal_device_query.air" 2> "$OUTPUT_DIR/metal_compile_log.txt" || true
+      
+      # Check if compile succeeded
+      if [ -f "$OUTPUT_DIR/metal_device_query.air" ]; then
+        output "Metal Shader Compilation: Successful" "metal_support_summary.md"
+      else
+        output "Metal Shader Compilation: Failed (see metal_compile_log.txt)" "metal_support_summary.md"
+      fi
+    fi
+  else
+    output "Metal Compiler: Not found" "metal_support_summary.md"
+  fi
+  
+  # Check for Metal Performance Shaders availability
+  output "## Metal Framework Availability" "metal_support_summary.md"
+  output "" "metal_support_summary.md"
+  
+  # Check for common Metal-related frameworks
+  FRAMEWORKS=("Metal" "MetalKit" "MetalPerformanceShaders")
+  
+  for framework in "${FRAMEWORKS[@]}"; do
+    if [ -d "/System/Library/Frameworks/${framework}.framework" ]; then
+      output "- ✅ $framework: Available" "metal_support_summary.md"
+    else
+      output "- ❌ $framework: Not found" "metal_support_summary.md"
+    fi
+  done
 fi
 
-exit 0 
+# Add recommendations based on findings
+output "" "metal_support_summary.md"
+output "## Recommendations" "metal_support_summary.md"
+output "" "metal_support_summary.md"
+
+if [ "$METAL_SUPPORTED" = true ]; then
+  output "- Metal is supported on this system and should work for HDR+ processing" "metal_support_summary.md"
+  output "- For optimal performance, ensure GPU drivers are up to date" "metal_support_summary.md"
+  
+  # Architecture-specific recommendations
+  if [ "$ARCH" = "arm64" ]; then
+    output "- Apple Silicon detected: Metal should provide excellent performance" "metal_support_summary.md"
+  else
+    output "- Intel architecture detected: Consider testing on Apple Silicon for best performance" "metal_support_summary.md"
+  fi
+else
+  output "- Metal is not supported on this system" "metal_support_summary.md"
+  output "- HDR+ processing will fall back to CPU-based methods if available" "metal_support_summary.md"
+  output "- For Metal support, use a Mac with compatible GPU" "metal_support_summary.md"
+fi
+
+# Exit with status based on Metal support
+if [ "$METAL_SUPPORTED" = true ]; then
+  echo "✅ Metal is supported on this system"
+  exit 0
+else
+  echo "⚠️ Metal is not supported on this system"
+  # Exit with 0 to not fail CI builds, but provide indication in the output
+  exit 0
+fi 

@@ -200,9 +200,11 @@ jobs:
     # Only run for PR events
     if: github.event_name == 'pull_request'
     needs: [summarize]
-    uses: ./.github/workflows/shared/pr-feedback.yml
+    uses: ./.github/workflows/shared/enhanced-pr-feedback.yml
     with:
       pr-number: ${{ github.event.pull_request.number }}
       artifact-prefix: 'test-results-'
+      include-metal-diagnostics: true
+      include-visual-comparisons: false
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }} 
