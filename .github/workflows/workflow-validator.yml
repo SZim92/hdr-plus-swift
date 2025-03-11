@@ -1,0 +1,218 @@
+name: Workflow Validator
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+jobs:
+  validate-workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyYAML
+
+      - name: Validate workflows follow best practices
+        id: validation
+        run: |
+          echo "Validating GitHub Actions workflows for best practices..."
+          
+          # Create results directory
+          mkdir -p validation-results
+          
+          # Create a summary file
+          SUMMARY_FILE="validation-results/summary.md"
+          echo "# Workflow Validation Results" > $SUMMARY_FILE
+          echo "" >> $SUMMARY_FILE
+          echo "## GitHub Script Best Practices" >> $SUMMARY_FILE
+          echo "" >> $SUMMARY_FILE
+          
+          # Create Python script to analyze workflows
+          cat > validate_workflows.py << 'EOF'
+          import os
+          import re
+          import yaml
+          import sys
+          from pathlib import Path
+          
+          def check_github_script_env_vars(file_path):
+              """Check if GitHub Script steps have environment variables"""
+              with open(file_path, 'r') as f:
+                  content = f.read()
+              
+              try:
+                  workflow = yaml.safe_load(content)
+                  if not workflow or 'jobs' not in workflow:
+                      return []
+                  
+                  issues = []
+                  
+                  # Process all jobs
+                  for job_id, job in workflow['jobs'].items():
+                      if not job or 'steps' not in job:
+                          continue
+                      
+                      # Process all steps in the job
+                      for step_index, step in enumerate(job['steps']):
+                          if not step:
+                              continue
+                          
+                          # Check if this is a GitHub Script action
+                          if step.get('uses') and 'actions/github-script' in step.get('uses'):
+                              step_name = step.get('name', f"Step {step_index+1}")
+                              
+                              # Check if it has env section
+                              if 'env' not in step:
+                                  issues.append({
+                                      'job': job_id,
+                                      'step': step_name,
+                                      'issue': 'GitHub Script action without environment variables',
+                                      'line': None  # Would need more complex parsing to get line number
+                                  })
+                                  continue
+                              
+                              # Check if the script accesses context directly
+                              if 'script' in step.get('with', {}):
+                                  script = step['with']['script']
+                                  
+                                  # Look for direct context access
+                                  context_access_patterns = [
+                                      r'context\.issue\.number',
+                                      r'context\.repo\.owner',
+                                      r'context\.repo\.repo',
+                                      r'context\.eventName',
+                                      r'context\.payload',
+                                      r'context\.serverUrl',
+                                      r'context\.runId',
+                                      r'fromJSON\(',
+                                  ]
+                                  
+                                  for pattern in context_access_patterns:
+                                      if re.search(pattern, script):
+                                          issues.append({
+                                              'job': job_id,
+                                              'step': step_name,
+                                              'issue': f'Direct context access with pattern "{pattern}"',
+                                              'line': None
+                                          })
+                  
+                  return issues
+                  
+              except yaml.YAMLError as e:
+                  print(f"Error parsing YAML in {file_path}: {e}")
+                  return [{
+                      'job': 'N/A',
+                      'step': 'N/A',
+                      'issue': f'YAML parsing error: {str(e)}',
+                      'line': None
+                  }]
+                  
+          def main():
+              workflows_path = Path('.github/workflows')
+              
+              all_issues = []
+              files_with_issues = 0
+              total_files = 0
+              
+              # Check each workflow file
+              for file_path in sorted(workflows_path.glob('**/*.yml')):
+                  if file_path.is_file():
+                      total_files += 1
+                      issues = check_github_script_env_vars(file_path)
+                      
+                      if issues:
+                          files_with_issues += 1
+                          all_issues.append((str(file_path), issues))
+              
+              # Output results
+              print(f"Analyzed {total_files} workflow files")
+              print(f"Found {files_with_issues} files with issues")
+              
+              if all_issues:
+                  print("\nIssues found:")
+                  for file_path, issues in all_issues:
+                      print(f"\n{file_path}:")
+                      for issue in issues:
+                          print(f"  - {issue['job']} / {issue['step']}: {issue['issue']}")
+                  
+                  # Create detailed markdown report
+                  with open('validation-results/github-script-issues.md', 'w') as f:
+                      f.write("# GitHub Script Issues\n\n")
+                      
+                      for file_path, issues in all_issues:
+                          f.write(f"## {file_path}\n\n")
+                          f.write("| Job | Step | Issue |\n")
+                          f.write("|-----|------|-------|\n")
+                          
+                          for issue in issues:
+                              f.write(f"| {issue['job']} | {issue['step']} | {issue['issue']} |\n")
+                          
+                          f.write("\n")
+                  
+                  # Return error code if issues found
+                  return 1
+              else:
+                  print("No GitHub Script issues found!")
+                  with open('validation-results/github-script-issues.md', 'w') as f:
+                      f.write("# GitHub Script Issues\n\n")
+                      f.write("✅ No issues found! All GitHub Script actions follow best practices.\n")
+                  return 0
+                  
+          if __name__ == "__main__":
+              sys.exit(main())
+          EOF
+          
+          # Run the validator
+          python validate_workflows.py
+          VALIDATION_EXIT_CODE=$?
+          
+          # Add results to summary
+          if [ $VALIDATION_EXIT_CODE -eq 0 ]; then
+            echo "✅ All GitHub Script actions follow best practices." >> $SUMMARY_FILE
+          else
+            echo "⚠️ Found workflows that don't follow GitHub Script best practices." >> $SUMMARY_FILE
+            echo "" >> $SUMMARY_FILE
+            echo "See detailed report in the 'github-script-issues.md' file." >> $SUMMARY_FILE
+          fi
+          
+          # Add the report to the GitHub step summary
+          cat $SUMMARY_FILE >> $GITHUB_STEP_SUMMARY
+          
+          # Also add detailed issues if found
+          if [ -f "validation-results/github-script-issues.md" ]; then
+            cat "validation-results/github-script-issues.md" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Set output with the validation status
+          echo "validation_passed=$([ $VALIDATION_EXIT_CODE -eq 0 ] && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+          
+      - name: Upload validation results
+        uses: actions/upload-artifact@v4
+        with:
+          name: workflow-validation-results
+          path: validation-results/
+          retention-days: 5
+          
+      - name: Check validation results
+        if: steps.validation.outputs.validation_passed == 'false'
+        run: |
+          echo "::warning::Workflow validation found issues. Please fix GitHub Script actions to follow best practices."
+          echo "See detailed report in the workflow summary."
+          # Fail the workflow if strict mode is desired
+          # exit 1 
