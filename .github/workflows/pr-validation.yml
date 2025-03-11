@@ -166,7 +166,7 @@ jobs:
             }
       
       - name: Provide test suggestions
-        if: ${{ github.event_name == 'pull_request' && steps.pr_files.outputs.has_swift_files == 'true' && steps.pr_files.outputs.has_test_files != 'true' }}
+        if: ${{ github.event_name == 'pull_request' && (steps.pr_files.outputs.has_swift_files || '') == 'true' && (steps.pr_files.outputs.has_test_files || '') != 'true' }}
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -186,7 +186,7 @@ jobs:
             });
       
       - name: Provide documentation suggestions
-        if: ${{ github.event_name == 'pull_request' && steps.pr_files.outputs.has_swift_files == 'true' && steps.pr_files.outputs.has_doc_files != 'true' }}
+        if: ${{ github.event_name == 'pull_request' && (steps.pr_files.outputs.has_swift_files || '') == 'true' && (steps.pr_files.outputs.has_doc_files || '') != 'true' }}
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
