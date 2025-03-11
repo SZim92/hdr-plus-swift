@@ -10,6 +10,12 @@ on:
     paths:
       - '.github/workflows/**'
   workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'  # Run weekly on Sunday at midnight
+
+permissions:
+  contents: read
+  pull-requests: write  # Needed for commenting on PRs
 
 jobs:
   validate-workflows:
@@ -49,11 +55,12 @@ jobs:
           import re
           import yaml
           import sys
+          import json
           from pathlib import Path
           
           def check_github_script_env_vars(file_path):
               """Check if GitHub Script steps have environment variables"""
-              with open(file_path, 'r') as f:
+              with open(file_path, 'r', encoding='utf-8') as f:
                   content = f.read()
               
               try:
@@ -83,6 +90,7 @@ jobs:
                                       'job': job_id,
                                       'step': step_name,
                                       'issue': 'GitHub Script action without environment variables',
+                                      'suggestion': 'Add env section to pass context values',
                                       'line': None  # Would need more complex parsing to get line number
                                   })
                                   continue
@@ -91,24 +99,25 @@ jobs:
                               if 'script' in step.get('with', {}):
                                   script = step['with']['script']
                                   
-                                  # Look for direct context access
+                                  # Look for direct context access patterns
                                   context_access_patterns = [
-                                      r'context\.issue\.number',
-                                      r'context\.repo\.owner',
-                                      r'context\.repo\.repo',
-                                      r'context\.eventName',
-                                      r'context\.payload',
-                                      r'context\.serverUrl',
-                                      r'context\.runId',
-                                      r'fromJSON\(',
+                                      (r'context\.issue\.number', 'process.env.PR_NUMBER'),
+                                      (r'context\.repo\.owner', 'process.env.REPO_OWNER'),
+                                      (r'context\.repo\.repo', 'process.env.REPO_NAME'),
+                                      (r'context\.eventName', 'process.env.EVENT_NAME'),
+                                      (r'context\.payload', 'Use individual environment variables'),
+                                      (r'context\.serverUrl', 'process.env.SERVER_URL'),
+                                      (r'context\.runId', 'process.env.RUN_ID'),
+                                      (r'fromJSON\(', 'process.env.JSON_VARIABLE with JSON.parse()'),
                                   ]
                                   
-                                  for pattern in context_access_patterns:
+                                  for pattern, replacement in context_access_patterns:
                                       if re.search(pattern, script):
                                           issues.append({
                                               'job': job_id,
                                               'step': step_name,
                                               'issue': f'Direct context access with pattern "{pattern}"',
+                                              'suggestion': f'Replace with {replacement}',
                                               'line': None
                                           })
                   
@@ -120,13 +129,63 @@ jobs:
                       'job': 'N/A',
                       'step': 'N/A',
                       'issue': f'YAML parsing error: {str(e)}',
+                      'suggestion': 'Fix YAML syntax',
                       'line': None
                   }]
+          
+          def check_workflow_best_practices(file_path):
+              """Check for other workflow best practices"""
+              with open(file_path, 'r', encoding='utf-8') as f:
+                  content = f.read()
+              
+              try:
+                  workflow = yaml.safe_load(content)
+                  if not workflow:
+                      return []
+                  
+                  issues = []
+                  
+                  # Check for top-level permissions
+                  if 'permissions' not in workflow:
+                      issues.append({
+                          'category': 'Security',
+                          'issue': 'No top-level permissions defined',
+                          'suggestion': 'Add explicit permissions to follow least-privilege principle',
+                          'severity': 'medium'
+                      })
+                  
+                  # Check for concurrency control
+                  if 'concurrency' not in workflow and workflow.get('on', {}).get('pull_request'):
+                      issues.append({
+                          'category': 'Efficiency',
+                          'issue': 'No concurrency control for PR workflows',
+                          'suggestion': 'Add concurrency group to avoid running duplicate workflows',
+                          'severity': 'low'
+                      })
+                  
+                  # Check for explicit job timeouts
+                  if 'jobs' in workflow:
+                      for job_id, job in workflow['jobs'].items():
+                          if job and 'timeout-minutes' not in job:
+                              issues.append({
+                                  'category': 'Reliability',
+                                  'issue': f'No timeout defined for job "{job_id}"',
+                                  'suggestion': 'Add timeout-minutes to prevent jobs from running indefinitely',
+                                  'severity': 'low',
+                                  'job': job_id
+                              })
+                  
+                  return issues
+                  
+              except yaml.YAMLError:
+                  # Already handled in the other check
+                  return []
                   
           def main():
               workflows_path = Path('.github/workflows')
               
-              all_issues = []
+              all_script_issues = []
+              all_best_practice_issues = []
               files_with_issues = 0
               total_files = 0
               
@@ -134,19 +193,24 @@ jobs:
               for file_path in sorted(workflows_path.glob('**/*.yml')):
                   if file_path.is_file():
                       total_files += 1
-                      issues = check_github_script_env_vars(file_path)
+                      script_issues = check_github_script_env_vars(file_path)
+                      best_practice_issues = check_workflow_best_practices(file_path)
                       
-                      if issues:
+                      if script_issues:
                           files_with_issues += 1
-                          all_issues.append((str(file_path), issues))
+                          all_script_issues.append((str(file_path), script_issues))
+                      
+                      if best_practice_issues:
+                          all_best_practice_issues.append((str(file_path), best_practice_issues))
               
               # Output results
               print(f"Analyzed {total_files} workflow files")
-              print(f"Found {files_with_issues} files with issues")
+              print(f"Found {files_with_issues} files with GitHub Script issues")
               
-              if all_issues:
-                  print("\nIssues found:")
-                  for file_path, issues in all_issues:
+              # Generate detailed GitHub Script issues report
+              if all_script_issues:
+                  print("\nGitHub Script issues found:")
+                  for file_path, issues in all_script_issues:
                       print(f"\n{file_path}:")
                       for issue in issues:
                           print(f"  - {issue['job']} / {issue['step']}: {issue['issue']}")
@@ -155,24 +219,104 @@ jobs:
                   with open('validation-results/github-script-issues.md', 'w') as f:
                       f.write("# GitHub Script Issues\n\n")
                       
-                      for file_path, issues in all_issues:
+                      for file_path, issues in all_script_issues:
                           f.write(f"## {file_path}\n\n")
-                          f.write("| Job | Step | Issue |\n")
-                          f.write("|-----|------|-------|\n")
+                          f.write("| Job | Step | Issue | Suggestion |\n")
+                          f.write("|-----|------|-------|------------|\n")
                           
                           for issue in issues:
-                              f.write(f"| {issue['job']} | {issue['step']} | {issue['issue']} |\n")
+                              f.write(f"| {issue['job']} | {issue['step']} | {issue['issue']} | {issue.get('suggestion', 'N/A')} |\n")
                           
                           f.write("\n")
                   
-                  # Return error code if issues found
-                  return 1
+                  # Generate environmental variable suggestions
+                  env_vars_needed = set()
+                  for _, issues in all_script_issues:
+                      for issue in issues:
+                          if 'context.issue.number' in issue['issue']:
+                              env_vars_needed.add('PR_NUMBER')
+                          if 'context.repo.owner' in issue['issue']:
+                              env_vars_needed.add('REPO_OWNER')
+                          if 'context.repo.repo' in issue['issue']:
+                              env_vars_needed.add('REPO_NAME')
+                          if 'context.eventName' in issue['issue']:
+                              env_vars_needed.add('EVENT_NAME')
+                          if 'context.serverUrl' in issue['issue']:
+                              env_vars_needed.add('SERVER_URL')
+                          if 'context.runId' in issue['issue']:
+                              env_vars_needed.add('RUN_ID')
+                  
+                  if env_vars_needed:
+                      with open('validation-results/suggestions.md', 'w') as f:
+                          f.write("# Suggested Environmental Variables\n\n")
+                          f.write("Add the following environment variables to your GitHub Script steps:\n\n")
+                          f.write("```yaml\n")
+                          f.write("env:\n")
+                          for var in sorted(env_vars_needed):
+                              # Write each env var using literal strings instead of f-strings with GitHub expressions
+                              if var == 'PR_NUMBER':
+                                  f.write("  PR_NUMBER: ${{ github.event.pull_request.number }}\n".replace("{", "{{").replace("}}", "}}}}"))
+                              elif var == 'REPO_OWNER':
+                                  f.write("  REPO_OWNER: ${{ github.repository_owner }}\n".replace("{", "{{").replace("}}", "}}}}"))
+                              elif var == 'REPO_NAME':
+                                  f.write("  REPO_NAME: ${{ github.repository.name }}\n".replace("{", "{{").replace("}}", "}}}}"))
+                              elif var == 'EVENT_NAME':
+                                  f.write("  EVENT_NAME: ${{ github.event_name }}\n".replace("{", "{{").replace("}}", "}}}}"))
+                              elif var == 'SERVER_URL':
+                                  f.write("  SERVER_URL: ${{ github.server_url }}\n".replace("{", "{{").replace("}}", "}}}}"))
+                              elif var == 'RUN_ID':
+                                  f.write("  RUN_ID: ${{ github.run_id }}\n".replace("{", "{{").replace("}}", "}}}}"))
+                          f.write("```\n\n")
+                          f.write("Then update your JavaScript code to use the environment variables:\n\n")
+                          f.write("```javascript\n")
+                          if 'PR_NUMBER' in env_vars_needed:
+                              f.write("const prNumber = parseInt(process.env.PR_NUMBER);\n")
+                          if 'REPO_OWNER' in env_vars_needed:
+                              f.write("const repoOwner = process.env.REPO_OWNER;\n")
+                          if 'REPO_NAME' in env_vars_needed:
+                              f.write("const repoName = process.env.REPO_NAME;\n")
+                          if 'EVENT_NAME' in env_vars_needed:
+                              f.write("const eventName = process.env.EVENT_NAME;\n")
+                          if 'SERVER_URL' in env_vars_needed:
+                              f.write("const serverUrl = process.env.SERVER_URL;\n")
+                          if 'RUN_ID' in env_vars_needed:
+                              f.write("const runId = process.env.RUN_ID;\n")
+                          f.write("```\n")
               else:
                   print("No GitHub Script issues found!")
                   with open('validation-results/github-script-issues.md', 'w') as f:
                       f.write("# GitHub Script Issues\n\n")
                       f.write("✅ No issues found! All GitHub Script actions follow best practices.\n")
-                  return 0
+              
+              # Generate best practices report
+              if all_best_practice_issues:
+                  with open('validation-results/best-practices.md', 'w') as f:
+                      f.write("# Workflow Best Practices\n\n")
+                      f.write("The following are recommendations to improve your workflows:\n\n")
+                      
+                      for file_path, issues in all_best_practice_issues:
+                          if issues:
+                              f.write(f"## {file_path}\n\n")
+                              f.write("| Category | Issue | Suggestion | Severity |\n")
+                              f.write("|----------|-------|------------|----------|\n")
+                              
+                              for issue in issues:
+                                  f.write(f"| {issue['category']} | {issue['issue']} | {issue['suggestion']} | {issue['severity']} |\n")
+                              
+                              f.write("\n")
+              
+              # Write summary statistics
+              with open('validation-results/stats.json', 'w') as f:
+                  stats = {
+                      'total_files': total_files,
+                      'files_with_script_issues': files_with_issues,
+                      'total_script_issues': sum(len(issues) for _, issues in all_script_issues),
+                      'total_best_practice_issues': sum(len(issues) for _, issues in all_best_practice_issues)
+                  }
+                  json.dump(stats, f, indent=2)
+              
+              # Return error code if issues found
+              return 1 if all_script_issues else 0
                   
           if __name__ == "__main__":
               sys.exit(main())
@@ -182,13 +326,34 @@ jobs:
           python validate_workflows.py
           VALIDATION_EXIT_CODE=$?
           
+          # Load stats
+          if [ -f "validation-results/stats.json" ]; then
+            TOTAL_FILES=$(cat validation-results/stats.json | grep total_files | sed 's/[^0-9]//g')
+            FILES_WITH_ISSUES=$(cat validation-results/stats.json | grep files_with_script_issues | sed 's/[^0-9]//g')
+            TOTAL_SCRIPT_ISSUES=$(cat validation-results/stats.json | grep total_script_issues | sed 's/[^0-9]//g')
+          else
+            TOTAL_FILES=0
+            FILES_WITH_ISSUES=0
+            TOTAL_SCRIPT_ISSUES=0
+          fi
+          
           # Add results to summary
           if [ $VALIDATION_EXIT_CODE -eq 0 ]; then
             echo "✅ All GitHub Script actions follow best practices." >> $SUMMARY_FILE
+            echo "" >> $SUMMARY_FILE
+            echo "Analyzed $TOTAL_FILES workflow files and found no issues." >> $SUMMARY_FILE
           else
-            echo "⚠️ Found workflows that don't follow GitHub Script best practices." >> $SUMMARY_FILE
+            echo "⚠️ Found $TOTAL_SCRIPT_ISSUES GitHub Script issues in $FILES_WITH_ISSUES workflow files." >> $SUMMARY_FILE
             echo "" >> $SUMMARY_FILE
             echo "See detailed report in the 'github-script-issues.md' file." >> $SUMMARY_FILE
+            
+            # Add suggestions if available
+            if [ -f "validation-results/suggestions.md" ]; then
+              echo "" >> $SUMMARY_FILE
+              echo "## Suggested Fixes" >> $SUMMARY_FILE
+              echo "" >> $SUMMARY_FILE
+              cat "validation-results/suggestions.md" | tail -n +2 >> $SUMMARY_FILE
+            fi
           fi
           
           # Add the report to the GitHub step summary
@@ -196,11 +361,20 @@ jobs:
           
           # Also add detailed issues if found
           if [ -f "validation-results/github-script-issues.md" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
             cat "validation-results/github-script-issues.md" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Also add best practices suggestions
+          if [ -f "validation-results/best-practices.md" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat "validation-results/best-practices.md" >> $GITHUB_STEP_SUMMARY
           fi
           
           # Set output with the validation status
           echo "validation_passed=$([ $VALIDATION_EXIT_CODE -eq 0 ] && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+          echo "files_with_issues=$FILES_WITH_ISSUES" >> $GITHUB_OUTPUT
+          echo "total_issues=$TOTAL_SCRIPT_ISSUES" >> $GITHUB_OUTPUT
           
       - name: Upload validation results
         uses: actions/upload-artifact@v4
@@ -208,6 +382,60 @@ jobs:
           name: workflow-validation-results
           path: validation-results/
           retention-days: 5
+          
+      - name: Comment on PR with validation results
+        if: github.event_name == 'pull_request' && steps.validation.outputs.validation_passed == 'false'
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.repository.name }}
+          FILES_WITH_ISSUES: ${{ steps.validation.outputs.files_with_issues }}
+          TOTAL_ISSUES: ${{ steps.validation.outputs.total_issues }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            
+            try {
+              let commentBody = `## Workflow Validation Results\n\n`;
+              
+              // Add summary
+              commentBody += `Found ${process.env.TOTAL_ISSUES} GitHub Script issues in ${process.env.FILES_WITH_ISSUES} workflow files.\n\n`;
+              
+              // Add suggestions if available
+              if (fs.existsSync('validation-results/suggestions.md')) {
+                const suggestionsContent = fs.readFileSync('validation-results/suggestions.md', 'utf8');
+                commentBody += suggestionsContent;
+              }
+              
+              // Add GitHub Script issues
+              if (fs.existsSync('validation-results/github-script-issues.md')) {
+                const issuesContent = fs.readFileSync('validation-results/github-script-issues.md', 'utf8');
+                const summarySection = issuesContent.split('\n\n')[0] + '\n\n';
+                
+                // Only include the first workflow with issues to keep the comment size reasonable
+                const firstWorkflowSection = issuesContent.split('## ')[1];
+                if (firstWorkflowSection) {
+                  const firstWorkflowContent = '## ' + firstWorkflowSection;
+                  commentBody += firstWorkflowContent + '\n\n';
+                }
+              }
+              
+              commentBody += `See the workflow run for full details.`;
+              
+              // Post comment on PR
+              await github.rest.issues.createComment({
+                issue_number: parseInt(process.env.PR_NUMBER),
+                owner: process.env.REPO_OWNER,
+                repo: process.env.REPO_NAME,
+                body: commentBody
+              });
+              
+              console.log('Posted validation results to PR');
+            } catch (error) {
+              console.error('Error posting validation results:', error);
+            }
           
       - name: Check validation results
         if: steps.validation.outputs.validation_passed == 'false'
