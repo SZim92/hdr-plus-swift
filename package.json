@@ -4,8 +4,8 @@
   "description": "Documentation tools for HDR+ Swift",
   "private": true,
   "scripts": {
-    "lint:md": "markdownlint '**/*.md' --ignore node_modules",
-    "fix:md": "markdownlint --fix '**/*.md' --ignore node_modules"
+    "lint:md": "markdownlint '**/*.md' --ignore node_modules --config .markdownlint.json",
+    "fix:md": "markdownlint --fix '**/*.md' --ignore node_modules --config .markdownlint.json"
   },
   "devDependencies": {
     "markdownlint": "^0.31.1",

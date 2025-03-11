@@ -4,6 +4,8 @@
 
 This document provides documentation for the CI/CD system used in the HDR+ Swift project. The system is designed to build, test, and maintain the codebase with minimal intervention required.
 
+For GitHub Actions workflow development best practices, please refer to the [GitHub Actions Guide](GITHUB_ACTIONS_GUIDE.md).
+
 ## Core Workflows
 
 ### Main CI Workflow (main.yml)
