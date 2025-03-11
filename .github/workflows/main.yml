@@ -155,6 +155,23 @@ jobs:
       platform: ${{ matrix.platform.runner }}
       xcode-version: ${{ matrix.platform.xcode }}
       architecture: ${{ matrix.platform.architecture }}
+  
+  # Add visual regression testing for Metal rendering
+  visual-testing:
+    name: Metal Visual Regression
+    # Only run on PRs with Metal or UI changes, or when manually triggered
+    if: >
+      github.event_name == 'workflow_dispatch' || 
+      (github.event_name == 'pull_request' && 
+       (contains(github.event.pull_request.labels.*.name, 'area/metal') || 
+        contains(github.event.pull_request.labels.*.name, 'area/ui')))
+    needs: [config]
+    uses: ./.github/workflows/shared/metal-visual-testing.yml
+    with:
+      platform: "macos-14"  # Use Apple Silicon for best Metal performance
+      test-scene-count: 5
+      tolerance-threshold: "0.02"
+      reference-branch: ${{ github.event.pull_request.base.ref || 'main' }}
       
   summarize:
     name: Summarize Results
@@ -192,6 +209,12 @@ jobs:
           echo "| Linting | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Testing | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Summary | ${{ needs.summarize.result }} |" >> $GITHUB_STEP_SUMMARY
+          
+          # Add visual testing status if it was run
+          if [[ "${{ contains(needs.*.name, 'visual-testing') }}" == "true" ]]; then
+            echo "| Visual Testing | ${{ needs.visual-testing.result }} |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Overall status: **${{ steps.check.outputs.status }}**" >> $GITHUB_STEP_SUMMARY
           
@@ -199,12 +222,12 @@ jobs:
     name: PR Feedback
     # Only run for PR events
     if: github.event_name == 'pull_request'
-    needs: [summarize]
+    needs: [summarize, visual-testing]
     uses: ./.github/workflows/shared/enhanced-pr-feedback.yml
     with:
       pr-number: ${{ github.event.pull_request.number }}
       artifact-prefix: 'test-results-'
       include-metal-diagnostics: true
-      include-visual-comparisons: false
+      include-visual-comparisons: true  # Enable visual comparisons in PR feedback
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }} 

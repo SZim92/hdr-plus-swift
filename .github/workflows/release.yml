@@ -27,8 +27,106 @@ concurrency:
   cancel-in-progress: false  # Don't cancel releases in progress as they're critical
 
 jobs:
+  # Add visual quality verification before release
+  visual-verification:
+    name: Visual Quality Verification
+    runs-on: macos-14
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Set up Swift environment
+        run: |
+          # Use our standardized Swift environment setup script
+          chmod +x .github/scripts/setup-swift-env.sh
+          ./.github/scripts/setup-swift-env.sh 'release-visual' 'false' 'true' 'false' 'standard'
+      
+      - name: Check Metal support
+        id: metal-check
+        run: |
+          # Use Metal detection script
+          chmod +x .github/scripts/check-metal-support.sh
+          ./.github/scripts/check-metal-support.sh metal-diagnostics
+          
+          # Extract Metal support status
+          if [ -f "metal-diagnostics/metal_support_summary.md" ]; then
+            echo "Found Metal diagnostics"
+            METAL_SUPPORTED=$(grep "Metal Supported" metal-diagnostics/metal_support_summary.md | grep -q "true" && echo "true" || echo "false")
+            echo "metal_supported=$METAL_SUPPORTED" >> $GITHUB_OUTPUT
+          else
+            echo "No Metal diagnostics found"
+            echo "metal_supported=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Run comprehensive visual tests
+        if: steps.metal-check.outputs.metal_supported == 'true'
+        run: |
+          echo "Running comprehensive visual quality tests for release v${{ github.event.inputs.version }}..."
+          
+          # Create output directory for renders
+          mkdir -p release-visual-tests
+          
+          # Render test scenes with the release build
+          echo "Generating test renders for various HDR scenarios..."
+          chmod +x tools/render-test-scenes.sh
+          ./tools/render-test-scenes.sh --count 10 --output release-visual-tests --verbose
+          
+          # Verify the renders exist
+          if [ ! "$(ls -A release-visual-tests)" ]; then
+            echo "::error::No renders were generated! Visual verification failed."
+            exit 1
+          fi
+          
+          echo "✅ Generated $(ls release-visual-tests | wc -l | xargs) test renders for verification"
+          
+          # Add human verification step
+          echo "For production releases, the following visual checks should be manually verified:"
+          echo "1. HDR tone mapping on high-contrast scenes"
+          echo "2. Color accuracy across different lighting conditions"
+          echo "3. Detail preservation in shadow and highlight areas"
+          echo "4. Noise reduction in low-light captures"
+          echo "5. Overall image quality compared to previous releases"
+      
+      - name: Upload visual test results
+        if: steps.metal-check.outputs.metal_supported == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-visual-test-renders
+          path: release-visual-tests/
+          retention-days: 30
+      
+      - name: Add visual test summary to GitHub step summary
+        run: |
+          echo "## Visual Quality Verification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.metal-check.outputs.metal_supported }}" == "true" ]; then
+            echo "✅ Generated reference renders for visual quality verification" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Test Scenes" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Images have been uploaded as artifacts for manual review." >> $GITHUB_STEP_SUMMARY
+            
+            # List of test images for reference
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Scene Type | Purpose |" >> $GITHUB_STEP_SUMMARY
+            echo "|------------|---------|" >> $GITHUB_STEP_SUMMARY
+            echo "| High Dynamic Range | Verify HDR processing capabilities |" >> $GITHUB_STEP_SUMMARY
+            echo "| Low Light | Check noise reduction and detail preservation |" >> $GITHUB_STEP_SUMMARY
+            echo "| Portrait Mode | Verify subject isolation and bokeh quality |" >> $GITHUB_STEP_SUMMARY
+            echo "| Bright Outdoor | Check highlight recovery and natural colors |" >> $GITHUB_STEP_SUMMARY
+            echo "| Night Mode | Verify long exposure quality |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Metal is not supported on this runner. Visual tests were skipped." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Consider running visual quality tests manually before finalizing the release." >> $GITHUB_STEP_SUMMARY
+          fi
+
   create-release:
     name: Create Release
+    needs: [visual-verification]
     runs-on: macos-latest
     steps:
       - name: Checkout code
