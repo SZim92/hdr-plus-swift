@@ -288,8 +288,10 @@ jobs:
       - name: Upload Release Assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_ID: ${{ fromJSON(steps.create-release.outputs.result).id }}
+          RELEASE_RESULT: ${{ steps.create-release.outputs.result }}
         run: |
+          # Parse release data from environment variable
+          RELEASE_ID=$(echo "$RELEASE_RESULT" | jq -r '.id')
           echo "Uploading assets to release $RELEASE_ID"
           
           # Upload the zip file
