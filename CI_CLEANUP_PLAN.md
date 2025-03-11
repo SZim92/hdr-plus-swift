@@ -7,7 +7,7 @@ This document outlines one-time cleanup tasks for the CI system to ensure it rem
 The following custom actions need basic README files to explain their purpose, inputs, and outputs:
 
 - [ ] `.github/actions/build-cache`: Add README explaining caching strategy
-- [ ] `.github/actions/changelog-generator`: Add README explaining how changelog generation works  
+- [ ] `.github/actions/changelog-generator`: Add README explaining how changelog generation works
 - [ ] `.github/actions/ci-dashboard`: Add README explaining dashboard generation
 - [ ] `.github/actions/disable-code-signing`: Add README explaining code signing disabling process
 - [ ] `.github/actions/extract-version`: Add README explaining version extraction logic
@@ -16,7 +16,7 @@ The following custom actions need basic README files to explain their purpose, i
 - [ ] `.github/actions/install-brew-package`: Add README explaining brew package installation
 - [ ] `.github/actions/load-config`: Add README explaining configuration loading
 - [ ] `.github/actions/notify-slack`: Add README explaining Slack notification format
-- [ ] `.github/actions/optimized-swift-setup`: Add README explaining Swift setup and caching 
+- [ ] `.github/actions/optimized-swift-setup`: Add README explaining Swift setup and caching
 - [ ] `.github/actions/run-benchmarks`: Add README explaining benchmark process
 - [ ] `.github/actions/security-scan-macos`: Add README explaining security scanning
 - [ ] `.github/actions/setup-cross-platform-swift`: Add README explaining cross-platform setup
@@ -85,13 +85,13 @@ Common permission settings to check:
 permissions:
   # For most workflows
   contents: read
-  
+
   # Only for workflows that need to write code
-  contents: write  
-  
+  contents: write
+
   # Only for workflows that comment on PRs
   pull-requests: write
-  
+
   # Only for workflows that need to upload artifacts
   actions: read
 ```

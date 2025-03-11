@@ -9,7 +9,9 @@ This guide outlines best practices for maintaining and developing GitHub Actions
 When referring to outputs from steps, always:
 
 1. **Add explicit IDs to steps that produce outputs**:
+
    ```yaml
+
    - name: Get file information
      id: file-info   # This ID is used to reference outputs
      run: |
@@ -17,7 +19,9 @@ When referring to outputs from steps, always:
    ```
 
 2. **Use full expression syntax when accessing outputs**:
+
    ```yaml
+
    - name: Use the output
      if: ${{ steps.file-info.outputs.count > 10 }}
      run: echo "Found many files"
@@ -30,13 +34,17 @@ When referring to outputs from steps, always:
 For environment variables:
 
 1. **Setting values**:
+
    ```yaml
+
    - name: Set environment variables
      run: echo "MY_VAR=hello" >> $GITHUB_ENV
    ```
 
 2. **Accessing values** (always use expression syntax):
+
    ```yaml
+
    - name: Use environment variables
      run: echo "The value is ${{ env.MY_VAR }}"
    ```
@@ -44,22 +52,26 @@ For environment variables:
 ### Job Outputs
 
 1. **Define outputs at the job level**:
+
    ```yaml
    jobs:
      job1:
        outputs:
          result: ${{ steps.my-step.outputs.result }}
        steps:
+
          - id: my-step
            run: echo "result=success" >> $GITHUB_OUTPUT
    ```
 
 2. **Access from other jobs**:
+
    ```yaml
    jobs:
      job2:
        needs: job1
        steps:
+
          - run: echo "Previous job result: ${{ needs.job1.outputs.result }}"
    ```
 
@@ -68,10 +80,11 @@ For environment variables:
 ### Workflow Linting Errors
 
 - **Installing actionlint locally**:
+
   ```bash
   # macOS
   brew install actionlint
-  
+
   # Linux
   bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
   ```
@@ -84,7 +97,9 @@ For environment variables:
 ### Python Dependency Issues
 
 - **Always use virtual environments** to avoid system Python conflicts:
+
   ```yaml
+
   - name: Set up Python
     run: |
       python -m venv .venv
@@ -94,6 +109,7 @@ For environment variables:
   ```
 
 - **Add virtual environment to PATH**:
+
   ```yaml
   echo "$PWD/.venv/bin" >> $GITHUB_PATH
   ```
@@ -103,20 +119,23 @@ For environment variables:
 You can test workflows locally using `act`:
 
 1. **Install act**:
+
    ```bash
    # macOS
    brew install act
-   
+
    # Windows (with Chocolatey)
    choco install act-cli
    ```
 
 2. **Run a workflow**:
+
    ```bash
    act -W .github/workflows/my-workflow.yml
    ```
 
 3. **Run a specific job**:
+
    ```bash
    act -W .github/workflows/my-workflow.yml -j job_id
    ```
@@ -124,17 +143,19 @@ You can test workflows locally using `act`:
 ## Workflow Structure Recommendations
 
 1. **Include explicit job dependencies**:
+
    ```yaml
    jobs:
      lint:
        # Lint job configuration...
-     
+
      test:
        needs: lint  # This job runs after lint
        # Test job configuration...
    ```
 
 2. **Set timeout limits** to prevent stuck workflows:
+
    ```yaml
    jobs:
      example:
@@ -142,7 +163,9 @@ You can test workflows locally using `act`:
    ```
 
 3. **Use caching** to speed up workflows:
+
    ```yaml
+
    - uses: actions/cache@v4
      with:
        path: ~/.npm
@@ -150,7 +173,9 @@ You can test workflows locally using `act`:
    ```
 
 4. **Add conditional steps** instead of duplicating workflows:
+
    ```yaml
+
    - name: Run macOS-specific step
      if: ${{ runner.os == 'macOS' }}
      run: echo "This only runs on macOS"
@@ -159,6 +184,7 @@ You can test workflows locally using `act`:
 ## Security Considerations
 
 1. **Minimize permission scope**:
+
    ```yaml
    permissions:
      contents: read
@@ -168,13 +194,17 @@ You can test workflows locally using `act`:
 2. **Securely handle secrets**:
    - Never access secrets in `if` conditions
    - Use environment variables when possible
+
    ```yaml
    env:
      TOKEN: ${{ secrets.API_TOKEN }}
    ```
 
 3. **Pin actions to specific versions**:
+
    ```yaml
+
    - uses: actions/checkout@v4  # Good - specific version
    - uses: actions/checkout@main # Bad - can change unexpectedly
-   ``` 
+
+   ```

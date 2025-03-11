@@ -229,7 +229,9 @@ jobs:
         run: |
           echo "Would post a comment to the PR with coverage information."
           # In a real implementation, you would use the GitHub API to post a comment
-          # gh pr comment ${{ github.event.pull_request.number }} -b "$(cat $GITHUB_STEP_SUMMARY)"
+          # Example (commented to avoid context access warnings):
+          # gh pr comment ${ISSUE_NUMBER} -b "$(cat $GITHUB_STEP_SUMMARY)"
+          # where ISSUE_NUMBER would be set earlier in the workflow when running in PR context
 
   report-coverage:
     name: Publish Coverage Report
