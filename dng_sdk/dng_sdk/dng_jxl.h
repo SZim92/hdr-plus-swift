@@ -413,3 +413,5 @@ bool SupportsJXL (const dng_image &image);
 #endif	// __dng_jxl__
 	
 /*****************************************************************************/
+
+#endif // DISABLE_JXL_SUPPORT (auto-added)

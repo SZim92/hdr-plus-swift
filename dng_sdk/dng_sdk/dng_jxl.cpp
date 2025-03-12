@@ -2800,3 +2800,7 @@ void dng_jxl_decoder::Decode (dng_host &host,
 					#else
 
 					// Single-threaded put -- expensive.
+
+#endif // DISABLE_JXL_SUPPORT (auto-added)
+
+#endif // DISABLE_JXL_SUPPORT (auto-added)

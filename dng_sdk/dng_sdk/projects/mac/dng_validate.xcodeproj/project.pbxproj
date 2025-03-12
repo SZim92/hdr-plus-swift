@@ -484,6 +484,13 @@
 			remoteGlobalIDString = 34D48C7928E73511000B5261;
 			remoteInfo = XMPCoreStaticDebug;
 		};
+		B0E582172D817DAE003F985D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 347BAB3128DF7CFC006A05CB /* jxl.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = C240348D29711D3400AF94CC;
+			remoteInfo = jxl_release_ios;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -1080,8 +1087,6 @@
 			isa = PBXGroup;
 			children = (
 				347BAB3128DF7CFC006A05CB /* jxl.xcodeproj */,
-				34D48C8528E7363D000B5261 /* XMPCore64.xcodeproj */,
-				3410853D28E73A4900571DDE /* XMPFiles64.xcodeproj */,
 			);
 			name = Subprojects;
 			sourceTree = SOURCE_ROOT;
@@ -1120,6 +1125,7 @@
 			children = (
 				34C3513328E71819004B35F8 /* libjxl_debug.a */,
 				34C3513528E71819004B35F8 /* libjxl_release.a */,
+				B0E582182D817DAE003F985D /* libjxl_release_ios.a */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -1342,6 +1348,13 @@
 			fileType = archive.ar;
 			path = libXMPCoreStatic_Debug.a;
 			remoteRef = 34D48CBB28E736A2000B5261 /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		B0E582182D817DAE003F985D /* libjxl_release_ios.a */ = {
+			isa = PBXReferenceProxy;
+			fileType = archive.ar;
+			path = libjxl_release_ios.a;
+			remoteRef = B0E582172D817DAE003F985D /* PBXContainerItemProxy */;
 			sourceTree = BUILT_PRODUCTS_DIR;
 		};
 /* End PBXReferenceProxy section */
