@@ -1,201 +1,282 @@
 import Foundation
 import XCTest
 
-/// Central configuration manager for all tests in the HDR+ Swift project.
-/// This class provides consistent access to test resources, directories, and settings.
-public final class TestConfig {
-    /// The shared singleton instance
+/// TestConfig provides centralized configuration settings for all tests in the HDR+ Swift project.
+/// This makes it easier to maintain consistent test behavior across the project.
+public class TestConfig {
+    
+    /// Shared instance for easy access
     public static let shared = TestConfig()
     
-    // MARK: - Directories
+    // MARK: - Test Environment Settings
     
-    /// Base directory for all test resources
-    public let testResourcesDir: URL
+    /// Whether the tests are running in a CI environment
+    public var isCI: Bool {
+        return ProcessInfo.processInfo.environment["CI"] != nil ||
+               ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] != nil ||
+               ProcessInfo.processInfo.environment["TRAVIS"] != nil ||
+               ProcessInfo.processInfo.environment["JENKINS_URL"] != nil
+    }
     
-    /// Directory for reference images used in visual tests
-    public let referenceImagesDir: URL
+    /// Whether verbose logging is enabled
+    public var verboseLogging: Bool {
+        return ProcessInfo.processInfo.environment["VERBOSE_TESTING"] == "1" ||
+               ProcessInfo.processInfo.environment["DEBUG"] == "1"
+    }
     
-    /// Directory for test fixtures and temporary files
-    public let fixturesDir: URL
+    /// Whether to skip resource-intensive tests
+    public var skipResourceIntensiveTests: Bool {
+        return ProcessInfo.processInfo.environment["SKIP_RESOURCE_INTENSIVE"] == "1" ||
+               isCI
+    }
     
-    /// Directory for failed test artifacts (diffs, etc.)
-    public let failedTestArtifactsDir: URL
+    /// Whether to skip tests that require Metal
+    public var skipMetalTests: Bool {
+        return ProcessInfo.processInfo.environment["SKIP_METAL_TESTS"] == "1" ||
+               !isMetalAvailable
+    }
     
-    /// Directory for performance test baselines
-    public let performanceBaselinesDir: URL
+    /// Whether Metal is available on the current device
+    public private(set) lazy var isMetalAvailable: Bool = {
+        // Check Metal availability by trying to create a Metal device
+        #if os(macOS) || os(iOS)
+        if let _ = MTLCreateSystemDefaultDevice() {
+            return true
+        }
+        #endif
+        return false
+    }()
     
-    /// Directory for Metal test resources
-    public let metalTestResourcesDir: URL
+    // MARK: - Test Data Paths
     
-    // MARK: - Test settings
+    /// Directory for test resources
+    public let testResourcesDir: URL = {
+        // First, check for an environment variable specifying the test resources dir
+        if let envPath = ProcessInfo.processInfo.environment["TEST_RESOURCES_DIR"] {
+            return URL(fileURLWithPath: envPath, isDirectory: true)
+        }
+        
+        // Otherwise use a default path relative to the current working directory
+        let currentDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        return currentDir.appendingPathComponent("TestResources", isDirectory: true)
+    }()
     
-    /// Whether to save visual test failures as artifacts
-    public var saveFailedVisualTests: Bool
+    /// Directory for test results
+    public let testResultsDir: URL = {
+        // First, check for an environment variable
+        if let envPath = ProcessInfo.processInfo.environment["TEST_RESULTS_DIR"] {
+            return URL(fileURLWithPath: envPath, isDirectory: true)
+        }
+        
+        // Otherwise use a default path
+        let currentDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        return currentDir.appendingPathComponent("TestResults", isDirectory: true)
+    }()
     
-    /// Whether to update reference images automatically when they don't exist
-    public var updateReferenceImagesAutomatically: Bool
+    /// Directory for test resources that are specific to the current run
+    public lazy var tempTestDir: URL = {
+        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("HDRPlusTests-\(UUID().uuidString)", isDirectory: true)
+        
+        do {
+            try FileManager.default.createDirectory(
+                at: tempDir,
+                withIntermediateDirectories: true,
+                attributes: nil
+            )
+        } catch {
+            print("Warning: Failed to create temporary test directory: \(error)")
+            // Fall back to the system temp dir
+            return URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        }
+        
+        return tempDir
+    }()
     
-    /// Whether to log verbose output during tests
-    public var verboseLogging: Bool
+    // MARK: - Performance Settings
     
-    /// Maximum acceptable percentage difference for image comparison in visual tests
-    public var defaultImageComparisonTolerance: Double
+    /// Default timeout for async operations in tests
+    public var defaultTimeout: TimeInterval = 30.0
     
-    /// Whether to skip tests that require Metal when Metal is not available
-    public var skipMetalTestsWhenUnavailable: Bool
+    /// Default allowed deviation for performance tests (as a multiplier)
+    public var defaultPerformanceDeviation: Double = 1.5
     
-    /// Performance test acceptable deviation from baseline as a percentage (0.2 = 20%)
-    public var performanceAcceptableDeviation: Double
+    /// Baseline performance metrics file path
+    public lazy var performanceBaselinesPath: URL = {
+        return testResourcesDir.appendingPathComponent("performance_baselines.json")
+    }()
+    
+    // MARK: - Visual Test Settings
+    
+    /// Default pixel tolerance for image comparison
+    public var defaultImageComparisonTolerance: Double = 0.02  // 2% pixel deviation allowed
+    
+    /// Whether to save diff images for failed visual tests
+    public var saveDiffImages: Bool = true
+    
+    /// Directory for reference images in visual tests
+    public lazy var referenceImagesDir: URL = {
+        return testResourcesDir.appendingPathComponent("ReferenceImages", isDirectory: true)
+    }()
+    
+    /// Directory for failed test images in visual tests
+    public lazy var failedImagesDir: URL = {
+        return testResultsDir.appendingPathComponent("FailedTests/Images", isDirectory: true)
+    }()
     
     // MARK: - Initialization
     
     private init() {
-        // Set up base directories
-        let fileManager = FileManager.default
-        
-        // Determine base test directory (either from environment variable or default)
-        if let testDirEnv = ProcessInfo.processInfo.environment["HDR_PLUS_TEST_DIR"] {
-            self.testResourcesDir = URL(fileURLWithPath: testDirEnv)
-        } else {
-            // Default: Use the current working directory with Tests subdirectory
-            let currentDir = URL(fileURLWithPath: fileManager.currentDirectoryPath)
-            
-            // Look for Tests directory
-            if fileManager.fileExists(atPath: currentDir.appendingPathComponent("Tests").path) {
-                self.testResourcesDir = currentDir.appendingPathComponent("Tests/TestResources")
-            } else {
-                // Fallback to temp directory if Tests directory not found
-                self.testResourcesDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("HDRPlusTests/TestResources")
-            }
-        }
-        
-        // Set up subdirectories
-        self.referenceImagesDir = testResourcesDir.appendingPathComponent("ReferenceImages")
-        self.fixturesDir = testResourcesDir.appendingPathComponent("Fixtures")
-        self.failedTestArtifactsDir = testResourcesDir.appendingPathComponent("FailedTestArtifacts")
-        self.performanceBaselinesDir = testResourcesDir.appendingPathComponent("PerformanceBaselines")
-        self.metalTestResourcesDir = testResourcesDir.appendingPathComponent("MetalResources")
-        
-        // Set up test settings from environment variables or defaults
-        self.saveFailedVisualTests = getBoolEnv("HDR_PLUS_SAVE_FAILED_VISUAL_TESTS", defaultValue: true)
-        self.updateReferenceImagesAutomatically = getBoolEnv("HDR_PLUS_UPDATE_REFERENCE_IMAGES", defaultValue: true)
-        self.verboseLogging = getBoolEnv("HDR_PLUS_TEST_VERBOSE", defaultValue: false)
-        self.defaultImageComparisonTolerance = getDoubleEnv("HDR_PLUS_IMAGE_COMPARISON_TOLERANCE", defaultValue: 0.01)
-        self.skipMetalTestsWhenUnavailable = getBoolEnv("HDR_PLUS_SKIP_METAL_TESTS", defaultValue: true)
-        self.performanceAcceptableDeviation = getDoubleEnv("HDR_PLUS_PERFORMANCE_DEVIATION", defaultValue: 0.2)
-        
         // Create directories if they don't exist
-        createDirectories()
+        createDirectoryIfNeeded(testResultsDir)
+        createDirectoryIfNeeded(testResourcesDir)
+        createDirectoryIfNeeded(referenceImagesDir)
+        createDirectoryIfNeeded(failedImagesDir)
+        
+        // Load any custom configuration
+        loadCustomConfig()
+        
+        if verboseLogging {
+            printConfigSummary()
+        }
     }
     
-    // MARK: - Directory Management
-    
-    /// Creates all required test directories if they don't exist
-    public func createDirectories() {
-        let fileManager = FileManager.default
-        let directories = [
-            testResourcesDir,
-            referenceImagesDir,
-            fixturesDir,
-            failedTestArtifactsDir,
-            performanceBaselinesDir,
-            metalTestResourcesDir
-        ]
-        
-        for directory in directories {
+    private func createDirectoryIfNeeded(_ url: URL) {
+        if !FileManager.default.fileExists(atPath: url.path) {
             do {
-                if !fileManager.fileExists(atPath: directory.path) {
-                    try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-                    logVerbose("Created directory: \(directory.path)")
-                }
+                try FileManager.default.createDirectory(
+                    at: url,
+                    withIntermediateDirectories: true,
+                    attributes: nil
+                )
             } catch {
-                print("Error creating directory \(directory.path): \(error)")
+                print("Warning: Failed to create directory \(url.path): \(error)")
             }
         }
     }
     
-    /// Gets the path to a reference image for a given test.
-    /// - Parameters:
-    ///   - name: The name of the reference image.
-    ///   - testClass: The test class requesting the reference.
-    /// - Returns: URL for the reference image.
-    public func referenceImageURL(for name: String, in testClass: AnyClass) -> URL {
-        let className = String(describing: testClass)
-        return referenceImagesDir
-            .appendingPathComponent(className)
-            .appendingPathComponent("\(name).png")
-    }
-    
-    /// Gets the path to a failed test artifact for a given test.
-    /// - Parameters:
-    ///   - name: The name of the failed test.
-    ///   - testClass: The test class that produced the failure.
-    /// - Returns: URL for the failed test artifact.
-    public func failedTestArtifactURL(for name: String, in testClass: AnyClass) -> URL {
-        let className = String(describing: testClass)
-        return failedTestArtifactsDir
-            .appendingPathComponent(className)
-            .appendingPathComponent("\(name).png")
-    }
-    
-    /// Gets the path to a performance baseline for a given test.
-    /// - Parameters:
-    ///   - name: The name of the performance test.
-    ///   - testClass: The test class that produced the baseline.
-    /// - Returns: URL for the performance baseline.
-    public func performanceBaselineURL(for name: String, in testClass: AnyClass) -> URL {
-        let className = String(describing: testClass)
-        return performanceBaselinesDir
-            .appendingPathComponent(className)
-            .appendingPathComponent("\(name).json")
-    }
-    
-    // MARK: - Utilities
-    
-    /// Log a message when verbose logging is enabled
-    /// - Parameter message: The message to log
-    public func logVerbose(_ message: String) {
-        if verboseLogging {
-            print("[TestConfig] \(message)")
-        }
-    }
-    
-    // MARK: - Environment Variable Helpers
-    
-    /// Gets a Boolean environment variable or returns the default value.
-    /// - Parameters:
-    ///   - name: The name of the environment variable.
-    ///   - defaultValue: The default value to return if the environment variable is not set.
-    /// - Returns: The Boolean value of the environment variable or the default value.
-    private func getBoolEnv(_ name: String, defaultValue: Bool) -> Bool {
-        guard let value = ProcessInfo.processInfo.environment[name] else {
-            return defaultValue
+    private func loadCustomConfig() {
+        // Look for a custom config file
+        let configPath = testResourcesDir.appendingPathComponent("test_config.json")
+        guard FileManager.default.fileExists(atPath: configPath.path) else {
+            return
         }
         
-        let lowercasedValue = value.lowercased()
-        return lowercasedValue == "true" || lowercasedValue == "yes" || lowercasedValue == "1"
+        do {
+            let data = try Data(contentsOf: configPath)
+            let decoder = JSONDecoder()
+            
+            struct ConfigValues: Codable {
+                var defaultTimeout: TimeInterval?
+                var defaultPerformanceDeviation: Double?
+                var defaultImageComparisonTolerance: Double?
+                var saveDiffImages: Bool?
+            }
+            
+            let configValues = try decoder.decode(ConfigValues.self, from: data)
+            
+            // Apply values that were found in the config file
+            if let timeout = configValues.defaultTimeout {
+                defaultTimeout = timeout
+            }
+            
+            if let deviation = configValues.defaultPerformanceDeviation {
+                defaultPerformanceDeviation = deviation
+            }
+            
+            if let tolerance = configValues.defaultImageComparisonTolerance {
+                defaultImageComparisonTolerance = tolerance
+            }
+            
+            if let saveDiff = configValues.saveDiffImages {
+                saveDiffImages = saveDiff
+            }
+            
+        } catch {
+            print("Warning: Failed to load custom test config from \(configPath): \(error)")
+        }
     }
     
-    /// Gets a Double environment variable or returns the default value.
-    /// - Parameters:
-    ///   - name: The name of the environment variable.
-    ///   - defaultValue: The default value to return if the environment variable is not set.
-    /// - Returns: The Double value of the environment variable or the default value.
-    private func getDoubleEnv(_ name: String, defaultValue: Double) -> Double {
-        guard let value = ProcessInfo.processInfo.environment[name],
-              let doubleValue = Double(value) else {
-            return defaultValue
+    private func printConfigSummary() {
+        print("=== Test Configuration ===")
+        print("- Running in CI: \(isCI)")
+        print("- Metal available: \(isMetalAvailable)")
+        print("- Skip resource-intensive tests: \(skipResourceIntensiveTests)")
+        print("- Skip Metal tests: \(skipMetalTests)")
+        print("- Resources directory: \(testResourcesDir.path)")
+        print("- Results directory: \(testResultsDir.path)")
+        print("- Default timeout: \(defaultTimeout) seconds")
+        print("- Default performance deviation: \(defaultPerformanceDeviation)x")
+        print("- Default image comparison tolerance: \(defaultImageComparisonTolerance * 100)%")
+        print("==========================")
+    }
+    
+    /// Reset temporary test directories
+    public func resetTempDirectories() {
+        do {
+            try FileManager.default.removeItem(at: tempTestDir)
+            // Re-create the directory
+            try FileManager.default.createDirectory(
+                at: tempTestDir,
+                withIntermediateDirectories: true,
+                attributes: nil
+            )
+        } catch {
+            print("Warning: Failed to reset temporary test directory: \(error)")
         }
-        
-        return doubleValue
     }
 }
 
-// MARK: - XCTestCase Extension
+// MARK: - XCTestCase Extensions
 
 extension XCTestCase {
-    /// Access to the shared test configuration from any test case
-    public var testConfig: TestConfig {
+    
+    /// Get the TestConfig instance
+    public var config: TestConfig {
         return TestConfig.shared
     }
-} 
+    
+    /// Skip test if it's running in CI
+    public func skipOnCI(_ message: String = "Test skipped in CI environment") {
+        if config.isCI {
+            throw XCTSkip(message)
+        }
+    }
+    
+    /// Skip test if it requires excessive resources and we're configured to skip them
+    public func skipIfResourceIntensive(_ message: String = "Test requires excessive resources") {
+        if config.skipResourceIntensiveTests {
+            throw XCTSkip(message)
+        }
+    }
+    
+    /// Skip test if it requires Metal and Metal isn't available or we're configured to skip Metal tests
+    public func skipIfMetalUnavailable(_ message: String = "Test requires Metal API") {
+        if config.skipMetalTests {
+            throw XCTSkip(message)
+        }
+    }
+    
+    /// Log a message, but only if verbose logging is enabled
+    public func logVerbose(_ message: String) {
+        if config.verboseLogging {
+            print("[VERBOSE] \(message)")
+        }
+    }
+    
+    /// Create a URL in the test resources directory
+    public func resourceURL(forResource name: String, withExtension ext: String) -> URL {
+        return config.testResourcesDir
+            .appendingPathComponent(name)
+            .appendingPathExtension(ext)
+    }
+    
+    /// Create a URL in the temporary test directory
+    public func tempURL(forFilename filename: String) -> URL {
+        return config.tempTestDir.appendingPathComponent(filename)
+    }
+}
+
+#if os(macOS) || os(iOS)
+import Metal
+#endif 
