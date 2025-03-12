@@ -167,4 +167,222 @@ public extension XCTestCase {
 ///         }
 ///     }
 /// }
-/// ``` 
+/// ```
+
+/// A property wrapper that marks a test as quarantined.
+/// This allows tracking and management of flaky tests.
+///
+/// Usage:
+/// ```swift
+/// @TestQuarantine(reason: "Network timeout", ticketID: "HDR-123", failureRate: 0.2)
+/// func testFlaky() {
+///    // Test implementation
+/// }
+/// ```
+@propertyWrapper
+public struct TestQuarantine<T> {
+    private let reason: String
+    private let ticketID: String?
+    private let failureRate: Double?
+    private let skipInCI: Bool
+    private let skipOnPlatforms: [String]
+    private let wrappedValue: T
+    private let createdAt: Date
+    
+    /// Initialize a test quarantine
+    /// - Parameters:
+    ///   - wrappedValue: The test function
+    ///   - reason: Reason why the test is quarantined
+    ///   - ticketID: Issue/ticket ID tracking the problem
+    ///   - failureRate: Approximate failure rate (0.0-1.0)
+    ///   - skipInCI: Whether to skip the test in CI environments
+    ///   - skipOnPlatforms: Platforms to skip the test on
+    public init(
+        wrappedValue: T,
+        reason: String,
+        ticketID: String? = nil,
+        failureRate: Double? = nil,
+        skipInCI: Bool = true,
+        skipOnPlatforms: [String] = []
+    ) {
+        self.wrappedValue = wrappedValue
+        self.reason = reason
+        self.ticketID = ticketID
+        self.failureRate = failureRate
+        self.skipInCI = skipInCI
+        self.skipOnPlatforms = skipOnPlatforms
+        self.createdAt = Date()
+    }
+    
+    public var projectedValue: TestQuarantineInfo {
+        return TestQuarantineInfo(
+            reason: reason,
+            ticketID: ticketID,
+            failureRate: failureRate,
+            skipInCI: skipInCI,
+            skipOnPlatforms: skipOnPlatforms,
+            createdAt: createdAt
+        )
+    }
+}
+
+/// Information about a quarantined test
+public struct TestQuarantineInfo {
+    public let reason: String
+    public let ticketID: String?
+    public let failureRate: Double?
+    public let skipInCI: Bool
+    public let skipOnPlatforms: [String]
+    public let createdAt: Date
+    
+    /// Returns true if the test should be skipped in the current environment
+    public var shouldSkip: Bool {
+        if skipInCI && QuarantineManager.shared.isCI {
+            return true
+        }
+        
+        #if os(macOS)
+        if skipOnPlatforms.contains("macOS") {
+            return true
+        }
+        #elseif os(iOS)
+        if skipOnPlatforms.contains("iOS") {
+            return true
+        }
+        #endif
+        
+        return false
+    }
+}
+
+/// Manages test quarantine data
+public class QuarantineManager {
+    /// Shared instance
+    public static let shared = QuarantineManager()
+    
+    /// Whether we're running in a CI environment
+    public var isCI: Bool {
+        return ProcessInfo.processInfo.environment["CI"] != nil ||
+               ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] != nil
+    }
+    
+    /// Database of quarantined tests
+    private var quarantinedTests: [String: TestQuarantineInfo] = [:]
+    
+    /// Get data for a quarantined test
+    public func getInfo(for testName: String) -> TestQuarantineInfo? {
+        return quarantinedTests[testName]
+    }
+    
+    /// Register a test in quarantine
+    public func register(testName: String, info: TestQuarantineInfo) {
+        quarantinedTests[testName] = info
+        
+        if TestOutputFormatter.shared.options.verbosityLevel > 0 {
+            let ticket = info.ticketID != nil ? " (\(info.ticketID!))" : ""
+            let failureRate = info.failureRate != nil ? " Failure rate: \(Int(info.failureRate! * 100))%" : ""
+            
+            print("⚠️ Quarantined test: \(testName)\(ticket)")
+            print("   Reason: \(info.reason)\(failureRate)")
+            
+            if info.shouldSkip {
+                print("   Test will be skipped")
+            } else {
+                print("   Test will be run but failures won't affect CI")
+            }
+        }
+    }
+    
+    /// Export quarantine data as JSON
+    public func exportJSON() -> Data? {
+        var exportData: [String: [String: Any]] = [:]
+        
+        for (testName, info) in quarantinedTests {
+            var infoDict: [String: Any] = [
+                "reason": info.reason,
+                "skipInCI": info.skipInCI,
+                "created": ISO8601DateFormatter().string(from: info.createdAt)
+            ]
+            
+            if let ticketID = info.ticketID {
+                infoDict["ticketID"] = ticketID
+            }
+            
+            if let failureRate = info.failureRate {
+                infoDict["failureRate"] = failureRate
+            }
+            
+            if !info.skipOnPlatforms.isEmpty {
+                infoDict["skipOnPlatforms"] = info.skipOnPlatforms
+            }
+            
+            exportData[testName] = infoDict
+        }
+        
+        return try? JSONSerialization.data(withJSONObject: exportData, options: [.prettyPrinted])
+    }
+    
+    /// Load quarantine database from JSON
+    public func loadFromJSON(data: Data) throws {
+        guard let jsonObject = try JSONSerialization.jsonObject(with: data, options: []) as? [String: [String: Any]] else {
+            throw NSError(domain: "QuarantineManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid quarantine JSON format"])
+        }
+        
+        for (testName, infoDict) in jsonObject {
+            guard let reason = infoDict["reason"] as? String else { continue }
+            
+            let ticketID = infoDict["ticketID"] as? String
+            let failureRate = infoDict["failureRate"] as? Double
+            let skipInCI = infoDict["skipInCI"] as? Bool ?? true
+            let skipOnPlatforms = infoDict["skipOnPlatforms"] as? [String] ?? []
+            
+            let createdAt: Date
+            if let dateString = infoDict["created"] as? String,
+               let date = ISO8601DateFormatter().date(from: dateString) {
+                createdAt = date
+            } else {
+                createdAt = Date()
+            }
+            
+            let info = TestQuarantineInfo(
+                reason: reason,
+                ticketID: ticketID,
+                failureRate: failureRate,
+                skipInCI: skipInCI,
+                skipOnPlatforms: skipOnPlatforms,
+                createdAt: createdAt
+            )
+            
+            quarantinedTests[testName] = info
+        }
+    }
+}
+
+// MARK: - XCTest Extensions
+
+extension XCTestCase {
+    /// Check if the current test is quarantined and should be skipped
+    public func checkQuarantine() throws {
+        // Get the current test name
+        let testName = String(reflecting: type(of: self)) + "." + name
+        
+        // Find property wrappers in the test class
+        let mirror = Mirror(reflecting: self)
+        for child in mirror.children {
+            if let propertyName = child.label,
+               propertyName.hasPrefix("$"),
+               let quarantineInfo = child.value as? TestQuarantineInfo {
+                
+                // Register the test in the quarantine manager
+                let fullTestName = String(reflecting: type(of: self)) + "." + propertyName.dropFirst()
+                QuarantineManager.shared.register(testName: fullTestName, info: quarantineInfo)
+                
+                // If this is the current test and it should be skipped, throw XCTSkip
+                if fullTestName == testName && quarantineInfo.shouldSkip {
+                    let ticketReference = quarantineInfo.ticketID != nil ? " (Ticket: \(quarantineInfo.ticketID!))" : ""
+                    throw XCTSkip("Test is quarantined: \(quarantineInfo.reason)\(ticketReference)")
+                }
+            }
+        }
+    }
+} 

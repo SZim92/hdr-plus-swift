@@ -100,3 +100,84 @@ You can download the app from the [Mac App Store](https://burst.photo/download/)
 Please feel free to contribute to any of these features or suggest other features.
 
 This product includes DNG technology under license by Adobe.
+
+## Testing Framework
+
+This repository includes a comprehensive testing framework designed specifically for HDR image processing. The framework provides tools and utilities to ensure proper functionality, performance, and visual consistency in the HDR+ processing pipeline.
+
+### Key Testing Components
+
+- **Visual Testing**: The `VisualTestUtility` provides specialized support for comparing and validating HDR images, including perceptual comparison and HDR-specific tolerance settings.
+
+- **Performance Testing**: The `HDRPerformanceTestHelper` enables detailed performance analysis of HDR processing, including CPU and GPU timing, memory usage tracking, and pipeline stage analysis.
+
+- **Result Visualization**: The `HDRResultVisualizer` generates visual reports of HDR processing, combining input brackets, output image, histograms, and metadata for easy visual inspection.
+
+- **Quarantine System**: A `TestQuarantine` utility manages flaky tests, allowing them to be tracked, analyzed, and temporarily disabled with proper documentation.
+
+### Running Tests
+
+To run the tests locally:
+
+```bash
+swift test --filter "HDRVisualTests"
+```
+
+For performance tests:
+
+```bash
+swift test --filter "HDRPerformanceTests"
+```
+
+### CI Integration
+
+The project includes specialized GitHub Actions workflows for testing:
+
+- **HDR Visual Tests**: Runs visual comparison tests on macOS systems with Metal support
+- **Test Quarantine**: Automatically analyzes test stability and manages flaky tests
+- **Performance Monitoring**: Tracks and reports performance metrics across changes
+
+### Creating Tests
+
+When creating new HDR tests, use the provided utilities:
+
+```swift
+// Visual comparison test
+func testHDRProcessing() throws {
+    // Process your HDR image
+    let result = processHDRImages()
+    
+    // Compare with reference image with HDR-specific settings
+    try assertHDRImage(
+        result,
+        matchesReferenceNamed: "expected_hdr_result"
+    )
+}
+
+// Performance test
+func testPerformance() throws {
+    let metrics = measureHDRPipeline(
+        name: "HDR Processing Pipeline",
+        stages: [
+            "Alignment": alignmentOperation,
+            "Merging": mergingOperation,
+            "ToneMapping": toneMappingOperation
+        ]
+    )
+    
+    // Analyze results
+    XCTAssertLessThan(metrics.totalTime, 0.5)
+}
+```
+
+## Contributing
+
+When contributing to the HDR+ Swift project, make sure to:
+
+1. Write tests for any new functionality
+2. Run the test suite locally before submitting a PR
+3. Document any test quarantines with appropriate ticket references
+
+## License
+
+[Insert your license information here]
