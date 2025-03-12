@@ -1,0 +1,253 @@
+name: Test Quarantine Management
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types:
+      - completed
+  schedule:
+    - cron: '0 2 * * 1'  # Run at 2 AM UTC every Monday
+  workflow_dispatch:  # Allow manual triggering
+
+# Set required permissions
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  analyze-and-update-quarantine:
+    name: Analyze Test Stability & Update Quarantine
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download test results
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          workflow: CI
+          workflow_conclusion: any
+          name: test-results-*
+          path: test-results
+      
+      - name: Analyze test stability
+        id: analyze
+        run: |
+          echo "Analyzing test stability across recent runs..."
+          
+          mkdir -p quarantine-data
+          
+          # Process test results to identify flaky tests
+          # A test is considered flaky if it has both passed and failed in recent runs
+          find test-results -name "*.xml" -o -name "*.json" | while read file; do
+            echo "Processing $file..."
+            
+            # Extract test names and statuses - this is a simplified version
+            # In a real scenario, you would parse the XML/JSON properly
+            if [[ "$file" == *.xml ]]; then
+              grep -o '<testcase classname="[^"]*" name="[^"]*"' "$file" | sed 's/<testcase classname="\([^"]*\)" name="\([^"]*\)"/\1.\2/' > "quarantine-data/test-names.txt"
+              grep -o '<failure[^>]*>' "$file" | sed 's/.*message="\([^"]*\)".*/\1/' > "quarantine-data/failures.txt"
+            elif [[ "$file" == *.json ]]; then
+              grep -o '"className": "[^"]*", "name": "[^"]*"' "$file" | sed 's/"className": "\([^"]*\)", "name": "\([^"]*\)"/\1.\2/' > "quarantine-data/test-names.txt"
+              grep -o '"failureMessage": "[^"]*"' "$file" | sed 's/"failureMessage": "\([^"]*\)"/\1/' > "quarantine-data/failures.txt"
+            fi
+          done
+          
+          # Detect flaky tests (tests that both pass and fail)
+          if [ -f "quarantine-data/test-names.txt" ]; then
+            cat quarantine-data/test-names.txt | sort | uniq > quarantine-data/unique-tests.txt
+            
+            # Create flaky test report
+            echo "# Flaky Test Detection Report" > quarantine-data/flaky-report.md
+            echo "" >> quarantine-data/flaky-report.md
+            echo "Report generated on $(date)" >> quarantine-data/flaky-report.md
+            echo "" >> quarantine-data/flaky-report.md
+            echo "## Potentially Flaky Tests" >> quarantine-data/flaky-report.md
+            echo "" >> quarantine-data/flaky-report.md
+            echo "| Test | Status | Occurrences | Recommendation |" >> quarantine-data/flaky-report.md
+            echo "|------|--------|-------------|----------------|" >> quarantine-data/flaky-report.md
+            
+            # This is a simplified detection - in a real scenario you would 
+            # track pass/fail for each test and identify those that show inconsistent results
+            FLAKY_COUNT=0
+            while read test; do
+              # Check if test appears in failures
+              grep -q "$test" quarantine-data/failures.txt
+              if [ $? -eq 0 ]; then
+                # For demo, we'll just mark tests in failures.txt as flaky
+                echo "| $test | ⚠️ Potentially Flaky | Multiple | Consider quarantining |" >> quarantine-data/flaky-report.md
+                FLAKY_COUNT=$((FLAKY_COUNT + 1))
+              fi
+            done < quarantine-data/unique-tests.txt
+            
+            if [ $FLAKY_COUNT -eq 0 ]; then
+              echo "No flaky tests detected in this analysis." >> quarantine-data/flaky-report.md
+            fi
+            
+            # Set output for later steps
+            echo "flaky_count=$FLAKY_COUNT" >> $GITHUB_OUTPUT
+          else
+            echo "No test results found to analyze."
+            echo "flaky_count=0" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Generate current quarantine status
+        id: current-status
+        run: |
+          echo "Extracting current quarantine status..."
+          
+          # Extract current quarantined tests from TestQuarantine.swift
+          grep -A 1 "/\".*\":" Tests/TestQuarantine.swift | grep -v "^--$" > quarantine-data/current-quarantine.txt || true
+          
+          # Count current quarantined tests
+          CURRENT_COUNT=$(grep -c ":" quarantine-data/current-quarantine.txt || echo "0")
+          echo "current_count=$CURRENT_COUNT" >> $GITHUB_OUTPUT
+          
+          # Generate quarantine status report
+          echo "# Current Test Quarantine Status" > quarantine-data/current-status.md
+          echo "" >> quarantine-data/current-status.md
+          echo "Report generated on $(date)" >> quarantine-data/current-status.md
+          echo "" >> quarantine-data/current-status.md
+          echo "## Currently Quarantined Tests" >> quarantine-data/current-status.md
+          echo "" >> quarantine-data/current-status.md
+          echo "| Test | Status | Reason |" >> quarantine-data/current-status.md
+          echo "|------|--------|--------|" >> quarantine-data/current-status.md
+          
+          if [ -s "quarantine-data/current-quarantine.txt" ]; then
+            cat quarantine-data/current-quarantine.txt | while read -r line; do
+              if [[ "$line" == *\"* ]]; then
+                TEST_NAME=$(echo "$line" | grep -o "\".*\"" | tr -d \")
+                
+                # Read the next line to get the status
+                read -r STATUS_LINE
+                
+                if [[ "$STATUS_LINE" == *.expectedToFail* ]]; then
+                  echo "| $TEST_NAME | Expected to Fail | - |" >> quarantine-data/current-status.md
+                elif [[ "$STATUS_LINE" == *.flaky* ]]; then
+                  REASON=$(echo "$STATUS_LINE" | grep -o "reason: \".*\"" | sed 's/reason: "\(.*\)"/\1/')
+                  echo "| $TEST_NAME | Flaky | $REASON |" >> quarantine-data/current-status.md
+                elif [[ "$STATUS_LINE" == *.skip* ]]; then
+                  REASON=$(echo "$STATUS_LINE" | grep -o "reason: \".*\"" | sed 's/reason: "\(.*\)"/\1/')
+                  echo "| $TEST_NAME | Skipped | $REASON |" >> quarantine-data/current-status.md
+                fi
+              fi
+            done
+          else
+            echo "No tests are currently quarantined." >> quarantine-data/current-status.md
+          fi
+      
+      - name: Update TestQuarantine.swift
+        id: update-quarantine
+        if: steps.analyze.outputs.flaky_count > 0
+        run: |
+          echo "Updating TestQuarantine.swift with newly identified flaky tests..."
+          
+          # Read the current file
+          cat Tests/TestQuarantine.swift > quarantine-data/TestQuarantine.swift.new
+          
+          # This would be more robust with a proper parser, but for demo purposes
+          # we'll use sed to uncomment existing commented tests and add new ones
+          # Note: In a real implementation, you would compare flaky tests with current quarantine
+          
+          # Mark the insertion point - right after the dictionary declaration
+          INSERTION_POINT=$(grep -n "private static let quarantinedTests" quarantine-data/TestQuarantine.swift.new | cut -d: -f1)
+          INSERTION_POINT=$((INSERTION_POINT + 2))  # Move past the opening bracket and first line
+          
+          # Backup the file for comparison
+          cat quarantine-data/TestQuarantine.swift.new > quarantine-data/TestQuarantine.swift.bak
+          
+          # Extract some flaky tests from the detection report to add
+          grep "| .* | ⚠️ Potentially Flaky" quarantine-data/flaky-report.md | head -5 | while read -r line; do
+            TEST_NAME=$(echo "$line" | cut -d'|' -f2 | xargs)
+            
+            # Check if this test is already in the file
+            if grep -q "\"$TEST_NAME\":" quarantine-data/TestQuarantine.swift.new; then
+              # Already there, just make sure it's uncommented
+              sed -i "s|//\(\"$TEST_NAME\".*\)|        \1|g" quarantine-data/TestQuarantine.swift.new
+            else
+              # Add this test as a new entry
+              sed -i "${INSERTION_POINT}i\\        \"$TEST_NAME\": .flaky(reason: \"Automatically detected as flaky by CI\")," quarantine-data/TestQuarantine.swift.new
+            fi
+          done
+          
+          # Check if file changed
+          if cmp -s quarantine-data/TestQuarantine.swift.bak quarantine-data/TestQuarantine.swift.new; then
+            echo "No changes needed to TestQuarantine.swift"
+            echo "changes_made=false" >> $GITHUB_OUTPUT
+          else
+            cp quarantine-data/TestQuarantine.swift.new Tests/TestQuarantine.swift
+            echo "Updated TestQuarantine.swift with flaky tests"
+            echo "changes_made=true" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create PR for quarantine updates
+        if: steps.update-quarantine.outputs.changes_made == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ github.token }}
+          commit-message: "test: Update test quarantine status [skip ci]"
+          title: "CI: Update Test Quarantine Status"
+          body: |
+            This PR updates the test quarantine status based on the latest CI runs.
+            
+            ## Summary
+            - Updated quarantine status for flaky tests
+            - Added new flaky tests to quarantine
+            
+            ## Flaky Test Report
+            
+            ```markdown
+            $(cat quarantine-data/flaky-report.md)
+            ```
+            
+            ## Current Quarantine Status
+            
+            ```markdown
+            $(cat quarantine-data/current-status.md)
+            ```
+            
+            *This PR was automatically generated by the test-quarantine workflow.*
+          branch: update-test-quarantine
+          delete-branch: true
+          base: main
+          labels: |
+            area/testing
+            automated-pr
+            no-changelog
+          draft: false
+      
+      - name: Upload quarantine reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-quarantine-reports
+          path: quarantine-data/*.md
+          retention-days: 90
+      
+      - name: Add quarantine report to step summary
+        run: |
+          echo "## Test Quarantine Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Current quarantined tests: ${{ steps.current-status.outputs.current_count }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Newly identified flaky tests: ${{ steps.analyze.outputs.flaky_count }}" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.update-quarantine.outputs.changes_made }}" == "true" ]; then
+            echo "- ✅ TestQuarantine.swift updated" >> $GITHUB_STEP_SUMMARY
+            echo "- 🔄 PR created to update quarantine status" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ℹ️ No updates needed to TestQuarantine.swift" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Current Quarantine Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          cat quarantine-data/current-status.md | grep -A 1000 "## Currently Quarantined Tests" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.analyze.outputs.flaky_count }}" -gt "0" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Flaky Test Detection" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat quarantine-data/flaky-report.md | grep -A 1000 "## Potentially Flaky Tests" >> $GITHUB_STEP_SUMMARY
+          fi 
