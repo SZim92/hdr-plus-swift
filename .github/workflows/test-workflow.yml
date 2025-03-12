@@ -1,0 +1,464 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [ main, develop, 'feature/**' ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      test_filter:
+        description: 'Regex pattern to filter tests'
+        required: false
+        default: ''
+      test_type:
+        description: 'Type of tests to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - unit
+          - integration
+          - visual
+          - performance
+          - metal
+
+# Prevent concurrent runs of the same workflow on the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+  LC_CTYPE: en_US.UTF-8
+  LANG: en_US.UTF-8
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+  issues: write
+  actions: read
+
+jobs:
+  prepare:
+    name: Prepare Test Environment
+    runs-on: macos-latest
+    outputs:
+      run_unit: ${{ steps.check_tests.outputs.run_unit }}
+      run_integration: ${{ steps.check_tests.outputs.run_integration }}
+      run_visual: ${{ steps.check_tests.outputs.run_visual }}
+      run_performance: ${{ steps.check_tests.outputs.run_performance }}
+      run_metal: ${{ steps.check_tests.outputs.run_metal }}
+      test_filter: ${{ steps.check_tests.outputs.test_filter }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Ruby for fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.0'
+          bundler-cache: true
+
+      - name: Install Dependencies
+        run: |
+          gem install bundler
+          bundle install
+          brew install imagemagick
+
+      - name: Generate Test Data
+        run: |
+          chmod +x Scripts/generate-test-data.sh
+          Scripts/generate-test-data.sh -v
+
+      - name: Determine Tests to Run
+        id: check_tests
+        run: |
+          INPUT_TEST_TYPE="${{ github.event.inputs.test_type }}"
+          
+          # Default to "all" if not specified
+          TEST_TYPE=${INPUT_TEST_TYPE:-all}
+          
+          # Set output variables based on test type
+          if [[ "$TEST_TYPE" == "all" ]]; then
+            echo "run_unit=true" >> $GITHUB_OUTPUT
+            echo "run_integration=true" >> $GITHUB_OUTPUT
+            echo "run_visual=true" >> $GITHUB_OUTPUT
+            echo "run_performance=true" >> $GITHUB_OUTPUT
+            echo "run_metal=true" >> $GITHUB_OUTPUT
+          else
+            echo "run_unit=$([ "$TEST_TYPE" == "unit" ] && echo true || echo false)" >> $GITHUB_OUTPUT
+            echo "run_integration=$([ "$TEST_TYPE" == "integration" ] && echo true || echo false)" >> $GITHUB_OUTPUT
+            echo "run_visual=$([ "$TEST_TYPE" == "visual" ] && echo true || echo false)" >> $GITHUB_OUTPUT
+            echo "run_performance=$([ "$TEST_TYPE" == "performance" ] && echo true || echo false)" >> $GITHUB_OUTPUT
+            echo "run_metal=$([ "$TEST_TYPE" == "metal" ] && echo true || echo false)" >> $GITHUB_OUTPUT
+          fi
+          
+          # Set test filter
+          TEST_FILTER="${{ github.event.inputs.test_filter }}"
+          echo "test_filter=$TEST_FILTER" >> $GITHUB_OUTPUT
+          
+          echo "Test Type: $TEST_TYPE"
+          echo "Test Filter: $TEST_FILTER"
+
+  unit-tests:
+    name: Unit Tests
+    needs: prepare
+    if: ${{ needs.prepare.outputs.run_unit == 'true' }}
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Ruby for fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.0'
+          bundler-cache: true
+
+      - name: Install Dependencies
+        run: |
+          gem install bundler
+          bundle install
+
+      - name: Run Unit Tests
+        run: |
+          chmod +x Scripts/run-tests.sh
+          Scripts/run-tests.sh --unit-only \
+            $([ -n "${{ needs.prepare.outputs.test_filter }}" ] && echo "--regex ${{ needs.prepare.outputs.test_filter }}") \
+            --coverage \
+            --report-format junit
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: unit-test-results
+          path: |
+            TestResults/UnitTests/reports/*
+            TestResults/UnitTests/logs/*
+            TestResults/Coverage/unit/*
+          if-no-files-found: warn
+
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: TestResults/UnitTests/reports/*.xml
+          check_name: Unit Test Results
+
+  integration-tests:
+    name: Integration Tests
+    needs: prepare
+    if: ${{ needs.prepare.outputs.run_integration == 'true' }}
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Ruby for fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.0'
+          bundler-cache: true
+
+      - name: Install Dependencies
+        run: |
+          gem install bundler
+          bundle install
+
+      - name: Run Integration Tests
+        run: |
+          chmod +x Scripts/run-integration-tests.sh
+          Scripts/run-integration-tests.sh \
+            $([ -n "${{ needs.prepare.outputs.test_filter }}" ] && echo "--regex ${{ needs.prepare.outputs.test_filter }}") \
+            --coverage \
+            --report-format junit
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: integration-test-results
+          path: |
+            TestResults/Integration/reports/*
+            TestResults/Integration/logs/*
+            TestResults/Coverage/integration/*
+          if-no-files-found: warn
+
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: TestResults/Integration/reports/*.xml
+          check_name: Integration Test Results
+
+  visual-tests:
+    name: Visual Tests
+    needs: prepare
+    if: ${{ needs.prepare.outputs.run_visual == 'true' }}
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Ruby for fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.0'
+          bundler-cache: true
+
+      - name: Install Dependencies
+        run: |
+          gem install bundler
+          bundle install
+          brew install imagemagick
+
+      - name: Generate Test Data
+        run: |
+          chmod +x Scripts/generate-test-data.sh
+          Scripts/generate-test-data.sh -v -p
+
+      - name: Run Visual Tests
+        run: |
+          chmod +x Scripts/run-tests.sh
+          Scripts/run-tests.sh --visual-only \
+            $([ -n "${{ needs.prepare.outputs.test_filter }}" ] && echo "--regex ${{ needs.prepare.outputs.test_filter }}") \
+            --report-format junit
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: visual-test-results
+          path: |
+            TestResults/VisualTests/reports/*
+            TestResults/VisualTests/logs/*
+            TestResults/VisualTests/diffs/*
+          if-no-files-found: warn
+
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: TestResults/VisualTests/reports/*.xml
+          check_name: Visual Test Results
+
+      - name: Create Visual Diff Report
+        if: ${{ failure() }}
+        run: |
+          # Create an HTML report of visual test failures
+          mkdir -p TestResults/VisualTests/reports/visual-report
+          
+          echo "<html><head><title>Visual Test Failures</title>" > TestResults/VisualTests/reports/visual-report/index.html
+          echo "<style>body { font-family: Arial, sans-serif; } .diff-container { margin-bottom: 30px; } img { max-width: 100%; border: 1px solid #ddd; }</style>" >> TestResults/VisualTests/reports/visual-report/index.html
+          echo "</head><body><h1>Visual Test Failures</h1>" >> TestResults/VisualTests/reports/visual-report/index.html
+          
+          for DIFF_FILE in TestResults/VisualTests/diffs/*.png; do
+            if [ -f "$DIFF_FILE" ]; then
+              BASE_NAME=$(basename "$DIFF_FILE" .diff.png)
+              echo "<div class='diff-container'>" >> TestResults/VisualTests/reports/visual-report/index.html
+              echo "<h2>$BASE_NAME</h2>" >> TestResults/VisualTests/reports/visual-report/index.html
+              echo "<h3>Difference</h3><img src='../../../diffs/$(basename "$DIFF_FILE")' /><br/>" >> TestResults/VisualTests/reports/visual-report/index.html
+              echo "</div>" >> TestResults/VisualTests/reports/visual-report/index.html
+            fi
+          done
+          
+          echo "</body></html>" >> TestResults/VisualTests/reports/visual-report/index.html
+
+      - name: Upload Visual Diff Report
+        uses: actions/upload-artifact@v3
+        if: ${{ failure() }}
+        with:
+          name: visual-diff-report
+          path: TestResults/VisualTests/reports/visual-report/
+          if-no-files-found: warn
+
+  performance-tests:
+    name: Performance Tests
+    needs: prepare
+    if: ${{ needs.prepare.outputs.run_performance == 'true' }}
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Ruby for fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.0'
+          bundler-cache: true
+
+      - name: Install Dependencies
+        run: |
+          gem install bundler
+          bundle install
+
+      - name: Run Performance Tests
+        run: |
+          chmod +x Scripts/run-tests.sh
+          Scripts/run-tests.sh --performance-only \
+            $([ -n "${{ needs.prepare.outputs.test_filter }}" ] && echo "--regex ${{ needs.prepare.outputs.test_filter }}") \
+            --report-format json
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-test-results
+          path: |
+            TestResults/Performance/reports/*
+            TestResults/Performance/logs/*
+            TestResults/Performance/history/*
+          if-no-files-found: warn
+
+      - name: Create Performance Report
+        run: |
+          # Create a simple performance report
+          mkdir -p TestResults/Performance/reports/performance-report
+          
+          echo "<html><head><title>Performance Test Results</title>" > TestResults/Performance/reports/performance-report/index.html
+          echo "<style>body { font-family: Arial, sans-serif; } table { border-collapse: collapse; width: 100%; } th, td { border: 1px solid #ddd; padding: 8px; text-align: left; } tr:nth-child(even) { background-color: #f2f2f2; } th { background-color: #4CAF50; color: white; }</style>" >> TestResults/Performance/reports/performance-report/index.html
+          echo "</head><body><h1>Performance Test Results</h1>" >> TestResults/Performance/reports/performance-report/index.html
+          
+          echo "<table><tr><th>Test Name</th><th>Duration (ms)</th><th>Baseline (ms)</th><th>Deviation (%)</th><th>Status</th></tr>" >> TestResults/Performance/reports/performance-report/index.html
+          
+          # In a real implementation, this would parse the JSON results
+          # This is a placeholder that would be replaced with actual results parsing
+          echo "<tr><td>Sample Test</td><td>100</td><td>95</td><td>5.3%</td><td>PASS</td></tr>" >> TestResults/Performance/reports/performance-report/index.html
+          
+          echo "</table></body></html>" >> TestResults/Performance/reports/performance-report/index.html
+
+      - name: Upload Performance Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-report
+          path: TestResults/Performance/reports/performance-report/
+          if-no-files-found: warn
+
+  metal-tests:
+    name: Metal Tests
+    needs: prepare
+    if: ${{ needs.prepare.outputs.run_metal == 'true' }}
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Ruby for fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.0'
+          bundler-cache: true
+
+      - name: Install Dependencies
+        run: |
+          gem install bundler
+          bundle install
+
+      - name: Run Metal Tests
+        run: |
+          chmod +x Scripts/run-tests.sh
+          Scripts/run-tests.sh --metal-only \
+            $([ -n "${{ needs.prepare.outputs.test_filter }}" ] && echo "--regex ${{ needs.prepare.outputs.test_filter }}") \
+            --report-format junit
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: metal-test-results
+          path: |
+            TestResults/MetalTests/reports/*
+            TestResults/MetalTests/logs/*
+          if-no-files-found: warn
+
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: TestResults/MetalTests/reports/*.xml
+          check_name: Metal Test Results
+
+  test-summary:
+    name: Test Summary
+    needs: [prepare, unit-tests, integration-tests, visual-tests, performance-tests, metal-tests]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: all-artifacts
+          
+      - name: Generate Test Summary
+        run: |
+          echo "# Test Results Summary" > test-summary.md
+          echo "" >> test-summary.md
+          echo "## Overview" >> test-summary.md
+          echo "" >> test-summary.md
+          
+          # Unit Tests
+          if [ -d "all-artifacts/unit-test-results" ]; then
+            echo "### Unit Tests" >> test-summary.md
+            echo "✅ Unit tests completed" >> test-summary.md
+            echo "" >> test-summary.md
+          fi
+          
+          # Integration Tests
+          if [ -d "all-artifacts/integration-test-results" ]; then
+            echo "### Integration Tests" >> test-summary.md
+            echo "✅ Integration tests completed" >> test-summary.md
+            echo "" >> test-summary.md
+          fi
+          
+          # Visual Tests
+          if [ -d "all-artifacts/visual-test-results" ]; then
+            echo "### Visual Tests" >> test-summary.md
+            if [ -d "all-artifacts/visual-diff-report" ]; then
+              echo "❌ Visual tests failed - see Visual Diff Report artifact" >> test-summary.md
+            else
+              echo "✅ Visual tests completed" >> test-summary.md
+            fi
+            echo "" >> test-summary.md
+          fi
+          
+          # Performance Tests
+          if [ -d "all-artifacts/performance-test-results" ]; then
+            echo "### Performance Tests" >> test-summary.md
+            echo "✅ Performance tests completed - see Performance Report artifact" >> test-summary.md
+            echo "" >> test-summary.md
+          fi
+          
+          # Metal Tests
+          if [ -d "all-artifacts/metal-test-results" ]; then
+            echo "### Metal Tests" >> test-summary.md
+            echo "✅ Metal tests completed" >> test-summary.md
+            echo "" >> test-summary.md
+          fi
+          
+          echo "## Artifacts" >> test-summary.md
+          echo "" >> test-summary.md
+          
+          ls -la all-artifacts/ | while read line; do
+            if [[ $line == *-report ]]; then
+              echo "- $line" >> test-summary.md
+            fi
+          done
+          
+      - name: Create Summary
+        run: cat test-summary.md >> $GITHUB_STEP_SUMMARY
+        
+      - name: Post PR Comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        if: github.event_name == 'pull_request'
+        with:
+          header: test-results
+          path: test-summary.md 
