@@ -115,7 +115,7 @@ int read_dng_from_disk(const char* in_path, void** pixel_bytes_pointer, int* wid
             printf("ERROR: MosaicInfo is null.\n");
             return 1;
         } else {
-            dng_point mosaic_pattern_size = negative->fMosaicInfo->fCFAPatternSize;
+            dng_point mosaic_pattern_size = mosaic_info->fCFAPatternSize;
             *mosaic_pattern_width = mosaic_pattern_size.h;
         }
                
@@ -278,10 +278,25 @@ int write_dng_to_disk(const char *in_path, const char *out_path, void** pixel_by
         // overwrite pixel buffer
         void* pixel_bytes = *pixel_bytes_pointer;
         int image_size = image.Width() * image.Height() * image.PixelSize();
-        memcpy(image.fBuffer.DirtyPixel(0, 0), pixel_bytes, image_size);
+        
+        // Create a new pixel buffer and copy the data
+        dng_pixel_buffer buffer;
+        buffer.fArea = image.Bounds();
+        buffer.fPlane = 0;
+        buffer.fPlanes = image.Planes();
+        buffer.fRowStep = image.Width() * image.PixelSize() / image.Planes();
+        buffer.fColStep = image.PixelSize() / image.Planes();
+        buffer.fPixelType = image.PixelType();
+        buffer.fPixelSize = image.PixelSize() / image.Planes();
+        buffer.fData = pixel_bytes;
+        
+        // Copy the data to the image
+        image.Put(buffer);
                 
         // store modified pixel buffer to the negative
-        negative->fStage1Image.Reset(image_pointer.Release());
+        AutoPtr<dng_image> stage1Image;
+        stage1Image.Reset(image_pointer.Release());
+        negative->SetStage1Image(stage1Image);
             
         // validate the modified image
         // - this resets some of the image stats like md5 checksums

@@ -29,6 +29,13 @@
 
 #include <memory>
 
+#if !DISABLE_JXL_SUPPORT
+#include "jxl/color_encoding.h"
+#else
+// Forward declaration for JxlColorEncoding when JPEG XL support is disabled
+struct JxlColorEncoding;
+#endif
+
 /*****************************************************************************/
 
 class dng_preview_info
@@ -207,6 +214,7 @@ class dng_ifd
 		dng_rect fMaskedArea [kMaxMaskedAreas];
 		
 		uint32 fRowInterleaveFactor;
+		uint32 fColumnInterleaveFactor;
 		
 		uint32 fSubTileBlockRows;
 		uint32 fSubTileBlockCols;
@@ -238,6 +246,17 @@ class dng_ifd
 		uint64 fNextIFD;
 		
 		int32 fCompressionQuality;
+
+		// For JPEG XL (compression type ccJXL), use fJXLEncodeSettings
+		// instead of fCompressionQuality.
+
+		std::shared_ptr<const dng_jxl_encode_settings> fJXLEncodeSettings;
+		
+#if !DISABLE_JXL_SUPPORT
+		std::shared_ptr<const JxlColorEncoding> fJXLColorEncoding;
+#else
+		std::shared_ptr<const void> fJXLColorEncoding;
+#endif
 		
 		bool fPatchFirstJPEGByte;
 
@@ -248,8 +267,14 @@ class dng_ifd
 
 		std::shared_ptr<const dng_gain_table_map> fProfileGainTableMap;
 
-		std::shared_ptr<const dng_masked_rgb_tables> fMaskedRGBTables;
+		uint32 fProfileGainTableMap_TagVersion = 1;
 
+		dng_image_stats fImageStats;
+		
+		real32 fJXLDistance    = -1.0f;
+		int32  fJXLEffort      = -1;
+		int32  fJXLDecodeSpeed = -1;
+		
 	public:
 	
 		dng_ifd ();
@@ -310,8 +335,8 @@ class dng_ifd
 		virtual void ReadImage (dng_host &host,
 								dng_stream &stream,
 								dng_image &image,
-								dng_jpeg_image *jpegImage = NULL,
-								dng_fingerprint *jpegDigest = NULL) const;
+								dng_lossy_compressed_image *lossyImage = NULL,
+								dng_fingerprint *lossyDigest = NULL) const;
 			
 	protected:
 							   

@@ -1,0 +1,71 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project burstphoto.xcodeproj -target VisualTests -configuration Debug -arch arm64 build
+
+User defaults from command line:
+    IDEPackageSupportUseBuiltinSCM = YES
+
+Build settings from command line:
+    ARCHS = arm64
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (2 targets)
+    Target 'VisualTests' in project 'burstphoto'
+        ➜ Explicit dependency on target 'gui' in project 'burstphoto'
+    Target 'gui' in project 'burstphoto' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk -x c++ -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+Build description signature: 4bd8fc036ef3c66c39a56ab5773f81a1
+Build description path: /Users/steven/Code/Mac/hdr-plus-swift/build/XCBuildData/4bd8fc036ef3c66c39a56ab5773f81a1.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk /var/folders/t3/p80dzx6923j3h1_n_3f7zm280000gn/C/com.apple.DeveloperTools/16.2-16C5032a/Xcode/SDKStatCaches.noindex/macosx15.2-24C94-1dd28740b163f220e3e9b9fd2a542f53.sdkstatcache
+    cd /Users/steven/Code/Mac/hdr-plus-swift/burstphoto.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk -o /var/folders/t3/p80dzx6923j3h1_n_3f7zm280000gn/C/com.apple.DeveloperTools/16.2-16C5032a/Xcode/SDKStatCaches.noindex/macosx15.2-24C94-1dd28740b163f220e3e9b9fd2a542f53.sdkstatcache
+
+CpResource /Users/steven/Code/Mac/hdr-plus-swift/build/Debug/Burst\ Photo.app/Contents/Resources/README.md /Users/steven/Code/Mac/hdr-plus-swift/dng_sdk/libjpeg/README.md (in target 'gui' from project 'burstphoto')
+    cd /Users/steven/Code/Mac/hdr-plus-swift
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks /Users/steven/Code/Mac/hdr-plus-swift/dng_sdk/libjpeg/README.md /Users/steven/Code/Mac/hdr-plus-swift/build/Debug/Burst\ Photo.app/Contents/Resources
+error: /Users/steven/Code/Mac/hdr-plus-swift/dng_sdk/libjpeg/README.md: No such file or directory (in target 'gui' from project 'burstphoto')
+
+GenerateAssetSymbols /Users/steven/Code/Mac/hdr-plus-swift/burstphoto/Preview\ Content/Preview\ Assets.xcassets /Users/steven/Code/Mac/hdr-plus-swift/burstphoto/Assets.xcassets (in target 'gui' from project 'burstphoto')
+    cd /Users/steven/Code/Mac/hdr-plus-swift
+    /Applications/Xcode.app/Contents/Developer/usr/bin/actool --output-format human-readable-text --notices --warnings --export-dependency-info /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/assetcatalog_dependencies --output-partial-info-plist /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/assetcatalog_generated_info.plist --app-icon AppIcon --accent-color AccentColor --enable-on-demand-resources NO --development-region en --target-device mac --minimum-deployment-target 11.0 --platform macosx --compile /Users/steven/Code/Mac/hdr-plus-swift/build/Debug/Burst\ Photo.app/Contents/Resources /Users/steven/Code/Mac/hdr-plus-swift/burstphoto/Preview\ Content/Preview\ Assets.xcassets /Users/steven/Code/Mac/hdr-plus-swift/burstphoto/Assets.xcassets --bundle-identifier martinmarek.burstphoto --generate-swift-asset-symbol-extensions NO --generate-swift-asset-symbols /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/DerivedSources/GeneratedAssetSymbols.swift --generate-objc-asset-symbols /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/DerivedSources/GeneratedAssetSymbols.h --generate-asset-symbol-index /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/DerivedSources/GeneratedAssetSymbols-Index.plist
+
+CompileMetalFile /Users/steven/Code/Mac/hdr-plus-swift/burstphoto/texture/texture.metal (in target 'gui' from project 'burstphoto')
+    cd /Users/steven/Code/Mac/hdr-plus-swift
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/metal -c -target air64-apple-macos11.0 -gline-tables-only -frecord-sources -I/Users/steven/Code/Mac/hdr-plus-swift/build/Debug/include -F/Users/steven/Code/Mac/hdr-plus-swift/build/Debug -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk -fmetal-math-mode\=fast -fmetal-math-fp32-functions\=fast -serialize-diagnostics /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/Metal/texture-5ab161e6a22b8de07332de1230f90ba6.dia -o /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/Metal/texture-5ab161e6a22b8de07332de1230f90ba6.air -MMD -MT dependencies -MF /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/Metal/texture-5ab161e6a22b8de07332de1230f90ba6.dat /Users/steven/Code/Mac/hdr-plus-swift/burstphoto/texture/texture.metal
+
+CompileMetalFile /Users/steven/Code/Mac/hdr-plus-swift/burstphoto/merge/frequency.metal (in target 'gui' from project 'burstphoto')
+    cd /Users/steven/Code/Mac/hdr-plus-swift
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/metal -c -target air64-apple-macos11.0 -gline-tables-only -frecord-sources -I/Users/steven/Code/Mac/hdr-plus-swift/build/Debug/include -F/Users/steven/Code/Mac/hdr-plus-swift/build/Debug -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk -fmetal-math-mode\=fast -fmetal-math-fp32-functions\=fast -serialize-diagnostics /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/Metal/frequency-cddafeb008611314f6f1d4ff3b351125.dia -o /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/Metal/frequency-cddafeb008611314f6f1d4ff3b351125.air -MMD -MT dependencies -MF /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/Metal/frequency-cddafeb008611314f6f1d4ff3b351125.dat /Users/steven/Code/Mac/hdr-plus-swift/burstphoto/merge/frequency.metal
+
+CompileMetalFile /Users/steven/Code/Mac/hdr-plus-swift/burstphoto/merge/spatial.metal (in target 'gui' from project 'burstphoto')
+    cd /Users/steven/Code/Mac/hdr-plus-swift
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/metal -c -target air64-apple-macos11.0 -gline-tables-only -frecord-sources -I/Users/steven/Code/Mac/hdr-plus-swift/build/Debug/include -F/Users/steven/Code/Mac/hdr-plus-swift/build/Debug -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk -fmetal-math-mode\=fast -fmetal-math-fp32-functions\=fast -serialize-diagnostics /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/Metal/spatial-222f8a79c3b92b0860b9fac259a85768.dia -o /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/Metal/spatial-222f8a79c3b92b0860b9fac259a85768.air -MMD -MT dependencies -MF /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/Metal/spatial-222f8a79c3b92b0860b9fac259a85768.dat /Users/steven/Code/Mac/hdr-plus-swift/burstphoto/merge/spatial.metal
+
+CompileMetalFile /Users/steven/Code/Mac/hdr-plus-swift/burstphoto/exposure/exposure.metal (in target 'gui' from project 'burstphoto')
+    cd /Users/steven/Code/Mac/hdr-plus-swift
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/metal -c -target air64-apple-macos11.0 -gline-tables-only -frecord-sources -I/Users/steven/Code/Mac/hdr-plus-swift/build/Debug/include -F/Users/steven/Code/Mac/hdr-plus-swift/build/Debug -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk -fmetal-math-mode\=fast -fmetal-math-fp32-functions\=fast -serialize-diagnostics /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/Metal/exposure-4ece42c110aff1bcfa59a3593d94ac48.dia -o /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/Metal/exposure-4ece42c110aff1bcfa59a3593d94ac48.air -MMD -MT dependencies -MF /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/Metal/exposure-4ece42c110aff1bcfa59a3593d94ac48.dat /Users/steven/Code/Mac/hdr-plus-swift/burstphoto/exposure/exposure.metal
+
+CompileMetalFile /Users/steven/Code/Mac/hdr-plus-swift/burstphoto/align/align.metal (in target 'gui' from project 'burstphoto')
+    cd /Users/steven/Code/Mac/hdr-plus-swift
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/metal -c -target air64-apple-macos11.0 -gline-tables-only -frecord-sources -I/Users/steven/Code/Mac/hdr-plus-swift/build/Debug/include -F/Users/steven/Code/Mac/hdr-plus-swift/build/Debug -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk -fmetal-math-mode\=fast -fmetal-math-fp32-functions\=fast -serialize-diagnostics /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/Metal/align-c5fe45db7f91326f413d4c33b1363ae8.dia -o /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/Metal/align-c5fe45db7f91326f413d4c33b1363ae8.air -MMD -MT dependencies -MF /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/Metal/align-c5fe45db7f91326f413d4c33b1363ae8.dat /Users/steven/Code/Mac/hdr-plus-swift/burstphoto/align/align.metal
+
+CompileAssetCatalog /Users/steven/Code/Mac/hdr-plus-swift/build/Debug/Burst\ Photo.app/Contents/Resources /Users/steven/Code/Mac/hdr-plus-swift/burstphoto/Preview\ Content/Preview\ Assets.xcassets /Users/steven/Code/Mac/hdr-plus-swift/burstphoto/Assets.xcassets (in target 'gui' from project 'burstphoto')
+    cd /Users/steven/Code/Mac/hdr-plus-swift
+    /Applications/Xcode.app/Contents/Developer/usr/bin/actool --output-format human-readable-text --notices --warnings --export-dependency-info /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/assetcatalog_dependencies --output-partial-info-plist /Users/steven/Code/Mac/hdr-plus-swift/build/burstphoto.build/Debug/gui.build/assetcatalog_generated_info.plist --app-icon AppIcon --accent-color AccentColor --enable-on-demand-resources NO --development-region en --target-device mac --minimum-deployment-target 11.0 --platform macosx --compile /Users/steven/Code/Mac/hdr-plus-swift/build/Debug/Burst\ Photo.app/Contents/Resources /Users/steven/Code/Mac/hdr-plus-swift/burstphoto/Preview\ Content/Preview\ Assets.xcassets /Users/steven/Code/Mac/hdr-plus-swift/burstphoto/Assets.xcassets
+

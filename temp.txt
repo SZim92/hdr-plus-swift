@@ -1,0 +1,1 @@
+#if !DISABLE_JXL_SUPPORT

@@ -327,37 +327,6 @@
 		FAED70FE2A53A30E00BF63BD /* exposure.metal in Sources */ = {isa = PBXBuildFile; fileRef = FAED70FC2A53A30E00BF63BD /* exposure.metal */; };
 /* End PBXBuildFile section */
 
-/* Begin PBXContainerItemProxy section */
-		B02711F22D812D2F002532CE /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = E1ACED5E26A490A0009B14EB /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = E1ACED6526A490A1009B14EB;
-			remoteInfo = gui;
-		};
-		B02712012D812D71002532CE /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = E1ACED5E26A490A0009B14EB /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = E1ACED6526A490A1009B14EB;
-			remoteInfo = gui;
-		};
-		B027120E2D812E11002532CE /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = E1ACED5E26A490A0009B14EB /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = E1ACED6526A490A1009B14EB;
-			remoteInfo = gui;
-		};
-		B027121B2D812E23002532CE /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = E1ACED5E26A490A0009B14EB /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = E1ACED6526A490A1009B14EB;
-			remoteInfo = gui;
-		};
-/* End PBXContainerItemProxy section */
-
 /* Begin PBXFileReference section */
 		B02711EE2D812D2F002532CE /* UnitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = UnitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B02711FB2D812D71002532CE /* VisualTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VisualTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -1740,7 +1709,6 @@
 			buildRules = (
 			);
 			dependencies = (
-				B02711F32D812D2F002532CE /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				B02711EF2D812D2F002532CE /* UnitTests */,
@@ -1763,7 +1731,6 @@
 			buildRules = (
 			);
 			dependencies = (
-				B02712022D812D71002532CE /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				B02711FC2D812D71002532CE /* VisualTests */,
@@ -1786,7 +1753,6 @@
 			buildRules = (
 			);
 			dependencies = (
-				B027120F2D812E11002532CE /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				B027120B2D812E11002532CE /* PerformanceTests */,
@@ -1809,7 +1775,6 @@
 			buildRules = (
 			);
 			dependencies = (
-				B027121C2D812E23002532CE /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				B02712182D812E23002532CE /* IntegrationTests */,
@@ -1887,7 +1852,7 @@
 				};
 			};
 			buildConfigurationList = E1ACED6126A490A0009B14EB /* Build configuration list for PBXProject "burstphoto" */;
-			compatibilityVersion = "Xcode 9.3";
+			compatibilityVersion = "Xcode 12.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -2313,29 +2278,6 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
-/* Begin PBXTargetDependency section */
-		B02711F32D812D2F002532CE /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = E1ACED6526A490A1009B14EB /* gui */;
-			targetProxy = B02711F22D812D2F002532CE /* PBXContainerItemProxy */;
-		};
-		B02712022D812D71002532CE /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = E1ACED6526A490A1009B14EB /* gui */;
-			targetProxy = B02712012D812D71002532CE /* PBXContainerItemProxy */;
-		};
-		B027120F2D812E11002532CE /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = E1ACED6526A490A1009B14EB /* gui */;
-			targetProxy = B027120E2D812E11002532CE /* PBXContainerItemProxy */;
-		};
-		B027121C2D812E23002532CE /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = E1ACED6526A490A1009B14EB /* gui */;
-			targetProxy = B027121B2D812E23002532CE /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
-
 /* Begin XCBuildConfiguration section */
 		B02711F42D812D2F002532CE /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -2730,7 +2672,7 @@
 					"$(PROJECT_DIR)/dng_sdk/xmp_lib/Release",
 					"$(PROJECT_DIR)/dng_sdk/xmp_lib/Debug",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 11.0;
+				MACOSX_DEPLOYMENT_TARGET = 11.5;
 				MARKETING_VERSION = 1.6;
 				PRODUCT_BUNDLE_IDENTIFIER = martinmarek.burstphoto;
 				PRODUCT_NAME = "Burst Photo";
@@ -2767,7 +2709,7 @@
 					"$(PROJECT_DIR)/dng_sdk/xmp_lib/Release",
 					"$(PROJECT_DIR)/dng_sdk/xmp_lib/Debug",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 11.0;
+				MACOSX_DEPLOYMENT_TARGET = 11.5;
 				MARKETING_VERSION = 1.6;
 				PRODUCT_BUNDLE_IDENTIFIER = martinmarek.burstphoto;
 				PRODUCT_NAME = "Burst Photo";

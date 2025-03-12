@@ -1,0 +1,11 @@
+// Configuration settings file to disable SwiftUICore direct linking
+// This file sets build settings to address the SwiftUICore linking issue
+
+// Use SwiftUI instead of SwiftUICore
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) USE_SWIFTUI_NOT_CORE
+
+// Don't link against private frameworks
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/../Frameworks
+
+// Make sure framework search paths are standard
+FRAMEWORK_SEARCH_PATHS = $(inherited) "$(DEVELOPER_FRAMEWORKS_DIR)" "$(PLATFORM_DIR)/Developer/Library/Frameworks"
