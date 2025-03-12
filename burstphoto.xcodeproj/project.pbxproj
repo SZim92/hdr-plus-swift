@@ -36,6 +36,7 @@
 		B02712822D8135D7002532CE /* AlignAndMergeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B027122A2D813350002532CE /* AlignAndMergeTests.swift */; };
 		B02712832D8135ED002532CE /* FrequencyMergeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B02712302D813350002532CE /* FrequencyMergeTests.swift */; };
 		B02712842D8135F1002532CE /* MetalTestUtility.swift in Sources */ = {isa = PBXBuildFile; fileRef = B02712322D813350002532CE /* MetalTestUtility.swift */; };
+		B0E56A732D8178B9003F985D /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B0E56A722D8178B9003F985D /* SwiftUI.framework */; };
 		E133AD6828FEF8770058B799 /* TXMPIterator.incl_cpp in Resources */ = {isa = PBXBuildFile; fileRef = E133AC3328FEF8770058B799 /* TXMPIterator.incl_cpp */; };
 		E133AD6928FEF8770058B799 /* TXMPDocOps.incl_cpp in Resources */ = {isa = PBXBuildFile; fileRef = E133AC3628FEF8770058B799 /* TXMPDocOps.incl_cpp */; };
 		E133AD6A28FEF8770058B799 /* TXMPMeta.incl_cpp in Resources */ = {isa = PBXBuildFile; fileRef = E133AC3728FEF8770058B799 /* TXMPMeta.incl_cpp */; };
@@ -374,6 +375,7 @@
 		B02712632D813350002532CE /* TestOutputFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestOutputFormatter.swift; sourceTree = "<group>"; };
 		B02712642D813350002532CE /* TestQuarantine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestQuarantine.swift; sourceTree = "<group>"; };
 		B02712652D813350002532CE /* VisualTestUtility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualTestUtility.swift; sourceTree = "<group>"; };
+		B0E56A722D8178B9003F985D /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		E133ABCA28FEF8770058B799 /* XMPAssetManagement.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = XMPAssetManagement.cpp; sourceTree = "<group>"; };
 		E133ABCB28FEF8770058B799 /* IAssetArtboardPart.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = IAssetArtboardPart.cpp; sourceTree = "<group>"; };
 		E133ABCC28FEF8770058B799 /* IComposedAssetManager.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = IComposedAssetManager.cpp; sourceTree = "<group>"; };
@@ -820,6 +822,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				E141516926CBFB2C006806D3 /* Carbon.framework in Frameworks */,
+				B0E56A732D8178B9003F985D /* SwiftUI.framework in Frameworks */,
 				E1F8351426F2741100994226 /* GameKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1589,6 +1592,7 @@
 		E141516726CBFB2C006806D3 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				B0E56A722D8178B9003F985D /* SwiftUI.framework */,
 				E1F8351326F2741100994226 /* GameKit.framework */,
 				E141516826CBFB2C006806D3 /* Carbon.framework */,
 			);

@@ -1,0 +1,5 @@
+// Configuration settings file to enable standard SwiftUI usage
+// This file adds a compilation condition for conditional SwiftUI code
+
+// Add USE_SWIFTUI_NOT_CORE to active compilation conditions
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) USE_SWIFTUI_NOT_CORE 

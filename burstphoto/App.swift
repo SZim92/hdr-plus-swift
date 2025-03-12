@@ -6,6 +6,14 @@
  * storage, window configuration, and the initial view hierarchy.
  */
 import SwiftUI
+
+// MARK: - SwiftUI Compatibility
+#if !USE_SWIFTUI_NOT_CORE
+// Original SwiftUICore code path
+#else
+// Standard SwiftUI path - may need adjustments for window management
+import AppKit
+#endif
 import AppKit
 
 /*
@@ -121,7 +129,12 @@ struct burstphotoApp: App {
                 .onAppear {initialize_xmp_sdk()}
                 .onDisappear {terminate_xmp_sdk()}
         }
+        
+#if !USE_SWIFTUI_NOT_CORE
         .windowStyle(HiddenTitleBarWindowStyle())
+#else
+        .windowStyle(.hiddenTitleBar)
+#endif
         .windowResizabilityContentSize()
         .commands {
             CommandGroup(replacing: .newItem, addition: {}) // disables creating any new windows
