@@ -2759,7 +2759,7 @@
 					"$(PROJECT_DIR)/dng_sdk/xmp_lib/Release",
 					"$(PROJECT_DIR)/dng_sdk/xmp_lib/Debug",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MACOSX_DEPLOYMENT_TARGET = 11.5;
 				MARKETING_VERSION = 1.4;
 				PRODUCT_BUNDLE_IDENTIFIER = martinmarek.burstphoto;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -2793,7 +2793,7 @@
 					"$(PROJECT_DIR)/dng_sdk/xmp_lib/Release",
 					"$(PROJECT_DIR)/dng_sdk/xmp_lib/Debug",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MACOSX_DEPLOYMENT_TARGET = 11.5;
 				MARKETING_VERSION = 1.4;
 				PRODUCT_BUNDLE_IDENTIFIER = martinmarek.burstphoto;
 				PRODUCT_NAME = "$(TARGET_NAME)";
