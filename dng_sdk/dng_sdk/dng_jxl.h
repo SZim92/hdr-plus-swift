@@ -12,8 +12,8 @@
 
 /*****************************************************************************/
 
-#ifndef __dng_jxl__
-#define __dng_jxl__
+#ifndef DNG_JXL_H
+#define DNG_JXL_H
 
 /*****************************************************************************/
 
@@ -34,10 +34,8 @@
 #include <unordered_set>
 
 // Disable JPEG XL support
+#ifndef DISABLE_JXL_SUPPORT
 #define DISABLE_JXL_SUPPORT 1
-
-#if !DISABLE_JXL_SUPPORT
-#include "jxl/color_encoding.h"
 #endif
 
 /*****************************************************************************/
@@ -223,33 +221,14 @@ bool ParseJXL (dng_host &host,
 			   dng_info &info,
 			   bool supportBasicCodeStream,
 			   bool supportContainer);
+#endif // DISABLE_JXL_SUPPORT
 
 /*****************************************************************************/
 
-class dng_jxl_color_space_info
-	{
-		
-	public:
-
-		uint32 fColorSpace = 0;
-
-		uint32 fWhitePoint = 0;
-
-		uint32 fPrimaries = 0;
-
-		uint32 fTransferFunction = 0;
-
-		uint32 fRenderingIntent = 0;
-
-#if !DISABLE_JXL_SUPPORT
-		AutoPtr<JxlColorEncoding> fJxlColorEncoding;
-#endif
-
-		AutoPtr<dng_memory_block> fICCProfile;
-
-		real32 fIntensityTargetNits = 0.0f;
-		
-	};
+class dng_jxl_color_space_info {
+public:
+    dng_jxl_color_space_info() {}
+};
 
 /*****************************************************************************/
 
@@ -410,8 +389,4 @@ bool SupportsJXL (const dng_image &image);
 
 /*****************************************************************************/
 
-#endif	// __dng_jxl__
-	
-/*****************************************************************************/
-
-#endif // DISABLE_JXL_SUPPORT (auto-added)
+#endif	// DNG_JXL_H

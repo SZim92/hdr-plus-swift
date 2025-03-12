@@ -6538,14 +6538,14 @@ void dng_negative::LosslessCompressJXL (dng_host &host,
 				
 				AutoPtr<dng_jxl_image> lossyImage (new dng_jxl_image);
 				
+				dng_ifd ifd;
 				lossyImage->Encode (host,
 									writer,
-									*tempImage,
-									dng_host::use_case_LosslessMosaic,
-									this);
-				
-				lossyImage->fRowInterleaveFactor    = GetMosaicInfo ()->fCFAPatternSize.v;
-				lossyImage->fColumnInterleaveFactor = GetMosaicInfo ()->fCFAPatternSize.h;
+									RawImage (),
+									nearLosslessOK ? dng_host::use_case_LosslessMosaic
+												   : dng_host::use_case_LosslessMainImage,
+									this,
+									ifd);
 					
 				fRawLossyCompressedImage.Reset (lossyImage.Release ());
 				

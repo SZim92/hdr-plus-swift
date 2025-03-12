@@ -18,6 +18,11 @@
 #include "dng_memory.h"
 #include "dng_point.h"
 #include "dng_tag_values.h"
+#include "dng_jxl_dummy.h"
+#include "dng_ifd.h"
+#include "dng_noise_profile.h"
+#include "dng_image.h"
+#include "dng_image_writer.h"
 
 #include <memory>
 #include <vector>
@@ -185,16 +190,19 @@ class dng_jxl_image : public dng_lossy_compressed_image
 					 const dng_image &image,
 					 const dng_jxl_encode_settings &encodeSettings,
 #if !DISABLE_JXL_SUPPORT
-					 const JxlColorEncoding *colorEncoding = nullptr);
+					 const JxlColorEncoding *colorEncoding = nullptr,
+					 dng_ifd &ifd);
 #else
-					 const void *colorEncoding = nullptr);
+					 const void *colorEncoding = nullptr,
+					 dng_ifd &ifd);
 #endif
 
 		void Encode (dng_host &host,
 					 dng_image_writer &writer,
 					 const dng_image &image,
 					 dng_host::use_case_enum useCase,
-					 const dng_negative *negative);
+					 const dng_negative *negative,
+					 dng_ifd &ifd);
 
 	};
 

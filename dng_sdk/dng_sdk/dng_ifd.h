@@ -26,15 +26,9 @@
 #include "dng_string.h"
 #include "dng_sdk_limits.h"
 #include "dng_tag_values.h"
+#include "dng_jxl_dummy.h"
 
 #include <memory>
-
-#if !DISABLE_JXL_SUPPORT
-#include "jxl/color_encoding.h"
-#else
-// Forward declaration for JxlColorEncoding when JPEG XL support is disabled
-struct JxlColorEncoding;
-#endif
 
 /*****************************************************************************/
 
@@ -252,11 +246,9 @@ class dng_ifd
 
 		std::shared_ptr<const dng_jxl_encode_settings> fJXLEncodeSettings;
 		
-#if !DISABLE_JXL_SUPPORT
-		std::shared_ptr<const JxlColorEncoding> fJXLColorEncoding;
-#else
-		std::shared_ptr<const void> fJXLColorEncoding;
-#endif
+		// #include "jxl/color_encoding.h"
+		// std::shared_ptr<const JxlColorEncoding> fJXLColorEncoding;
+		std::shared_ptr<const struct JxlColorEncoding> fJXLColorEncoding;
 		
 		bool fPatchFirstJPEGByte;
 

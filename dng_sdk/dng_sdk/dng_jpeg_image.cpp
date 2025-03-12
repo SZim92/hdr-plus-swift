@@ -512,9 +512,11 @@ void dng_jxl_image::Encode (dng_host &host,
 							const dng_image &image,
 							const dng_jxl_encode_settings &encodeSettings,
 #if !DISABLE_JXL_SUPPORT
-							const JxlColorEncoding *colorEncoding)
+							const JxlColorEncoding *colorEncoding,
+							dng_ifd &ifd)
 #else
-							const void *colorEncoding)
+							const void *colorEncoding,
+							dng_ifd &ifd)
 #endif
 	{
 	
@@ -526,8 +528,6 @@ void dng_jxl_image::Encode (dng_host &host,
 				 image.PixelType () == ttFloat,
 				 "Unsupported pixel type");
 				 
-	dng_ifd ifd;
-	
 	ifd.fImageWidth  = image.Width  ();
 	ifd.fImageLength = image.Height ();
 	
@@ -569,10 +569,8 @@ void dng_jxl_image::Encode (dng_host &host,
 		{
 		
 #if !DISABLE_JXL_SUPPORT
-		AutoPtr<JxlColorEncoding> colorEncodingHolder
-			(new JxlColorEncoding (*colorEncoding));
-		
-		ifd.fJXLColorEncoding.reset (colorEncodingHolder.Release ());
+		JxlColorEncoding* enc = new JxlColorEncoding(*colorEncoding);
+		ifd.fJXLColorEncoding.reset (enc);
 #endif
 		
 		}
@@ -592,7 +590,8 @@ void dng_jxl_image::Encode (dng_host &host,
 							dng_image_writer &writer,
 							const dng_image &image,
 							dng_host::use_case_enum useCase,
-							const dng_negative *negative)
+							const dng_negative *negative,
+							dng_ifd &ifd)
 	{
 	
 	AutoPtr<dng_jxl_encode_settings> encodeSettings
@@ -601,27 +600,24 @@ void dng_jxl_image::Encode (dng_host &host,
 									 negative));
 									 
 #if !DISABLE_JXL_SUPPORT
-	AutoPtr<JxlColorEncoding> colorEncoding;
-
 	if ((useCase == dng_host::use_case_EncodedMainImage ||
 		 useCase == dng_host::use_case_ProxyImage) &&
 		image.PixelType () == ttShort)
 		{
 	
-		colorEncoding.Reset (new JxlColorEncoding);
-
-		memset (colorEncoding.Get (), 0, sizeof (JxlColorEncoding));
+		JxlColorEncoding* enc = new JxlColorEncoding();
+		memset (enc, 0, sizeof (JxlColorEncoding));
 		
 		// EncodeImageForCompression leaves the image far from linear gamma,
 		// so let's pretend it is sRGB gamma.
 
-		colorEncoding->color_space       = image.Planes () == 1 ? JXL_COLOR_SPACE_GRAY
-																: JXL_COLOR_SPACE_RGB;
-		colorEncoding->white_point       = JXL_WHITE_POINT_D65;
-		colorEncoding->primaries         = JXL_PRIMARIES_2100;
-		colorEncoding->transfer_function = JXL_TRANSFER_FUNCTION_SRGB;
+		enc->color_space       = image.Planes () == 1 ? JXL_COLOR_SPACE_GRAY
+													  : JXL_COLOR_SPACE_RGB;
+		enc->white_point       = JXL_WHITE_POINT_D65;
+		enc->primaries         = JXL_PRIMARIES_2100;
+		enc->transfer_function = JXL_TRANSFER_FUNCTION_SRGB;
 		
-		ifd.fJXLColorEncoding.reset (colorEncoding.Release ());
+		ifd.fJXLColorEncoding.reset (enc);
 		
 		}
 #endif
@@ -631,9 +627,11 @@ void dng_jxl_image::Encode (dng_host &host,
 			image,
 			*encodeSettings,
 #if !DISABLE_JXL_SUPPORT
-			colorEncoding.Get ());
+			ifd.fJXLColorEncoding.get (),
+			ifd);
 #else
-			nullptr);
+			nullptr,
+			ifd);
 #endif
 	
 	}

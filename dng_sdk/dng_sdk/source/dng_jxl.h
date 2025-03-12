@@ -12,8 +12,8 @@
 
 /*****************************************************************************/
 
-#ifndef __dng_jxl__
-#define __dng_jxl__
+#ifndef DNG_JXL_H
+#define DNG_JXL_H
 
 /*****************************************************************************/
 
@@ -32,8 +32,9 @@
 
 #include <vector>
 #include <unordered_set>
+#include "dng_jxl_dummy.h"
 
-#include "jxl/color_encoding.h"
+// #include "jxl/color_encoding.h"  // Removed to disable JPEG XL support
 
 /*****************************************************************************/
 
@@ -212,6 +213,7 @@ class dng_jxl_encode_settings
 /*****************************************************************************/
 
 #ifndef DISABLE_JXL_SUPPORT
+
 bool ParseJXL (dng_host &host,
 			   dng_stream &stream,
 			   dng_info &info,
@@ -392,8 +394,16 @@ bool SupportsJXL (const dng_image &image);
 
 /*****************************************************************************/
 
-#endif	// __dng_jxl__
-	
+#else // DISABLE_JXL_SUPPORT
+
+class dng_jxl_color_space_info
+{
+public:
+    dng_jxl_color_space_info() {}
+};
+
+#endif // DISABLE_JXL_SUPPORT
+
 /*****************************************************************************/
 
-#endif // DISABLE_JXL_SUPPORT (auto-added)
+#endif // DNG_JXL_H

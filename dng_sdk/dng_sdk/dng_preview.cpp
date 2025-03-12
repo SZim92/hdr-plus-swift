@@ -733,20 +733,14 @@ void dng_raw_preview::SetIFDInfo (dng_host &host,
 		if (image.PixelType () == ttShort)
 			{
 		
-			AutoPtr<JxlColorEncoding> encoding (new JxlColorEncoding);
-
-			memset (encoding.Get (), 0, sizeof (JxlColorEncoding));
+			JxlColorEncoding* enc = new JxlColorEncoding();
+			enc->color_space = image.Planes() == 1 ? JXL_COLOR_SPACE_GRAY 
+			                                       : JXL_COLOR_SPACE_RGB;
+			enc->white_point = JXL_WHITE_POINT_D65;
+			enc->primaries = JXL_PRIMARIES_2100;
+			enc->transfer_function = JXL_TRANSFER_FUNCTION_SRGB;
 			
-			// EncodeImageForCompression leaves the image far from linear gamma,
-			// so let's pretend it is sRGB gamma.
-
-			encoding->color_space	    = image.Planes () == 1 ? JXL_COLOR_SPACE_GRAY
-															   : JXL_COLOR_SPACE_RGB;
-			encoding->white_point	    = JXL_WHITE_POINT_D65;
-			encoding->primaries		    = JXL_PRIMARIES_2100;
-			encoding->transfer_function = JXL_TRANSFER_FUNCTION_SRGB;
-			
-			fIFD.fJXLColorEncoding.reset (encoding.Release ());
+			fIFD.fJXLColorEncoding.reset(enc);
 			
 			}
 #endif

@@ -1,7 +1,6 @@
 import XCTest
 import AppKit
-@testable // HDRPlusCore module replaced with direct imports
-import Foundation // Assume this is the module name
+import Foundation
 
 class HDRProcessingBenchmarks: XCTestCase {
     

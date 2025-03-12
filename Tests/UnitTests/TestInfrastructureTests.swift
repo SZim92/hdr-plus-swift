@@ -1,5 +1,4 @@
 import XCTest
-@testable import HDRPlus
 
 class TestInfrastructureTests: XCTestCase {
     

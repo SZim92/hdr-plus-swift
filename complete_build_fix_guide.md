@@ -1,3 +1,13 @@
+/Users/steven/Code/Mac/hdr-plus-swift/dng_sdk/dng_sdk/dng_ifd.h:33:10 'jxl/color_encoding.h' file not found
+
+/Users/steven/Code/Mac/hdr-plus-swift/dng_sdk/dng_sdk/dng_jpeg_image.h
+/Users/steven/Code/Mac/hdr-plus-swift/dng_sdk/dng_sdk/dng_jpeg_image.h:194:13 Unknown type name 'JxlColorEncoding'
+
+/Users/steven/Code/Mac/hdr-plus-swift/dng_sdk/dng_sdk/dng_jxl.h
+/Users/steven/Code/Mac/hdr-plus-swift/dng_sdk/dng_sdk/dng_jxl.h:397:2 #endif without #if
+
+UnitTests
+Command SwiftGeneratePch failed with a nonzero exit code
 # HDR+ Swift Project Build Fix Guide
 
 This guide provides solutions for all the build issues identified in the HDR+ Swift project. Three main issues have been addressed:

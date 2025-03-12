@@ -26,10 +26,9 @@
 #include "dng_string.h"
 #include "dng_sdk_limits.h"
 #include "dng_tag_values.h"
+#include "dng_jxl_dummy.h"
 
 #include <memory>
-
-#include "jxl/color_encoding.h"
 
 /*****************************************************************************/
 
