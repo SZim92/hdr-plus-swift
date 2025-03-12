@@ -1,0 +1,11 @@
+// Combined configuration file for HDR+ Swift project
+// This file addresses both SwiftUI and JPEG XL issues
+
+// Add USE_SWIFTUI_NOT_CORE to active compilation conditions
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) USE_SWIFTUI_NOT_CORE
+
+// Add DISABLE_JXL_SUPPORT=1 to preprocessor definitions
+GCC_PREPROCESSOR_DEFINITIONS = $(inherited) DISABLE_JXL_SUPPORT=1
+
+// Add PerformanceTests/Compatibility to header search paths for HDRPlusCore compatibility
+HEADER_SEARCH_PATHS = $(inherited) $(SRCROOT)/PerformanceTests/Compatibility 

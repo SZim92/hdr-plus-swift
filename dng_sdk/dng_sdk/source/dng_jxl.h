@@ -211,6 +211,7 @@ class dng_jxl_encode_settings
 
 /*****************************************************************************/
 
+#ifndef DISABLE_JXL_SUPPORT
 bool ParseJXL (dng_host &host,
 			   dng_stream &stream,
 			   dng_info &info,

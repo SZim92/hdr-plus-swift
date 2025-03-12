@@ -1,0 +1,8 @@
+// Configuration settings file to disable JPEG XL support
+// This file adds preprocessor definitions for conditional JXL code
+
+// Add DISABLE_JXL_SUPPORT=1 to preprocessor definitions
+GCC_PREPROCESSOR_DEFINITIONS = $(inherited) DISABLE_JXL_SUPPORT=1
+
+// Include the SwiftUI configuration
+#include "use_swiftui.xcconfig"
