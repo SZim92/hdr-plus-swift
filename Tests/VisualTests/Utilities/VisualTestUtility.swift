@@ -187,7 +187,7 @@ public class VisualTestUtility {
         _ data1: [UInt8],
         _ data2: [UInt8],
         tolerance: Float
-    ) -> (matches: Bool, diffPercentage: Float) {
+    ) -> (Bool, Float) {
         var totalDifference: Float = 0
         let pixelCount = data1.count / 4
         
@@ -218,112 +218,106 @@ public class VisualTestUtility {
     
     /// Generates a visual diff image highlighting differences
     private static func generateDiffImage(_ image1: NSImage, _ image2: NSImage) -> NSImage? {
-        // Ensure images are the same size, or resize them
-        let size = image1.size
+        // Get the dimensions of both images
+        let size1 = image1.size
+        let size2 = image2.size
         
+        // Use the larger dimensions for the diff image
+        let width = max(Int(size1.width), Int(size2.width))
+        let height = max(Int(size1.height), Int(size2.height))
+        
+        // Create bitmap data for both images
         guard let data1 = convertToBitmapData(image1),
               let data2 = convertToBitmapData(image2) else {
             return nil
         }
         
-        // Create a new image for the diff
-        let diffImage = NSImage(size: size)
-        diffImage.lockFocus()
+        // Create a new image to show the differences
+        let diffImage = NSImage(size: NSSize(width: width, height: height))
         
-        guard let context = NSGraphicsContext.current?.cgContext else {
-            diffImage.unlockFocus()
+        // Create a bitmap representation for the diff image
+        guard let diffRep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: width,
+            pixelsHigh: height,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .calibratedRGB,
+            bytesPerRow: width * 4,
+            bitsPerPixel: 32
+        ) else {
             return nil
         }
         
-        // Create a bitmap for the diff
-        let width = Int(size.width)
-        let height = Int(size.height)
-        var diffData = [UInt8](repeating: 0, count: width * height * 4)
+        // Process each pixel to highlight differences
+        let pixelCount = min(data1.count, data2.count) / 4
         
-        // Calculate difference for each pixel
-        for i in stride(from: 0, to: min(data1.count, data2.count), by: 4) {
+        for i in 0..<pixelCount {
+            let pixelIndex = i * 4
+            
+            // Get pixel values from both images
+            let r1 = CGFloat(data1[pixelIndex]) / 255.0
+            let g1 = CGFloat(data1[pixelIndex + 1]) / 255.0
+            let b1 = CGFloat(data1[pixelIndex + 2]) / 255.0
+            let a1 = CGFloat(data1[pixelIndex + 3]) / 255.0
+            
+            let r2 = CGFloat(data2[pixelIndex]) / 255.0
+            let g2 = CGFloat(data2[pixelIndex + 1]) / 255.0
+            let b2 = CGFloat(data2[pixelIndex + 2]) / 255.0
+            let a2 = CGFloat(data2[pixelIndex + 3]) / 255.0
+            
+            // Calculate pixel coordinates
+            let x = i % width
+            let y = i / width
+            
             // Calculate difference magnitude
-            let r1 = Float(data1[i])
-            let g1 = Float(data1[i+1])
-            let b1 = Float(data1[i+2])
+            let diff = (abs(r1 - r2) + abs(g1 - g2) + abs(b1 - b2)) / 3.0
             
-            let r2 = Float(data2[i])
-            let g2 = Float(data2[i+1])
-            let b2 = Float(data2[i+2])
-            
-            // Calculate diff values - show in red for better visibility
-            let diffR = UInt8(min(255, abs(r1 - r2) * 4)) // Amplify difference for visibility
-            let diffG = UInt8(min(255, abs(g1 - g2) * 4))
-            let diffB = UInt8(min(255, abs(b1 - b2) * 4))
-            
-            // We'll use a heat map: black means no difference, red/yellow/white means increasing difference
-            let diffMagnitude = max(diffR, diffG, diffB)
-            
-            if diffMagnitude > 0 {
-                // Create a heat map effect
-                diffData[i] = diffMagnitude
-                diffData[i+1] = diffMagnitude > 128 ? UInt8(diffMagnitude - 128) * 2 : 0 // Yellow for larger diffs
-                diffData[i+2] = 0 // No blue
-                diffData[i+3] = 255 // Fully opaque
+            // Color based on difference (red for differences, blend of original colors for similar)
+            let color: NSColor
+            if diff > 0.05 {  // More than 5% difference
+                // Highlight in red, intensity based on difference
+                let intensity = min(1.0, diff * 5.0)  // Scale up for visibility
+                color = NSColor(calibratedRed: 1.0, green: 0.0, blue: 0.0, alpha: intensity)
             } else {
-                // No difference - show original image in grayscale at 50% opacity
-                let gray = UInt8((r1 * 0.299 + g1 * 0.587 + b1 * 0.114) / 4)
-                diffData[i] = gray
-                diffData[i+1] = gray
-                diffData[i+2] = gray 
-                diffData[i+3] = 128 // Semi-transparent
+                // Average the two pixels for similar areas with slight transparency
+                let avgR = (r1 + r2) / 2.0
+                let avgG = (g1 + g2) / 2.0
+                let avgB = (b1 + b2) / 2.0
+                let avgA = (a1 + a2) / 2.0 * 0.7  // Reduce opacity for easier viewing
+                
+                color = NSColor(calibratedRed: avgR, green: avgG, blue: avgB, alpha: avgA)
             }
+            
+            // Set the pixel in the diff image
+            diffRep.setColor(color, atX: x, y: y)
         }
         
-        // Create a CGImage from our diff data
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
-        
-        guard let provider = CGDataProvider(data: Data(bytes: diffData, count: diffData.count) as CFData),
-              let cgImage = CGImage(
-                width: width,
-                height: height,
-                bitsPerComponent: 8,
-                bitsPerPixel: 32,
-                bytesPerRow: width * 4,
-                space: colorSpace,
-                bitmapInfo: bitmapInfo,
-                provider: provider,
-                decode: nil,
-                shouldInterpolate: false,
-                intent: .defaultIntent
-              ) else {
-            diffImage.unlockFocus()
-            return nil
-        }
-        
-        // Draw the CGImage in our context
-        context.draw(cgImage, in: CGRect(origin: .zero, size: size))
-        diffImage.unlockFocus()
+        // Add the representation to the diff image
+        diffImage.addRepresentation(diffRep)
         
         return diffImage
     }
     
-    /// Saves an image to disk at the specified URL with the given filename
+    /// Saves an image to disk
     private static func saveImage(_ image: NSImage, to directory: URL, fileName: String) {
-        // Ensure the directory exists
-        ensureDirectoryExists(directory)
-        
-        // Create final URL for the image
         let fileURL = directory.appendingPathComponent("\(fileName).png")
         
-        // Convert to PNG and save
+        // Convert to PNG data
         guard let tiffData = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiffData),
               let pngData = bitmap.representation(using: .png, properties: [:]) else {
-            print("⚠️ Failed to convert image to PNG")
+            print("⚠️ Failed to convert image to PNG for saving")
             return
         }
         
         do {
             try pngData.write(to: fileURL)
+            print("✅ Saved image to: \(fileURL.path)")
         } catch {
-            print("⚠️ Failed to save image to \(fileURL.path): \(error.localizedDescription)")
+            print("⚠️ Failed to save image: \(error.localizedDescription)")
         }
     }
     
@@ -334,39 +328,35 @@ public class VisualTestUtility {
         if !fileManager.fileExists(atPath: url.path) {
             do {
                 try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+                print("📁 Created directory: \(url.path)")
             } catch {
-                print("⚠️ Failed to create directory at \(url.path): \(error.localizedDescription)")
+                print("⚠️ Failed to create directory: \(error.localizedDescription)")
             }
         }
     }
     
-    /// Gets the URL for the reference images directory for a test class
+    /// Gets the URL for the reference images directory
     private static func referenceDirectoryURL(testClass: AnyClass) -> URL {
         let bundle = Bundle(for: testClass)
         let testModuleName = String(describing: testClass).components(separatedBy: ".").first ?? "TestModule"
         
-        // First try the standard location
-        let standardPath = bundle.bundleURL.appendingPathComponent(referenceImageDirectory)
-                               .appendingPathComponent(testModuleName)
+        // Try to find TestResources directory relative to the test bundle
+        var resourcesURL = bundle.bundleURL.deletingLastPathComponent()
+                                 .appendingPathComponent("TestResources")
+                                 .appendingPathComponent(referenceImageDirectory)
+                                 .appendingPathComponent(testModuleName)
         
-        // If we're running in an Xcode environment, try a different path
-        if !FileManager.default.fileExists(atPath: standardPath.path) {
-            // Try to find the project directory
-            let sourceRoot = ProcessInfo.processInfo.environment["SOURCE_ROOT"] ?? ""
-            if !sourceRoot.isEmpty {
-                let projectPath = URL(fileURLWithPath: sourceRoot)
-                                    .appendingPathComponent("Tests")
-                                    .appendingPathComponent("TestResources")
-                                    .appendingPathComponent(referenceImageDirectory)
-                                    .appendingPathComponent(testModuleName)
-                return projectPath
-            }
+        // Alternative: check for Resources directory inside the bundle
+        if !FileManager.default.fileExists(atPath: resourcesURL.path),
+           let bundleResourcesURL = bundle.resourceURL {
+            resourcesURL = bundleResourcesURL.appendingPathComponent(referenceImageDirectory)
+                                           .appendingPathComponent(testModuleName)
         }
         
-        return standardPath
+        return resourcesURL
     }
     
-    /// Gets the URL for a reference file
+    /// Gets the URL for a reference image file
     private static func referenceFileURL(fileName: String, testClass: AnyClass) -> URL? {
         let directory = referenceDirectoryURL(testClass: testClass)
         let fileURL = directory.appendingPathComponent("\(fileName).png")

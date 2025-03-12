@@ -1,197 +1,248 @@
 import XCTest
 @testable import HDRPlus
 
+/// ParameterizedTestExample demonstrates how to use the parameterized testing utility
+/// for data-driven testing with multiple inputs.
 class ParameterizedTestExample: XCTestCase {
     
     // MARK: - Simple Parameterized Tests
     
-    func testWithMultipleImageSizes() {
-        // Run the same test with different image sizes
-        let sizes = [(width: 32, height: 32),
-                     (width: 64, height: 64),
-                     (width: 128, height: 128),
-                     (width: 256, height: 256)]
+    /// Tests a simple function with multiple inputs using array parameters
+    func testArrayParameters() {
+        // Define test parameters
+        let inputValues = [1, 2, 3, 4, 5]
         
-        runParameterized(name: "Image Processing", parameters: sizes) { size, testName in
-            // This closure runs once for each size
-            let (width, height) = size
+        // Run parameterized test
+        runParameterized(name: "squareNumber", parameters: inputValues) { value, testName in
+            // Test squaring a number
+            let result = square(value)
+            let expected = value * value
             
-            // Simulate processing an image of this size
-            let result = simulateImageProcessing(width: width, height: height)
-            
-            // Verify the result
-            XCTAssertEqual(result.width, width, "\(testName): Width should match")
-            XCTAssertEqual(result.height, height, "\(testName): Height should match")
-            XCTAssertTrue(result.success, "\(testName): Processing should succeed")
+            XCTAssertEqual(result, expected, "\(testName): Square of \(value) should be \(expected)")
         }
     }
     
-    func testWithNamedParameters() {
-        // Run the same test with different named parameters
-        let exposureSettings: [String: Double] = [
-            "underexposed": 0.5,
-            "normal": 1.0,
-            "overexposed": 2.0,
-            "extreme_high": 4.0
+    /// Tests a simple function with multiple inputs using named parameters
+    func testNamedParameters() {
+        // Define named test parameters
+        let namedParameters: [String: Double] = [
+            "zero": 0.0,
+            "positive": 10.0,
+            "negative": -5.0,
+            "smallFraction": 0.1,
+            "largeFraction": 0.99
         ]
         
-        runParameterized(name: "Exposure Correction", parameters: exposureSettings) { exposureFactor, testName in
-            // This closure runs once for each exposure setting
-            let result = simulateExposureCorrection(factor: exposureFactor)
+        // Run parameterized test
+        runParameterized(name: "roundNumber", namedParameters: namedParameters) { value, testName in
+            // Test rounding a number
+            let result = round(value)
             
-            // Check that the result has the correct exposure factor
-            XCTAssertEqual(result.appliedFactor, exposureFactor, accuracy: 0.01, "\(testName): Applied factor should match input")
+            // Verify the result is a whole number
+            XCTAssertEqual(result, Double(Int(result)), "\(testName): Result should be a whole number")
             
-            // Different validity checks based on exposure level
-            if exposureFactor > 3.0 {
-                XCTAssertTrue(result.hasHighlightClipping, "\(testName): High exposures should have highlight clipping")
-            } else if exposureFactor < 0.7 {
-                XCTAssertTrue(result.hasNoisyDarkAreas, "\(testName): Low exposures should have noisy dark areas")
-            }
+            // Verify the result is within 0.5 of the input
+            XCTAssertLessThanOrEqual(abs(result - value), 0.5, "\(testName): Result should be within 0.5 of input")
         }
     }
     
-    // MARK: - Data-Driven Tests
+    // MARK: - Parameter Sets
     
-    func testColorConversion() {
-        // Test RGB to HSV conversion with known input-output pairs
-        let testData: [(input: (r: Double, g: Double, b: Double), expected: (h: Double, s: Double, v: Double))] = [
-            (input: (r: 1.0, g: 0.0, b: 0.0), expected: (h: 0.0, s: 1.0, v: 1.0)),     // Red
-            (input: (r: 0.0, g: 1.0, b: 0.0), expected: (h: 120.0, s: 1.0, v: 1.0)),   // Green
-            (input: (r: 0.0, g: 0.0, b: 1.0), expected: (h: 240.0, s: 1.0, v: 1.0)),   // Blue
-            (input: (r: 1.0, g: 1.0, b: 1.0), expected: (h: 0.0, s: 0.0, v: 1.0)),     // White
-            (input: (r: 0.0, g: 0.0, b: 0.0), expected: (h: 0.0, s: 0.0, v: 0.0))      // Black
+    /// Tests a function with structured parameter sets
+    func testParameterSets() {
+        // Define parameter sets with expected results
+        let parameterSets: [(parameters: (width: Double, height: Double), name: String)] = [
+            ((width: 5.0, height: 10.0), "rectangle"),
+            ((width: 7.0, height: 7.0), "square"),
+            ((width: 0.0, height: 5.0), "zeroWidth"),
+            ((width: 3.0, height: 0.0), "zeroHeight"),
+            ((width: 0.1, height: 0.2), "tinyRectangle")
         ]
         
-        runDataDriven(name: "RGB to HSV", data: testData) { input, expected, testName in
-            // Convert RGB to HSV
-            let result = simulateRGBtoHSV(r: input.r, g: input.g, b: input.b)
+        // Run parameterized test
+        runParameterized(name: "rectangleArea", parameterSets: parameterSets) { params, testName in
+            // Test calculating rectangle area
+            let (width, height) = (params.width, params.height)
+            let area = rectangleArea(width: width, height: height)
+            let expected = width * height
             
-            // Verify results (with small tolerance for floating-point precision)
-            XCTAssertEqual(result.h, expected.h, accuracy: 0.01, "\(testName): Hue should match")
-            XCTAssertEqual(result.s, expected.s, accuracy: 0.01, "\(testName): Saturation should match")
-            XCTAssertEqual(result.v, expected.v, accuracy: 0.01, "\(testName): Value should match")
+            XCTAssertEqual(area, expected, "\(testName): Area of \(width)×\(height) rectangle should be \(expected)")
         }
     }
     
-    func testParameterCombinations() {
-        // Test all combinations of parameters
-        let apertures = [2.8, 4.0, 5.6, 8.0]
-        let shutterSpeeds = [1.0/500, 1.0/250, 1.0/125, 1.0/60]
-        let isoValues = [100.0, 400.0, 1600.0]
-        
-        // Generate all combinations
-        let combinations = ParameterizedTestUtility.combinations(of: [apertures, shutterSpeeds, isoValues])
-        
-        // Create tuple array from combinations
-        let exposureSettings = combinations.map { combo -> (aperture: Double, shutterSpeed: Double, iso: Double) in
-            return (aperture: combo[0], shutterSpeed: combo[1], iso: combo[2])
-        }
-        
-        runParameterized(name: "Exposure Calculation", parameters: exposureSettings) { settings, testName in
-            let (aperture, shutterSpeed, iso) = settings
-            
-            // Calculate EV (Exposure Value)
-            let ev = simulateCalculateEV(aperture: aperture, shutterSpeed: shutterSpeed, iso: iso)
-            
-            // Simple verification (just checking the function runs without errors)
-            XCTAssertNotNil(ev, "\(testName): Should calculate an exposure value")
-        }
-    }
+    // MARK: - Grid Parameters
     
-    // MARK: - Test with Parameter Ranges
-    
-    func testPerformanceWithVaryingImageSizes() {
-        // Test with a range of image sizes
-        let widths = ParameterizedTestUtility.range(from: 100, to: 500, step: 100)
-        let heights = ParameterizedTestUtility.range(from: 100, to: 500, step: 100)
+    /// Tests a function with a grid of parameter combinations
+    func testParameterGrid() {
+        // Define parameter sets for the first parameter (temperature in Celsius)
+        let temperatures: [(Double, String)] = [
+            (0.0, "freezing"),
+            (20.0, "room"),
+            (100.0, "boiling"),
+            (-40.0, "veryLow")
+        ]
         
-        // Create size pairs
-        let sizes = widths.flatMap { width in
-            heights.map { height in
-                return (width: width, height: height)
-            }
-        }
+        // Define parameter sets for the second parameter (conversion type)
+        let conversions: [(String, String)] = [
+            ("fahrenheit", "toFahrenheit"),
+            ("kelvin", "toKelvin")
+        ]
         
-        runParameterized(name: "Performance Scaling", parameters: sizes) { size, testName in
-            let (width, height) = size
+        // Run parameterized grid test
+        runParameterizedGrid(
+            name: "temperatureConversion",
+            parameters1: temperatures,
+            parameters2: conversions
+        ) { celsius, conversionType, testName in
+            // Convert temperature based on conversion type
+            let result: Double
+            let expected: Double
             
-            // Measure processing time
-            let executionMetric = PerformanceTestUtility.measureExecutionTime(
-                name: "Process \(width)x\(height)"
-            ) {
-                // Simulate image processing
-                _ = simulateImageProcessing(width: width, height: height)
+            switch conversionType {
+            case "fahrenheit":
+                result = celsiusToFahrenheit(celsius)
+                expected = celsius * 9/5 + 32
+            case "kelvin":
+                result = celsiusToKelvin(celsius)
+                expected = celsius + 273.15
+            default:
+                XCTFail("Unknown conversion type: \(conversionType)")
+                return
             }
             
-            // Verify that processing time scales reasonably with image size
-            // (This is a simplified check - in reality you might want more complex verification)
-            let pixelCount = width * height
-            let timePerPixel = executionMetric.value / Double(pixelCount)
-            
-            // Print the metric for analysis
-            print("\(testName): Time per pixel: \(timePerPixel) ms/pixel")
-            
-            // Very basic verification - just check that time per pixel isn't wildly increasing
-            // with larger images (which might indicate poor scaling)
-            XCTAssertLessThan(timePerPixel, 0.001, "\(testName): Time per pixel should be reasonable")
+            // Verify the result with a small tolerance for floating-point errors
+            XCTAssertEqual(result, expected, accuracy: 0.001, "\(testName): Conversion incorrect")
         }
     }
     
-    // MARK: - Simulation Methods
+    // MARK: - JSON Data-Driven Tests
     
-    // These are stub implementations that would be replaced with actual logic
-    // in a real test suite
-    
-    private func simulateImageProcessing(width: Int, height: Int) -> (width: Int, height: Int, success: Bool) {
-        // Simulate some processing delay based on image size
-        usleep(UInt32(width * height / 10000))
-        return (width: width, height: height, success: true)
+    /// Define a struct for JSON test data
+    struct CalculationTestCase: Decodable {
+        let input: Double
+        let expectedOutput: Double
     }
     
-    private func simulateExposureCorrection(factor: Double) -> (appliedFactor: Double, hasHighlightClipping: Bool, hasNoisyDarkAreas: Bool) {
-        return (
-            appliedFactor: factor,
-            hasHighlightClipping: factor > 3.0,
-            hasNoisyDarkAreas: factor < 0.7
-        )
-    }
-    
-    private func simulateRGBtoHSV(r: Double, g: Double, b: Double) -> (h: Double, s: Double, v: Double) {
-        // Simplified RGB to HSV conversion
-        let maxValue = max(r, max(g, b))
-        let minValue = min(r, min(g, b))
-        let delta = maxValue - minValue
+    /// Tests a function using data from a JSON file (would need a JSON file in the test bundle)
+    func testWithJSONData() {
+        // Create a temporary JSON file with test data
+        let fixture = createFixture()
+        let testCases: [[String: Any]] = [
+            ["input": 2.0, "expectedOutput": 1.0],
+            ["input": 4.0, "expectedOutput": 2.0],
+            ["input": 9.0, "expectedOutput": 3.0],
+            ["input": 16.0, "expectedOutput": 4.0],
+            ["input": 25.0, "expectedOutput": 5.0]
+        ]
         
-        var hue: Double = 0
-        
-        if delta != 0 {
-            if maxValue == r {
-                hue = 60 * ((g - b) / delta).truncatingRemainder(dividingBy: 6)
-            } else if maxValue == g {
-                hue = 60 * ((b - r) / delta + 2)
-            } else {
-                hue = 60 * ((r - g) / delta + 4)
-            }
-            
-            if hue < 0 {
-                hue += 360
-            }
+        // Convert to JSON data
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: testCases, options: []),
+              let jsonString = String(data: jsonData, encoding: .utf8) else {
+            XCTFail("Failed to create JSON data")
+            return
         }
         
-        let saturation = maxValue == 0 ? 0 : delta / maxValue
-        let value = maxValue
-        
-        return (h: hue, s: saturation, v: value)
+        // Write to a temporary file
+        let jsonFileName = "sqrt_test_cases.json"
+        do {
+            try fixture.createFile(named: jsonFileName, content: jsonString)
+            
+            // This would normally use runWithJSONData, but since we're using a fixture file,
+            // we'll manually parse and execute the tests
+            let decodedCases = try JSONDecoder().decode([CalculationTestCase].self, from: jsonData)
+            
+            // Test each case
+            for (index, testCase) in decodedCases.enumerated() {
+                let testName = "sqrtTest_\(index)"
+                let result = sqrt(testCase.input)
+                XCTAssertEqual(result, testCase.expectedOutput, accuracy: 0.0001, "\(testName): Square root calculation failed")
+            }
+        } catch {
+            XCTFail("Failed to execute JSON data test: \(error)")
+        }
     }
     
-    private func simulateCalculateEV(aperture: Double, shutterSpeed: Double, iso: Double) -> Double? {
-        // EV calculation (at ISO 100): EV = log2(aperture² / shutterSpeed)
-        // Then adjust for actual ISO: EV_actual = EV_100 + log2(ISO/100)
+    // MARK: - CSV Data-Driven Tests
+    
+    /// Tests a function using data from a CSV-like string (simulating a CSV file)
+    func testWithCSVData() {
+        // Create a temporary CSV file with test data
+        let fixture = createFixture()
+        let csvContent = """
+        input,expectedOutput
+        1,1
+        4,8
+        10,100
+        2,2
+        5,15
+        """.replacingOccurrences(of: "\n", with: "\r\n")
         
-        let ev100 = log2(pow(aperture, 2) / shutterSpeed)
-        let evActual = ev100 + log2(iso/100)
-        
-        return evActual
+        // Write to a temporary file
+        let csvFileName = "triangle_numbers.csv"
+        do {
+            try fixture.createFile(named: csvFileName, content: csvContent)
+            let csvURL = fixture.url(for: csvFileName)
+            
+            // Read the CSV content
+            let csvString = try String(contentsOf: csvURL)
+            
+            // Parse the CSV data
+            let rows = csvString.components(separatedBy: .newlines)
+                .filter { !$0.isEmpty }
+                .map { $0.components(separatedBy: ",") }
+            
+            // Get the header row
+            guard let headerRow = rows.first, rows.count > 1 else {
+                XCTFail("CSV file is empty or malformed")
+                return
+            }
+            
+            // Get the data rows
+            let dataRows = Array(rows.dropFirst())
+            
+            // Test each row
+            for (index, row) in dataRows.enumerated() {
+                guard row.count >= 2,
+                      let input = Int(row[0]),
+                      let expectedOutput = Int(row[1]) else {
+                    XCTFail("Invalid data in row \(index + 1)")
+                    continue
+                }
+                
+                let testName = "triangleNumber_\(index)"
+                let result = triangleNumber(input)
+                XCTAssertEqual(result, expectedOutput, "\(testName): Triangle number calculation failed")
+            }
+        } catch {
+            XCTFail("Failed to execute CSV data test: \(error)")
+        }
+    }
+    
+    // MARK: - Test Functions
+    
+    /// Returns the square of a number
+    private func square(_ x: Int) -> Int {
+        return x * x
+    }
+    
+    /// Returns the area of a rectangle
+    private func rectangleArea(width: Double, height: Double) -> Double {
+        return width * height
+    }
+    
+    /// Converts Celsius to Fahrenheit
+    private func celsiusToFahrenheit(_ celsius: Double) -> Double {
+        return celsius * 9/5 + 32
+    }
+    
+    /// Converts Celsius to Kelvin
+    private func celsiusToKelvin(_ celsius: Double) -> Double {
+        return celsius + 273.15
+    }
+    
+    /// Returns the triangle number for a given input
+    /// (sum of all integers from 1 to n)
+    private func triangleNumber(_ n: Int) -> Int {
+        return n * (n + 1) / 2
     }
 } 
