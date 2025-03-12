@@ -95,3 +95,8 @@ DerivedData_*/
 
 # Build products
 build/
+
+# Backup files
+*.backup
+*.bak
+*.pbxproj.backup
