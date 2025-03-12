@@ -3,412 +3,529 @@ import XCTest
 import CoreGraphics
 import CoreImage
 
-/// Utility for comparing images in visual regression tests.
-/// This provides methods to compare generated images with reference images,
-/// and handle the saving of reference images if they don't exist.
-public class VisualTestUtility {
+/// Utility for visual testing and image comparison.
+/// Provides methods for comparing images, generating diff visualizations, and managing reference images.
+public final class VisualTestUtility {
     
-    // MARK: - Image Comparison
+    /// Enum defining possible comparison results
+    public enum ComparisonResult {
+        case match
+        case differ
+        case referenceNotFound
+    }
     
-    /// Compares a test image to a reference image
+    /// Compare an image against a reference image.
+    /// If the reference image doesn't exist and auto-update is enabled, the test image becomes the new reference.
+    /// If the images differ and saving is enabled, the test image and diff image are saved to the failed artifacts directory.
+    ///
     /// - Parameters:
-    ///   - image: The test image to compare
-    ///   - referenceNamed: The name of the reference image
-    ///   - tolerance: The maximum allowed difference between pixels (0.0-1.0)
-    ///   - testCase: The test case that's performing the comparison
-    /// - Returns: True if the images match within the tolerance
+    ///   - image: The test image to compare.
+    ///   - referenceName: The name of the reference image (without extension).
+    ///   - tolerance: The maximum acceptable percentage of pixels that can differ (0.0 to 1.0).
+    ///   - testCase: The test case requesting the comparison.
+    /// - Returns: true if the images match within tolerance, false otherwise.
     @discardableResult
     public static func compareImage(
         _ image: CGImage,
-        toReferenceNamed referenceNamed: String,
+        toReferenceNamed referenceName: String,
         tolerance: Double = TestConfig.shared.defaultImageComparisonTolerance,
         in testCase: XCTestCase
     ) -> Bool {
         let testClass = type(of: testCase)
-        let testName = testCase.name
+        let referenceURL = TestConfig.shared.referenceImageURL(for: referenceName, in: testClass)
         
-        // Create a unique name for this test case and reference image
-        let referenceImageName = "\(referenceNamed)"
-        
-        // Get URLs for reference, failed, and diff images
-        let config = TestConfig.shared
-        let referenceImageURL = config.referenceImageURL(for: referenceImageName, in: testClass)
-        let failedImageURL = config.failedImageURL(for: referenceImageName, in: testClass)
-        let diffImageURL = config.diffImageURL(for: referenceImageName, in: testClass)
-        
-        // Create directories if they don't exist
-        let referenceDir = referenceImageURL.deletingLastPathComponent()
-        let failedDir = failedImageURL.deletingLastPathComponent()
-        let diffDir = diffImageURL.deletingLastPathComponent()
-        
-        try? FileManager.default.createDirectory(at: referenceDir, withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(at: failedDir, withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(at: diffDir, withIntermediateDirectories: true)
-        
-        // If reference image doesn't exist, save this one and return success
-        if !FileManager.default.fileExists(atPath: referenceImageURL.path) {
-            config.logVerbose("Reference image doesn't exist, saving current image as reference: \(referenceImageURL.path)")
-            saveImage(image, to: referenceImageURL)
-            return true
-        }
-        
-        // Load the reference image
-        guard let referenceImage = loadImage(from: referenceImageURL) else {
-            XCTFail("Failed to load reference image from \(referenceImageURL.path)")
+        // Get directory for reference image
+        let referenceDir = referenceURL.deletingLastPathComponent()
+        do {
+            if !FileManager.default.fileExists(atPath: referenceDir.path) {
+                try FileManager.default.createDirectory(at: referenceDir, withIntermediateDirectories: true)
+            }
+        } catch {
+            XCTFail("Failed to create reference directory: \(error)")
             return false
         }
         
-        // Check that the images have the same dimensions
-        guard image.width == referenceImage.width && image.height == referenceImage.height else {
-            config.logVerbose("Image dimensions don't match: Test \(image.width)x\(image.height) vs Reference \(referenceImage.width)x\(referenceImage.height)")
-            
-            if config.saveFailedImages {
-                saveImage(image, to: failedImageURL)
+        // Check if reference image exists
+        let referenceExists = FileManager.default.fileExists(atPath: referenceURL.path)
+        
+        if !referenceExists {
+            if TestConfig.shared.updateReferenceImagesAutomatically {
+                // Save current image as reference
+                if saveImage(image, to: referenceURL) {
+                    print("Created new reference image at \(referenceURL.path)")
+                    return true
+                } else {
+                    XCTFail("Failed to create reference image at \(referenceURL.path)")
+                    return false
+                }
+            } else {
+                XCTFail("Reference image doesn't exist at \(referenceURL.path) and auto-update is disabled")
+                return false
             }
-            
-            XCTFail("Image dimensions don't match: Test \(image.width)x\(image.height) vs Reference \(referenceImage.width)x\(referenceImage.height)")
+        }
+        
+        // Load reference image
+        guard let referenceImage = loadImage(from: referenceURL) else {
+            XCTFail("Failed to load reference image from \(referenceURL.path)")
             return false
         }
         
-        // Compare the images
-        let (matches, differencePercentage, diffImage) = compareImages(image, referenceImage, tolerance: tolerance)
+        // Compare images
+        let (match, diffImage, diffPercentage) = compareImages(image, referenceImage, tolerance: tolerance)
         
-        if !matches {
-            config.logVerbose("Images differ by \(differencePercentage * 100)% (tolerance: \(tolerance * 100)%)")
+        // If images don't match and saving is enabled, save the failed test and diff images
+        if !match && TestConfig.shared.saveFailedVisualTests {
+            // Save test image
+            let failedTestURL = TestConfig.shared.failedTestArtifactURL(for: referenceName, in: testClass)
             
-            // Save the failed and difference images
-            if config.saveFailedImages {
-                saveImage(image, to: failedImageURL)
+            // Create directory for failed test artifact
+            let failedDir = failedTestURL.deletingLastPathComponent()
+            do {
+                if !FileManager.default.fileExists(atPath: failedDir.path) {
+                    try FileManager.default.createDirectory(at: failedDir, withIntermediateDirectories: true)
+                }
+            } catch {
+                XCTFail("Failed to create directory for failed test: \(error)")
             }
             
-            if config.generateDiffImages, let diffImage = diffImage {
-                saveImage(diffImage, to: diffImageURL)
+            // Save test image
+            if !saveImage(image, to: failedTestURL) {
+                XCTFail("Failed to save test image to \(failedTestURL.path)")
             }
             
-            // If configured to update reference images automatically, do so
-            if config.updateReferenceImagesAutomatically {
-                config.logVerbose("Automatically updating reference image: \(referenceImageURL.path)")
-                saveImage(image, to: referenceImageURL)
-                return true
+            // Save diff image if available
+            if let diffImage = diffImage {
+                let diffURL = failedTestURL.deletingLastPathComponent()
+                    .appendingPathComponent("\(referenceName)_diff.png")
+                if !saveImage(diffImage, to: diffURL) {
+                    XCTFail("Failed to save diff image to \(diffURL.path)")
+                }
             }
             
-            XCTFail("Images differ by \(differencePercentage * 100)% (tolerance: \(tolerance * 100)%)")
-            return false
+            print("Images differ by \(diffPercentage * 100)% (tolerance: \(tolerance * 100)%)")
+            print("Failed test image saved to \(failedTestURL.path)")
         }
         
-        return true
+        return match
     }
     
-    /// Compares two images and calculates their difference
+    /// Compare two images and generate a diff image.
     /// - Parameters:
-    ///   - image1: The first image
-    ///   - image2: The second image
-    ///   - tolerance: The maximum allowed difference between pixels (0.0-1.0)
-    /// - Returns: A tuple containing whether the images match, the difference percentage, and an optional diff image
-    static func compareImages(
+    ///   - image1: The first image to compare.
+    ///   - image2: The second image to compare.
+    ///   - tolerance: The maximum acceptable percentage of pixels that can differ (0.0 to 1.0).
+    /// - Returns: A tuple containing (match, diffImage, diffPercentage).
+    private static func compareImages(
         _ image1: CGImage,
         _ image2: CGImage,
         tolerance: Double
-    ) -> (matches: Bool, differencePercentage: Double, diffImage: CGImage?) {
-        // Convert images to CIImage
-        let ciImage1 = CIImage(cgImage: image1)
-        let ciImage2 = CIImage(cgImage: image2)
-        
-        // Create a CIFilter to calculate the difference
-        guard let differenceFilter = CIFilter(name: "CIDifferenceBlendMode") else {
-            return (false, 1.0, nil)
+    ) -> (Bool, CGImage?, Double) {
+        // Check if dimensions match
+        guard image1.width == image2.width, image1.height == image2.height else {
+            print("Image dimensions don't match: \(image1.width)x\(image1.height) vs \(image2.width)x\(image2.height)")
+            return (false, nil, 1.0)
         }
         
-        differenceFilter.setValue(ciImage1, forKey: kCIInputImageKey)
-        differenceFilter.setValue(ciImage2, forKey: kCIInputBackgroundImageKey)
-        
-        guard let outputImage = differenceFilter.outputImage else {
-            return (false, 1.0, nil)
+        // Create contexts for both images
+        guard let data1 = createRGBAData(from: image1),
+              let data2 = createRGBAData(from: image2) else {
+            print("Failed to create RGBA data for images")
+            return (false, nil, 1.0)
         }
         
-        // Calculate the average difference
-        let context = CIContext()
-        guard let diffCGImage = context.createCGImage(outputImage, from: outputImage.extent) else {
-            return (false, 1.0, nil)
-        }
-        
-        // Analyze the difference image to calculate the percentage difference
-        let differencePercentage = calculateDifferencePercentage(diffCGImage)
-        
-        // Create a more visible diff image for display
-        let enhancedDiffImage = enhanceDifferenceImage(diffCGImage)
-        
-        return (differencePercentage <= tolerance, differencePercentage, enhancedDiffImage)
-    }
-    
-    /// Calculates the percentage difference between two images
-    /// - Parameter diffImage: The difference image from compareImages
-    /// - Returns: The percentage difference (0.0-1.0)
-    static func calculateDifferencePercentage(_ diffImage: CGImage) -> Double {
-        let width = diffImage.width
-        let height = diffImage.height
-        
-        // Get the raw image data
+        // Create diff image data
+        let width = image1.width
+        let height = image1.height
+        let pixelCount = width * height
         let bytesPerPixel = 4
-        let bytesPerRow = bytesPerPixel * width
-        let bitsPerComponent = 8
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        let diffData = UnsafeMutablePointer<UInt8>.allocate(capacity: pixelCount * bytesPerPixel)
         
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: bitsPerComponent,
-            bytesPerRow: bytesPerRow,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: bitmapInfo
-        ) else {
-            return 1.0
-        }
-        
-        context.draw(diffImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-        
-        guard let data = context.data else {
-            return 1.0
-        }
-        
-        // Calculate the total difference
-        var totalDifference: Double = 0.0
-        let buffer = data.bindMemory(to: UInt8.self, capacity: width * height * bytesPerPixel)
-        let bufferPointer = UnsafeBufferPointer(start: buffer, count: width * height * bytesPerPixel)
-        
-        for y in 0..<height {
-            for x in 0..<width {
-                let pixelIndex = (y * width + x) * bytesPerPixel
+        // Count differing pixels
+        var differentPixels = 0
+        for i in 0..<pixelCount {
+            let baseIndex = i * bytesPerPixel
+            
+            let r1 = data1[baseIndex]
+            let g1 = data1[baseIndex + 1]
+            let b1 = data1[baseIndex + 2]
+            let a1 = data1[baseIndex + 3]
+            
+            let r2 = data2[baseIndex]
+            let g2 = data2[baseIndex + 1]
+            let b2 = data2[baseIndex + 2]
+            let a2 = data2[baseIndex + 3]
+            
+            if r1 != r2 || g1 != g2 || b1 != b2 || a1 != a2 {
+                differentPixels += 1
                 
-                // Get RGB components (ignoring alpha)
-                let r = Double(bufferPointer[pixelIndex])
-                let g = Double(bufferPointer[pixelIndex + 1])
-                let b = Double(bufferPointer[pixelIndex + 2])
-                
-                // Calculate difference (normalized to 0.0-1.0)
-                let pixelDifference = (r + g + b) / (255.0 * 3.0)
-                totalDifference += pixelDifference
+                // Highlight difference in red
+                diffData[baseIndex] = 255      // R
+                diffData[baseIndex + 1] = 0    // G
+                diffData[baseIndex + 2] = 0    // B
+                diffData[baseIndex + 3] = 255  // A
+            } else {
+                // Keep original pixel
+                diffData[baseIndex] = r1       // R
+                diffData[baseIndex + 1] = g1   // G
+                diffData[baseIndex + 2] = b1   // B
+                diffData[baseIndex + 3] = a1   // A
             }
         }
         
-        // Calculate average difference
-        return totalDifference / Double(width * height)
+        // Calculate difference percentage
+        let diffPercentage = Double(differentPixels) / Double(pixelCount)
+        
+        // Create diff image
+        let diffImage = createImage(from: diffData, width: width, height: height)
+        
+        // Free memory
+        data1.deallocate()
+        data2.deallocate()
+        diffData.deallocate()
+        
+        return (diffPercentage <= tolerance, diffImage, diffPercentage)
     }
     
-    /// Enhances a difference image to make differences more visible
-    /// - Parameter diffImage: The raw difference image
-    /// - Returns: An enhanced image with visible differences
-    static func enhanceDifferenceImage(_ diffImage: CGImage) -> CGImage? {
-        let ciImage = CIImage(cgImage: diffImage)
-        
-        // Apply a color matrix to enhance the visibility of differences
-        let colorMatrix = CIFilter(name: "CIColorMatrix")
-        colorMatrix?.setValue(ciImage, forKey: kCIInputImageKey)
-        colorMatrix?.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputGVector")
-        colorMatrix?.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputBVector")
-        colorMatrix?.setValue(CIVector(x: 5, y: 0, z: 0, w: 0), forKey: "inputRVector") // Enhance red channel
-        
-        guard let enhancedImage = colorMatrix?.outputImage else {
-            return diffImage
-        }
-        
-        // Convert back to CGImage
-        let context = CIContext()
-        return context.createCGImage(enhancedImage, from: enhancedImage.extent)
-    }
-    
-    // MARK: - Image Saving and Loading
-    
-    /// Saves a CGImage to a file
-    /// - Parameters:
-    ///   - image: The image to save
-    ///   - url: The URL to save the image to
-    static func saveImage(_ image: CGImage, to url: URL) {
-        let ciImage = CIImage(cgImage: image)
-        let context = CIContext()
-        
-        do {
-            try context.writeJPEGRepresentation(
-                of: ciImage,
-                to: url,
-                colorSpace: CGColorSpaceCreateDeviceRGB(),
-                options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.9]
-            )
-        } catch {
-            print("Error saving image to \(url.path): \(error)")
-        }
-    }
-    
-    /// Loads a CGImage from a file
-    /// - Parameter url: The URL to load the image from
-    /// - Returns: The loaded CGImage, or nil if loading failed
-    static func loadImage(from url: URL) -> CGImage? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+    /// Load an image from a file URL.
+    /// - Parameter url: The URL of the image file.
+    /// - Returns: A CGImage if successful, nil otherwise.
+    private static func loadImage(from url: URL) -> CGImage? {
+        guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
             return nil
         }
+        
         return image
     }
     
-    // MARK: - Utility Methods
-    
-    /// Creates a simple colored test image
+    /// Save a CGImage to a file URL.
     /// - Parameters:
-    ///   - width: The width of the image
-    ///   - height: The height of the image
-    ///   - color: The RGB color components (0.0-1.0)
-    /// - Returns: A CGImage with the specified color
-    public static func createTestImage(width: Int, height: Int, color: (red: Double, green: Double, blue: Double)) -> CGImage {
+    ///   - image: The image to save.
+    ///   - url: The URL to save the image to.
+    /// - Returns: true if saving was successful, false otherwise.
+    @discardableResult
+    private static func saveImage(_ image: CGImage, to url: URL) -> Bool {
+        let fileURL = url as CFURL
+        guard let destination = CGImageDestinationCreateWithURL(fileURL, kUTTypePNG, 1, nil) else {
+            return false
+        }
+        
+        CGImageDestinationAddImage(destination, image, nil)
+        return CGImageDestinationFinalize(destination)
+    }
+    
+    /// Create RGBA data from a CGImage.
+    /// - Parameter image: The source image.
+    /// - Returns: A pointer to the RGBA data if successful, nil otherwise.
+    private static func createRGBAData(from image: CGImage) -> UnsafeMutablePointer<UInt8>? {
+        let width = image.width
+        let height = image.height
         let bytesPerPixel = 4
         let bytesPerRow = bytesPerPixel * width
         let bitsPerComponent = 8
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
         
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: bitsPerComponent,
-            bytesPerRow: bytesPerRow,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: bitmapInfo
-        ) else {
-            fatalError("Failed to create CGContext")
+        let data = UnsafeMutablePointer<UInt8>.allocate(capacity: width * height * bytesPerPixel)
+        
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: data,
+                width: width,
+                height: height,
+                bitsPerComponent: bitsPerComponent,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else {
+            data.deallocate()
+            return nil
         }
         
-        // Set the fill color
-        context.setFillColor(red: CGFloat(color.red), green: CGFloat(color.green), blue: CGFloat(color.blue), alpha: 1.0)
-        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        // Draw image to context
+        let rect = CGRect(x: 0, y: 0, width: width, height: height)
+        context.draw(image, in: rect)
         
-        // Create the image
-        guard let image = context.makeImage() else {
-            fatalError("Failed to create image from context")
+        return data
+    }
+    
+    /// Create a CGImage from RGBA data.
+    /// - Parameters:
+    ///   - data: The RGBA pixel data.
+    ///   - width: The width of the image.
+    ///   - height: The height of the image.
+    /// - Returns: A CGImage if successful, nil otherwise.
+    private static func createImage(from data: UnsafeMutablePointer<UInt8>, width: Int, height: Int) -> CGImage? {
+        let bytesPerPixel = 4
+        let bytesPerRow = bytesPerPixel * width
+        let bitsPerComponent = 8
+        
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: data,
+                width: width,
+                height: height,
+                bitsPerComponent: bitsPerComponent,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ),
+              let image = context.makeImage() else {
+            return nil
         }
         
         return image
     }
     
-    /// Creates a gradient test image
+    // MARK: - Test Image Generation
+    
+    /// Create a gradient test image.
     /// - Parameters:
-    ///   - width: The width of the image
-    ///   - height: The height of the image
-    ///   - startColor: The RGB color at the top (0.0-1.0)
-    ///   - endColor: The RGB color at the bottom (0.0-1.0)
-    /// - Returns: A CGImage with a vertical gradient
+    ///   - width: The width of the image.
+    ///   - height: The height of the image.
+    ///   - startColor: The start color as (red, green, blue) tuple, values from 0.0 to 1.0.
+    ///   - endColor: The end color as (red, green, blue) tuple, values from 0.0 to 1.0.
+    ///   - direction: The direction of the gradient, "horizontal" or "vertical".
+    /// - Returns: A CGImage containing the gradient.
     public static func createGradientImage(
         width: Int,
         height: Int,
         startColor: (red: Double, green: Double, blue: Double),
-        endColor: (red: Double, green: Double, blue: Double)
-    ) -> CGImage {
+        endColor: (red: Double, green: Double, blue: Double),
+        direction: String = "horizontal"
+    ) -> CGImage? {
         let bytesPerPixel = 4
         let bytesPerRow = bytesPerPixel * width
         let bitsPerComponent = 8
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        let pixelCount = width * height
         
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: bitsPerComponent,
-            bytesPerRow: bytesPerRow,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: bitmapInfo
-        ) else {
-            fatalError("Failed to create CGContext")
+        let data = UnsafeMutablePointer<UInt8>.allocate(capacity: pixelCount * bytesPerPixel)
+        defer { data.deallocate() }
+        
+        for y in 0..<height {
+            for x in 0..<width {
+                let index = (y * width + x) * bytesPerPixel
+                
+                // Calculate gradient factor (0.0 to 1.0)
+                let factor: Double
+                if direction == "vertical" {
+                    factor = Double(y) / Double(height - 1)
+                } else {
+                    factor = Double(x) / Double(width - 1)
+                }
+                
+                // Interpolate colors
+                let r = startColor.red + (endColor.red - startColor.red) * factor
+                let g = startColor.green + (endColor.green - startColor.green) * factor
+                let b = startColor.blue + (endColor.blue - startColor.blue) * factor
+                
+                // Set pixel values
+                data[index] = UInt8(r * 255.0)
+                data[index + 1] = UInt8(g * 255.0)
+                data[index + 2] = UInt8(b * 255.0)
+                data[index + 3] = 255 // Alpha
+            }
         }
         
-        // Create a gradient
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let colors = [
-            CGColor(red: CGFloat(startColor.red), green: CGFloat(startColor.green), blue: CGFloat(startColor.blue), alpha: 1.0),
-            CGColor(red: CGFloat(endColor.red), green: CGFloat(endColor.green), blue: CGFloat(endColor.blue), alpha: 1.0)
-        ] as CFArray
-        
-        guard let gradient = CGGradient(
-            colorsSpace: colorSpace,
-            colors: colors,
-            locations: [0.0, 1.0]
-        ) else {
-            fatalError("Failed to create gradient")
-        }
-        
-        // Draw the gradient
-        context.drawLinearGradient(
-            gradient,
-            start: CGPoint(x: 0, y: 0),
-            end: CGPoint(x: 0, y: height),
-            options: []
-        )
-        
-        // Create the image
-        guard let image = context.makeImage() else {
-            fatalError("Failed to create image from context")
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: data,
+                width: width,
+                height: height,
+                bitsPerComponent: bitsPerComponent,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ),
+              let image = context.makeImage() else {
+            return nil
         }
         
         return image
     }
     
-    /// Creates a checkerboard pattern image
+    /// Create a checkerboard test image.
     /// - Parameters:
-    ///   - width: The width of the image
-    ///   - height: The height of the image
-    ///   - squareSize: The size of each square in pixels
-    ///   - color1: The RGB color for odd squares (0.0-1.0)
-    ///   - color2: The RGB color for even squares (0.0-1.0)
-    /// - Returns: A CGImage with a checkerboard pattern
+    ///   - width: The width of the image.
+    ///   - height: The height of the image.
+    ///   - squareSize: The size of each checkerboard square.
+    ///   - color1: The first color as (red, green, blue) tuple, values from 0.0 to 1.0.
+    ///   - color2: The second color as (red, green, blue) tuple, values from 0.0 to 1.0.
+    /// - Returns: A CGImage containing the checkerboard.
     public static func createCheckerboardImage(
         width: Int,
         height: Int,
-        squareSize: Int,
-        color1: (red: Double, green: Double, blue: Double),
-        color2: (red: Double, green: Double, blue: Double)
-    ) -> CGImage {
+        squareSize: Int = 16,
+        color1: (red: Double, green: Double, blue: Double) = (0.0, 0.0, 0.0),
+        color2: (red: Double, green: Double, blue: Double) = (1.0, 1.0, 1.0)
+    ) -> CGImage? {
         let bytesPerPixel = 4
         let bytesPerRow = bytesPerPixel * width
         let bitsPerComponent = 8
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        let pixelCount = width * height
         
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: bitsPerComponent,
-            bytesPerRow: bytesPerRow,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: bitmapInfo
-        ) else {
-            fatalError("Failed to create CGContext")
-        }
+        let data = UnsafeMutablePointer<UInt8>.allocate(capacity: pixelCount * bytesPerPixel)
+        defer { data.deallocate() }
         
-        // Set the colors
-        let color1CGColor = CGColor(red: CGFloat(color1.red), green: CGFloat(color1.green), blue: CGFloat(color1.blue), alpha: 1.0)
-        let color2CGColor = CGColor(red: CGFloat(color2.red), green: CGFloat(color2.green), blue: CGFloat(color2.blue), alpha: 1.0)
-        
-        // Draw the checkerboard
-        for y in stride(from: 0, to: height, by: squareSize) {
-            for x in stride(from: 0, to: width, by: squareSize) {
-                let isEvenRow = (y / squareSize) % 2 == 0
-                let isEvenColumn = (x / squareSize) % 2 == 0
+        for y in 0..<height {
+            for x in 0..<width {
+                let index = (y * width + x) * bytesPerPixel
                 
-                // Set the color based on position
-                if isEvenRow != isEvenColumn {
-                    context.setFillColor(color1CGColor)
-                } else {
-                    context.setFillColor(color2CGColor)
-                }
+                // Determine if this is color1 or color2 based on checkerboard pattern
+                let isColor1 = ((x / squareSize) + (y / squareSize)) % 2 == 0
+                let color = isColor1 ? color1 : color2
                 
-                // Draw the square
-                let squareWidth = min(squareSize, width - x)
-                let squareHeight = min(squareSize, height - y)
-                context.fill(CGRect(x: x, y: y, width: squareWidth, height: squareHeight))
+                // Set pixel values
+                data[index] = UInt8(color.red * 255.0)
+                data[index + 1] = UInt8(color.green * 255.0)
+                data[index + 2] = UInt8(color.blue * 255.0)
+                data[index + 3] = 255 // Alpha
             }
         }
         
-        // Create the image
-        guard let image = context.makeImage() else {
-            fatalError("Failed to create image from context")
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: data,
+                width: width,
+                height: height,
+                bitsPerComponent: bitsPerComponent,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ),
+              let image = context.makeImage() else {
+            return nil
+        }
+        
+        return image
+    }
+    
+    /// Create a test image with a grid of color patches.
+    /// - Parameters:
+    ///   - width: The width of the image.
+    ///   - height: The height of the image.
+    ///   - columns: The number of color columns.
+    ///   - rows: The number of color rows.
+    /// - Returns: A CGImage containing the color patches.
+    public static func createColorPatchesImage(
+        width: Int,
+        height: Int,
+        columns: Int = 4,
+        rows: Int = 4
+    ) -> CGImage? {
+        let bytesPerPixel = 4
+        let bytesPerRow = bytesPerPixel * width
+        let bitsPerComponent = 8
+        let pixelCount = width * height
+        
+        let data = UnsafeMutablePointer<UInt8>.allocate(capacity: pixelCount * bytesPerPixel)
+        defer { data.deallocate() }
+        
+        let patchWidth = width / columns
+        let patchHeight = height / rows
+        
+        for y in 0..<height {
+            for x in 0..<width {
+                let index = (y * width + x) * bytesPerPixel
+                
+                let col = x / patchWidth
+                let row = y / patchHeight
+                
+                // Calculate color based on position
+                let r = Double(col) / Double(columns - 1)
+                let g = Double(row) / Double(rows - 1)
+                let b = 0.5
+                
+                // Set pixel values
+                data[index] = UInt8(r * 255.0)
+                data[index + 1] = UInt8(g * 255.0)
+                data[index + 2] = UInt8(b * 255.0)
+                data[index + 3] = 255 // Alpha
+            }
+        }
+        
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: data,
+                width: width,
+                height: height,
+                bitsPerComponent: bitsPerComponent,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ),
+              let image = context.makeImage() else {
+            return nil
+        }
+        
+        return image
+    }
+    
+    /// Create a simulated HDR image with overexposed and underexposed areas.
+    /// - Parameters:
+    ///   - width: The width of the image.
+    ///   - height: The height of the image.
+    ///   - dynamicRange: The simulated dynamic range (higher values create more contrast).
+    /// - Returns: A CGImage simulating an HDR scene.
+    public static func createHDRTestImage(
+        width: Int,
+        height: Int,
+        dynamicRange: Double = 5.0
+    ) -> CGImage? {
+        let bytesPerPixel = 4
+        let bytesPerRow = bytesPerPixel * width
+        let bitsPerComponent = 8
+        let pixelCount = width * height
+        
+        let data = UnsafeMutablePointer<UInt8>.allocate(capacity: pixelCount * bytesPerPixel)
+        defer { data.deallocate() }
+        
+        let centerX = Double(width) / 2.0
+        let centerY = Double(height) / 2.0
+        let maxRadius = min(Double(width), Double(height)) / 2.0
+        
+        for y in 0..<height {
+            for x in 0..<width {
+                let index = (y * width + x) * bytesPerPixel
+                
+                // Create a radial gradient with some high contrast areas
+                let dx = Double(x) - centerX
+                let dy = Double(y) - centerY
+                let distance = sqrt(dx * dx + dy * dy) / maxRadius
+                
+                // Create some high dynamic range by having very bright and very dark areas
+                let angle = atan2(dy, dx)
+                let angleFactor = (sin(angle * 5.0) + 1.0) / 2.0
+                
+                // Adjust intensity based on dynamic range
+                let intensity = pow(distance, dynamicRange) * angleFactor
+                
+                // Simulate bright spot in center
+                let brightSpot = max(0.0, 1.0 - distance * 3.0)
+                let brightFactor = brightSpot * brightSpot * 2.0
+                
+                // Set pixel values with some areas being very bright (simulating overexposure)
+                let r = min(1.0, intensity + brightFactor)
+                let g = min(1.0, intensity * 0.8 + brightFactor * 0.7)
+                let b = min(1.0, intensity * 0.6 + brightFactor * 0.5)
+                
+                data[index] = UInt8(r * 255.0)
+                data[index + 1] = UInt8(g * 255.0)
+                data[index + 2] = UInt8(b * 255.0)
+                data[index + 3] = 255 // Alpha
+            }
+        }
+        
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: data,
+                width: width,
+                height: height,
+                bitsPerComponent: bitsPerComponent,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ),
+              let image = context.makeImage() else {
+            return nil
         }
         
         return image

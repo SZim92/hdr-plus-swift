@@ -1,11 +1,11 @@
 name: Test Results Dashboard
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # Allow manual triggering
   schedule:
-    - cron: '0 1 * * 0'  # Every Sunday at 1 AM UTC
+    - cron: '0 1 * * 0'  # Run every Sunday at 1 AM UTC
   workflow_run:
-    workflows: ["CI"]
+    workflows: [CI]
     types:
       - completed
 
@@ -13,7 +13,7 @@ on:
 permissions:
   contents: write  # Needed to create/update branches
   pull-requests: write  # Needed to create PRs
-  actions: read  # Needed to read workflow runs for test results
+  actions: read  # Needed to read workflow runs for dashboard
 
 # Prevent concurrent dashboard generation
 concurrency:
@@ -22,99 +22,86 @@ concurrency:
 
 jobs:
   generate-test-dashboard:
-    name: Generate Test Dashboard
+    name: Generate Test Results Dashboard
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
-      - name: Download test results
+        
+      - name: Download test results artifacts
         uses: dawidd6/action-download-artifact@v2
         with:
           workflow: CI
           workflow_conclusion: any
-          path: test-results-artifacts
-          if_no_artifact_found: warn
+          name: test-results-*
+          path: test-results
           
-      - name: Process test results
-        id: process-results
+      - name: Process downloaded results
         run: |
-          mkdir -p test-dashboard/data
+          echo "Processing test results from recent CI runs..."
+          mkdir -p dashboard
           
-          echo "Processing test results artifacts..."
+          # Create directory structure
+          mkdir -p dashboard/data
+          mkdir -p dashboard/charts
+          mkdir -p dashboard/reports
           
-          # Process unit test results
-          if [ -d "test-results-artifacts/unit-test-results" ]; then
-            cp -R test-results-artifacts/unit-test-results/* test-dashboard/data/
+          # Extract test data from downloaded artifacts
+          TOTAL_TESTS=0
+          PASSED_TESTS=0
+          FAILED_TESTS=0
+          SKIPPED_TESTS=0
+          FLAKY_TESTS=0
+          
+          # Process test result files
+          find test-results -name "*.json" | while read -r file; do
+            echo "Processing $file..."
+            
+            # Extract data points for dashboard
+            TESTS_COUNT=$(jq '.tests | length' "$file" 2>/dev/null || echo 0)
+            PASS_COUNT=$(jq '.passed | length' "$file" 2>/dev/null || echo 0)
+            FAIL_COUNT=$(jq '.failed | length' "$file" 2>/dev/null || echo 0)
+            SKIP_COUNT=$(jq '.skipped | length' "$file" 2>/dev/null || echo 0)
+            
+            # Calculate totals
+            TOTAL_TESTS=$((TOTAL_TESTS + TESTS_COUNT))
+            PASSED_TESTS=$((PASSED_TESTS + PASS_COUNT))
+            FAILED_TESTS=$((FAILED_TESTS + FAIL_COUNT))
+            SKIPPED_TESTS=$((SKIPPED_TESTS + SKIP_COUNT))
+            
+            # Extract and record specific test data
+            jq -r '.tests[] | "\(.name),\(.status),\(.duration)"' "$file" 2>/dev/null >> dashboard/data/all_tests.csv || true
+          done
+          
+          # Find potentially flaky tests (pass in some runs, fail in others)
+          if [ -f dashboard/data/all_tests.csv ]; then
+            echo "Analyzing for flaky tests..."
+            sort dashboard/data/all_tests.csv | grep -v "^$" | awk -F, '{print $1","$2}' | sort | uniq -c | grep -v "^[[:space:]]*1 " | awk '{print $2}' | sort | uniq > dashboard/data/flaky_tests.csv
+            FLAKY_TESTS=$(wc -l < dashboard/data/flaky_tests.csv | xargs)
           fi
           
-          # Process visual test results
-          if [ -d "test-results-artifacts/visual-test-results" ]; then
-            cp -R test-results-artifacts/visual-test-results/* test-dashboard/data/
-          fi
-          
-          # Process performance test results
-          if [ -d "test-results-artifacts/performance-test-results" ]; then
-            cp -R test-results-artifacts/performance-test-results/* test-dashboard/data/
-          fi
-          
-          # Process flaky test reports
-          if [ -d "test-results-artifacts/flaky-test-report" ]; then
-            cp -R test-results-artifacts/flaky-test-report/* test-dashboard/data/
-          fi
-          
-          # Generate summary stats
+          # Generate summary statistics
+          cat > dashboard/data/summary.json << EOF
           {
-            echo "# Test Results Summary"
-            echo ""
-            echo "## Unit Tests"
-            echo ""
-            if [ -f "test-dashboard/data/unit-test-summary.json" ]; then
-              echo "- Tests: $(jq '.tests' test-dashboard/data/unit-test-summary.json)"
-              echo "- Passed: $(jq '.passed' test-dashboard/data/unit-test-summary.json)"
-              echo "- Failed: $(jq '.failed' test-dashboard/data/unit-test-summary.json)"
-              echo "- Skipped: $(jq '.skipped' test-dashboard/data/unit-test-summary.json)"
-            else
-              echo "No unit test data available"
-            fi
-            
-            echo ""
-            echo "## Visual Tests"
-            echo ""
-            if [ -f "test-dashboard/data/visual-test-summary.json" ]; then
-              echo "- Tests: $(jq '.tests' test-dashboard/data/visual-test-summary.json)"
-              echo "- Matches: $(jq '.matches' test-dashboard/data/visual-test-summary.json)"
-              echo "- Differences: $(jq '.differences' test-dashboard/data/visual-test-summary.json)"
-            else
-              echo "No visual test data available"
-            fi
-            
-            echo ""
-            echo "## Performance Tests"
-            echo ""
-            if [ -f "test-dashboard/data/performance-test-summary.json" ]; then
-              echo "- Tests: $(jq '.tests' test-dashboard/data/performance-test-summary.json)"
-              echo "- Within threshold: $(jq '.withinThreshold' test-dashboard/data/performance-test-summary.json)"
-              echo "- Exceeding threshold: $(jq '.exceedingThreshold' test-dashboard/data/performance-test-summary.json)"
-            else
-              echo "No performance test data available"
-            fi
-            
-            echo ""
-            echo "## Flaky Tests"
-            echo ""
-            if [ -f "test-dashboard/data/flaky-tests.json" ]; then
-              echo "- Detected: $(jq '.count' test-dashboard/data/flaky-tests.json)"
-            else
-              echo "No flaky test data available"
-            fi
-          } > test-dashboard/summary.md
+            "total": $TOTAL_TESTS,
+            "passed": $PASSED_TESTS,
+            "failed": $FAILED_TESTS,
+            "skipped": $SKIPPED_TESTS,
+            "flaky": $FLAKY_TESTS,
+            "date": "$(date -u +"%Y-%m-%d")",
+            "time": "$(date -u +"%H:%M:%S")"
+          }
+          EOF
           
-      - name: Generate test dashboard HTML
-        id: dashboard
+          echo "Generated test summary data"
+          
+      - name: Generate HTML dashboard
         run: |
-          cat > test-dashboard/index.html << 'EOF'
+          echo "Creating HTML dashboard..."
+          
+          # Create simple HTML dashboard
+          cat > dashboard/index.html << 'EOF'
           <!DOCTYPE html>
           <html lang="en">
           <head>
@@ -122,258 +109,199 @@ jobs:
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>HDR+ Swift Test Dashboard</title>
             <style>
-              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif; margin: 0; padding: 0; color: #333; }
-              .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
-              header { background-color: #f8f9fa; padding: 1rem 0; border-bottom: 1px solid #e9ecef; margin-bottom: 2rem; }
-              header .container { display: flex; justify-content: space-between; align-items: center; }
-              h1, h2, h3 { margin-top: 0; }
-              .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
-              .dashboard-card { background-color: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); padding: 1.5rem; }
-              .dashboard-card h3 { border-bottom: 1px solid #e9ecef; padding-bottom: 0.75rem; margin-bottom: 1rem; }
-              .stat { display: flex; justify-content: space-between; margin-bottom: 0.5rem; }
-              .stat-label { font-weight: 500; }
-              .stat-value { font-weight: 600; }
-              .success { color: #28a745; }
-              .warning { color: #ffc107; }
-              .danger { color: #dc3545; }
-              .tabs { display: flex; margin-bottom: 1rem; border-bottom: 1px solid #e9ecef; }
-              .tab { padding: 0.5rem 1rem; cursor: pointer; border-bottom: 2px solid transparent; }
-              .tab.active { border-bottom-color: #007bff; font-weight: 500; }
-              .tab-content { display: none; }
-              .tab-content.active { display: block; }
-              .test-list { list-style: none; padding: 0; }
-              .test-item { padding: 0.75rem; border-bottom: 1px solid #e9ecef; }
-              .test-item:last-child { border-bottom: none; }
-              .test-item .header { display: flex; justify-content: space-between; margin-bottom: 0.5rem; }
-              .test-item .name { font-weight: 500; }
-              .test-details { font-size: 0.875rem; color: #6c757d; }
-              .performance-chart { height: 300px; margin-top: 1rem; }
-              .badge { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
-              .badge-success { background-color: #d4edda; color: #155724; }
-              .badge-warning { background-color: #fff3cd; color: #856404; }
-              .badge-danger { background-color: #f8d7da; color: #721c24; }
-              footer { background-color: #f8f9fa; padding: 1rem 0; border-top: 1px solid #e9ecef; margin-top: 2rem; }
+              body { font-family: Arial, sans-serif; margin: 0; padding: 20px; color: #333; }
+              h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+              .dashboard { display: flex; flex-wrap: wrap; gap: 20px; }
+              .card { background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; flex: 1; min-width: 300px; }
+              .summary { display: flex; gap: 15px; flex-wrap: wrap; }
+              .stat { display: flex; flex-direction: column; align-items: center; padding: 15px; border-radius: 8px; min-width: 100px; }
+              .stat-title { font-size: 14px; font-weight: bold; margin-bottom: 5px; }
+              .stat-value { font-size: 24px; font-weight: bold; }
+              .passed { background-color: #e6ffe6; color: #006600; }
+              .failed { background-color: #ffe6e6; color: #cc0000; }
+              .skipped { background-color: #e6e6ff; color: #000066; }
+              .flaky { background-color: #fff2e6; color: #cc6600; }
+              .total { background-color: #e6f7ff; color: #0066cc; }
+              table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+              th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+              th { background-color: #f2f2f2; }
+              tr:hover { background-color: #f5f5f5; }
+              .status-pass { color: green; }
+              .status-fail { color: red; }
+              .status-skip { color: blue; }
             </style>
           </head>
           <body>
-            <header>
-              <div class="container">
-                <h1>HDR+ Swift Test Dashboard</h1>
-                <div>Last updated: <span id="last-updated"></span></div>
-              </div>
-            </header>
-            
-            <div class="container">
-              <div class="dashboard-grid">
-                <div class="dashboard-card">
-                  <h3>Unit Tests</h3>
-                  <div class="stat">
-                    <span class="stat-label">Total Tests:</span>
-                    <span class="stat-value" id="unit-total">-</span>
+            <h1>HDR+ Swift Test Dashboard</h1>
+            <div class="dashboard">
+              <div class="card">
+                <h2>Test Summary</h2>
+                <div class="summary" id="summary">
+                  <div class="stat total">
+                    <div class="stat-title">Total Tests</div>
+                    <div class="stat-value" id="total-tests">-</div>
                   </div>
-                  <div class="stat">
-                    <span class="stat-label">Passed:</span>
-                    <span class="stat-value success" id="unit-passed">-</span>
+                  <div class="stat passed">
+                    <div class="stat-title">Passed</div>
+                    <div class="stat-value" id="passed-tests">-</div>
                   </div>
-                  <div class="stat">
-                    <span class="stat-label">Failed:</span>
-                    <span class="stat-value danger" id="unit-failed">-</span>
+                  <div class="stat failed">
+                    <div class="stat-title">Failed</div>
+                    <div class="stat-value" id="failed-tests">-</div>
                   </div>
-                  <div class="stat">
-                    <span class="stat-label">Skipped:</span>
-                    <span class="stat-value warning" id="unit-skipped">-</span>
+                  <div class="stat skipped">
+                    <div class="stat-title">Skipped</div>
+                    <div class="stat-value" id="skipped-tests">-</div>
+                  </div>
+                  <div class="stat flaky">
+                    <div class="stat-title">Flaky</div>
+                    <div class="stat-value" id="flaky-tests">-</div>
                   </div>
                 </div>
-                
-                <div class="dashboard-card">
-                  <h3>Visual Tests</h3>
-                  <div class="stat">
-                    <span class="stat-label">Total Tests:</span>
-                    <span class="stat-value" id="visual-total">-</span>
-                  </div>
-                  <div class="stat">
-                    <span class="stat-label">Matches:</span>
-                    <span class="stat-value success" id="visual-matches">-</span>
-                  </div>
-                  <div class="stat">
-                    <span class="stat-label">Differences:</span>
-                    <span class="stat-value danger" id="visual-differences">-</span>
-                  </div>
-                </div>
-                
-                <div class="dashboard-card">
-                  <h3>Performance Tests</h3>
-                  <div class="stat">
-                    <span class="stat-label">Total Tests:</span>
-                    <span class="stat-value" id="perf-total">-</span>
-                  </div>
-                  <div class="stat">
-                    <span class="stat-label">Within Threshold:</span>
-                    <span class="stat-value success" id="perf-within">-</span>
-                  </div>
-                  <div class="stat">
-                    <span class="stat-label">Exceeding Threshold:</span>
-                    <span class="stat-value danger" id="perf-exceeding">-</span>
-                  </div>
-                </div>
-                
-                <div class="dashboard-card">
-                  <h3>Test Stability</h3>
-                  <div class="stat">
-                    <span class="stat-label">Flaky Tests:</span>
-                    <span class="stat-value warning" id="flaky-count">-</span>
-                  </div>
-                  <div class="stat">
-                    <span class="stat-label">Last CI Run:</span>
-                    <span class="stat-value" id="last-ci-run">-</span>
-                  </div>
-                </div>
+                <p>Last updated: <span id="last-updated">-</span></p>
               </div>
               
-              <div class="tabs">
-                <div class="tab active" data-tab="flaky">Flaky Tests</div>
-                <div class="tab" data-tab="failing">Failing Tests</div>
-                <div class="tab" data-tab="performance">Performance</div>
-                <div class="tab" data-tab="visual">Visual Differences</div>
-              </div>
-              
-              <div class="tab-content active" id="tab-flaky">
-                <div class="dashboard-card">
-                  <h3>Flaky Tests</h3>
-                  <ul class="test-list" id="flaky-tests-list">
-                    <li class="test-item">Loading data...</li>
-                  </ul>
-                </div>
-              </div>
-              
-              <div class="tab-content" id="tab-failing">
-                <div class="dashboard-card">
-                  <h3>Failing Tests</h3>
-                  <ul class="test-list" id="failing-tests-list">
-                    <li class="test-item">Loading data...</li>
-                  </ul>
-                </div>
-              </div>
-              
-              <div class="tab-content" id="tab-performance">
-                <div class="dashboard-card">
-                  <h3>Performance Tests</h3>
-                  <div class="performance-chart" id="performance-chart">
-                    <!-- Chart will be rendered here -->
-                    <p>Performance data visualization will appear here when available.</p>
-                  </div>
-                </div>
-              </div>
-              
-              <div class="tab-content" id="tab-visual">
-                <div class="dashboard-card">
-                  <h3>Visual Test Differences</h3>
-                  <div id="visual-diffs">
-                    <p>Visual difference data will appear here when available.</p>
-                  </div>
-                </div>
+              <div class="card">
+                <h2>Flaky Tests</h2>
+                <div id="flaky-tests-list">Loading...</div>
               </div>
             </div>
             
-            <footer>
-              <div class="container">
-                <p>HDR+ Swift Test Dashboard - Generated by GitHub Actions</p>
-              </div>
-            </footer>
+            <div class="card">
+              <h2>Recent Test Runs</h2>
+              <div id="test-runs">Loading...</div>
+            </div>
             
             <script>
-              // Simple tab switching logic
-              document.querySelectorAll('.tab').forEach(tab => {
-                tab.addEventListener('click', () => {
-                  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                  
-                  tab.classList.add('active');
-                  document.getElementById('tab-' + tab.getAttribute('data-tab')).classList.add('active');
+              // Load summary data
+              fetch('data/summary.json')
+                .then(response => response.json())
+                .then(data => {
+                  document.getElementById('total-tests').textContent = data.total;
+                  document.getElementById('passed-tests').textContent = data.passed;
+                  document.getElementById('failed-tests').textContent = data.failed;
+                  document.getElementById('skipped-tests').textContent = data.skipped;
+                  document.getElementById('flaky-tests').textContent = data.flaky;
+                  document.getElementById('last-updated').textContent = `${data.date} ${data.time} UTC`;
+                })
+                .catch(error => {
+                  console.error('Error loading summary data:', error);
                 });
-              });
               
-              // Set last updated time
-              document.getElementById('last-updated').textContent = new Date().toLocaleString();
+              // Load flaky tests
+              fetch('data/flaky_tests.csv')
+                .then(response => response.text())
+                .then(data => {
+                  const lines = data.trim().split('\n');
+                  if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) {
+                    document.getElementById('flaky-tests-list').innerHTML = '<p>No flaky tests detected in recent runs.</p>';
+                    return;
+                  }
+                  
+                  let html = '<ul>';
+                  lines.forEach(line => {
+                    if (line.trim() !== '') {
+                      const [testName, status] = line.split(',');
+                      html += `<li>${testName}</li>`;
+                    }
+                  });
+                  html += '</ul>';
+                  document.getElementById('flaky-tests-list').innerHTML = html;
+                })
+                .catch(error => {
+                  console.error('Error loading flaky tests:', error);
+                  document.getElementById('flaky-tests-list').innerHTML = '<p>Error loading flaky test data.</p>';
+                });
               
-              // Placeholder data - would be replaced by actual data in a real implementation
-              // In a real implementation, you would load JSON data files generated during the test process
-              const placeholderData = {
-                unitTests: {
-                  total: 120,
-                  passed: 115,
-                  failed: 3,
-                  skipped: 2
-                },
-                visualTests: {
-                  total: 45,
-                  matches: 43,
-                  differences: 2
-                },
-                performanceTests: {
-                  total: 30,
-                  withinThreshold: 28,
-                  exceedingThreshold: 2
-                },
-                flakyTests: {
-                  count: 5,
-                  lastRun: "2023-06-15"
-                }
-              };
-              
-              // Update dashboard with data
-              document.getElementById('unit-total').textContent = placeholderData.unitTests.total;
-              document.getElementById('unit-passed').textContent = placeholderData.unitTests.passed;
-              document.getElementById('unit-failed').textContent = placeholderData.unitTests.failed;
-              document.getElementById('unit-skipped').textContent = placeholderData.unitTests.skipped;
-              
-              document.getElementById('visual-total').textContent = placeholderData.visualTests.total;
-              document.getElementById('visual-matches').textContent = placeholderData.visualTests.matches;
-              document.getElementById('visual-differences').textContent = placeholderData.visualTests.differences;
-              
-              document.getElementById('perf-total').textContent = placeholderData.performanceTests.total;
-              document.getElementById('perf-within').textContent = placeholderData.performanceTests.withinThreshold;
-              document.getElementById('perf-exceeding').textContent = placeholderData.performanceTests.exceedingThreshold;
-              
-              document.getElementById('flaky-count').textContent = placeholderData.flakyTests.count;
-              document.getElementById('last-ci-run').textContent = placeholderData.flakyTests.lastRun;
-              
-              // In a real implementation, you would load and process actual test result data here
+              // Load recent test runs
+              fetch('data/all_tests.csv')
+                .then(response => response.text())
+                .then(data => {
+                  const lines = data.trim().split('\n');
+                  if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) {
+                    document.getElementById('test-runs').innerHTML = '<p>No test data available.</p>';
+                    return;
+                  }
+                  
+                  // Process test data
+                  const tests = lines.map(line => {
+                    const [name, status, duration] = line.split(',');
+                    return { name, status, duration: parseFloat(duration) };
+                  });
+                  
+                  // Get unique test names
+                  const testNames = [...new Set(tests.map(t => t.name))];
+                  
+                  // Create table
+                  let html = '<table><thead><tr><th>Test Name</th><th>Status</th><th>Duration (ms)</th></tr></thead><tbody>';
+                  
+                  // Sort by test name
+                  testNames.sort().forEach(name => {
+                    const testRuns = tests.filter(t => t.name === name);
+                    const latestRun = testRuns[testRuns.length - 1];
+                    
+                    const statusClass = 
+                      latestRun.status === 'passed' ? 'status-pass' :
+                      latestRun.status === 'failed' ? 'status-fail' : 'status-skip';
+                    
+                    html += `<tr>
+                      <td>${name}</td>
+                      <td class="${statusClass}">${latestRun.status}</td>
+                      <td>${latestRun.duration.toFixed(2)}</td>
+                    </tr>`;
+                  });
+                  
+                  html += '</tbody></table>';
+                  document.getElementById('test-runs').innerHTML = html;
+                })
+                .catch(error => {
+                  console.error('Error loading test runs:', error);
+                  document.getElementById('test-runs').innerHTML = '<p>Error loading test run data.</p>';
+                });
             </script>
           </body>
           </html>
           EOF
           
-          echo "Test dashboard generated at test-dashboard/index.html"
-      
-      - name: Deploy test dashboard to GitHub Pages
-        run: |
-          # Create .nojekyll file to prevent Jekyll processing
-          touch test-dashboard/.nojekyll
+          echo "HTML dashboard created"
           
-          # Set up Git user
+      - name: Deploy dashboard to GitHub Pages
+        run: |
+          # Configure git
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           
           # Create a new branch for the dashboard
           git checkout -b test-dashboard-updates
           
+          # Create output directory if it doesn't exist
+          mkdir -p test-dashboard
+          
+          # Copy dashboard files
+          cp -r dashboard/* test-dashboard/
+          
           # Add all changes
           git add test-dashboard/
           
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          
           # Commit changes
-          git commit -m "ci: update test dashboard"
+          git commit -m "test: update test results dashboard"
           
-          # Push to the repository
-          git push origin test-dashboard-updates -f
+          # Force push to the branch
+          git push -f origin test-dashboard-updates
           
-          # Create or update PR
+          # Create or update PR using GitHub CLI
           PR_EXISTS=$(gh pr list --state open --head test-dashboard-updates --json number | jq 'length')
           
           if [ "$PR_EXISTS" -eq "0" ]; then
             # Create a new PR
             gh pr create --title "Test Dashboard Update" \
-                         --body "This PR updates the Test Dashboard with the latest test results. This is an automated PR created by the Test Dashboard workflow." \
+                         --body "This PR updates the Test Results Dashboard with the latest metrics. This is an automated PR created by the Test Dashboard workflow." \
                          --base main \
                          --head test-dashboard-updates \
                          --label "area/testing" \
@@ -383,23 +311,4 @@ jobs:
             echo "PR already exists, pushing updates only."
           fi
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Create summary with dashboard link
-        run: |
-          echo "## Test Dashboard Generated" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "The test dashboard has been updated with the latest test results." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Include summary from the processed data if available
-          if [ -f "test-dashboard/summary.md" ]; then
-            cat test-dashboard/summary.md >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "### Actions" >> $GITHUB_STEP_SUMMARY
-          echo "- A PR has been created/updated with the new dashboard" >> $GITHUB_STEP_SUMMARY
-          echo "- View the dashboard by checking out the PR branch" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Once merged, the dashboard will be available in the repository under `/test-dashboard/`." >> $GITHUB_STEP_SUMMARY 
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 

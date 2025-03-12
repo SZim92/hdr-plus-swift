@@ -1,351 +1,311 @@
-# HDR+ Swift Testing Framework
+# HDR+ Swift Testing
 
-This directory contains a comprehensive testing framework for the HDR+ Swift project, designed to make testing of image processing algorithms easier, more reliable, and more insightful.
+This directory contains the test suite for the HDR+ Swift project. The testing infrastructure is designed to provide comprehensive validation of the HDR+ image processing pipeline through various test types and utilities.
+
+## Directory Structure
+
+```
+Tests/
+├── UnitTests/          # Tests for individual components
+├── IntegrationTests/   # Tests for component interactions
+├── VisualTests/        # Image comparison tests
+├── PerformanceTests/   # Performance measurement tests
+├── MetalTests/         # Tests for Metal shader code
+├── TestResources/      # Test images and data files
+├── TestConfig.swift    # Centralized test configuration
+├── TestFixtureUtility.swift      # Test fixture management
+├── VisualTestUtility.swift       # Visual testing utilities
+├── PerformanceTestUtility.swift  # Performance testing utilities
+├── ParameterizedTestUtility.swift # Data-driven test utilities
+├── MetalTestUtility.swift        # Metal testing utilities
+├── TestingGuidelines.md          # Guidelines for writing tests
+├── TestInfrastructureEnhancements.md  # Overview of test infrastructure
+└── README.md           # This file
+```
+
+## Test Types
+
+### Unit Tests
+
+Unit tests validate the behavior of individual components in isolation. These tests are fast, focused, and should cover all edge cases and error conditions.
+
+Location: `UnitTests/`
+
+Example:
+```swift
+func testExposureCalculation() {
+    let calculator = ExposureCalculator()
+    let result = calculator.calculateEV(iso: 100, shutterSpeed: 1.0/125.0)
+    XCTAssertEqual(result, 13.0, accuracy: 0.01)
+}
+```
+
+### Integration Tests
+
+Integration tests validate the interactions between multiple components. These tests ensure that components work together correctly.
+
+Location: `IntegrationTests/`
+
+Example:
+```swift
+func testCaptureAndProcessPipeline() {
+    let camera = MockCamera()
+    let processor = HDRProcessor()
+    let pipeline = HDRPipeline(camera: camera, processor: processor)
+    
+    let result = pipeline.captureAndProcess(frameCount: 3)
+    XCTAssertNotNil(result.finalImage)
+}
+```
+
+### Visual Tests
+
+Visual tests compare processed images against reference images to verify that image processing algorithms produce the expected visual results.
+
+Location: `VisualTests/`
+
+Example:
+```swift
+func testToneMapping() throws {
+    let input = try loadTestImage("hdr_input")
+    let processor = HDRToneMapper()
+    
+    let result = processor.process(input)
+    
+    try VisualTestUtility.compareImages(
+        actual: result,
+        expected: "tone_mapped_reference",
+        tolerance: 0.02
+    )
+}
+```
+
+### Performance Tests
+
+Performance tests measure the execution time and memory usage of operations to ensure they meet performance requirements.
+
+Location: `PerformanceTests/`
+
+Example:
+```swift
+func testMergePerformance() throws {
+    let images = try loadTestImages(count: 8)
+    
+    try measureExecutionTime(
+        name: "hdr_merge_8_images",
+        baselineValue: 150.0  // 150ms baseline
+    ) {
+        _ = try merger.mergeImages(images)
+    }
+}
+```
+
+### Metal Tests
+
+Metal tests validate the correctness of GPU-accelerated code, ensuring shaders and compute kernels produce the expected results.
+
+Location: `MetalTests/`
+
+Example:
+```swift
+func testNoiseReductionShader() throws {
+    let metalUtil = try createMetalTestUtility()
+    let pipelineState = try metalUtil.createComputePipelineState(functionName: "denoise_shader")
+    
+    // Run shader and verify results
+    // ...
+}
+```
 
 ## Test Utilities
 
-The testing framework includes several utilities to help with different aspects of testing:
-
 ### TestConfig
 
-`TestConfig` provides centralized configuration for all tests in the project:
+`TestConfig` is a singleton that provides centralized configuration for all tests, including paths, settings, and environment variables.
 
-- Environment variable support for customizing test behavior
-- Consistent directory structure for test resources, fixtures, and results
-- Helper methods for managing test resources and directories
-
+Usage:
 ```swift
-// Example: Get a reference image URL
-let referenceURL = TestConfig.shared.referenceImageURL(for: "tonemap_test", in: type(of: self))
+// Access test resources directory
+let resourceURL = TestConfig.shared.testResourcesDir.appendingPathComponent("images")
 
-// Example: Create required directories
-TestConfig.shared.createDirectories()
-
-// Example: Log verbose output when enabled
-TestConfig.shared.logVerbose("Processing test image...")
+// Check verbose logging setting
+if TestConfig.shared.verboseLogging {
+    print("Debug info: \(debugInfo)")
+}
 ```
 
 ### TestFixtureUtility
 
-`TestFixtureUtility` provides easy management of test fixtures and mocks:
+`TestFixtureUtility` manages test environments, creating temporary directories and files that are automatically cleaned up after tests run.
 
-- Automatic cleanup of test fixtures when tests complete
-- Helper methods for creating files, directories, and test data
-- Built-in helpers for common mock objects (camera config, burst frames, etc.)
-
+Usage:
 ```swift
-// Example: Create a test fixture
-let fixture = createFixture()
+// In setUp method
+testFixture = try createFixture()
 
-// Example: Create a text file in the fixture
-let configFile = fixture.createTextFile(named: "settings.json", contents: "{...}")
+// Create test files
+try testFixture.createFile(at: "config.json", content: "{\"key\": \"value\"}")
 
-// Example: Create a mock camera configuration
-let cameraConfigURL = TestFixtureUtility.createMockCameraConfig(in: fixture)
+// Use files in tests
+let fileURL = testFixture.url(for: "config.json")
 ```
 
 ### VisualTestUtility
 
-`VisualTestUtility` helps with image comparison and visual regression testing:
+`VisualTestUtility` provides tools for comparing images and verifying visual output.
 
-- Compare generated images with reference images
-- Save reference images when they don't exist
-- Generate visual diffs to highlight differences between images
-- Helper methods for creating test images
-
+Usage:
 ```swift
-// Example: Compare an image to a reference
-let matches = VisualTestUtility.compareImage(
-    processedImage,
-    toReferenceNamed: "hdr_tonemap",
-    tolerance: 0.01,
-    in: self
+// Compare an image with a reference
+try VisualTestUtility.compareImages(
+    actual: processedImage,
+    expected: "reference_image",
+    tolerance: 0.02,
+    saveDiffOnFailure: true
 )
 
-// Example: Create a test image
-let testImage = VisualTestUtility.createGradientImage(
-    width: 512,
-    height: 512,
-    startColor: (red: 0.0, green: 0.0, blue: 0.0),
-    endColor: (red: 1.0, green: 1.0, blue: 1.0)
+// Generate a test pattern
+let testPattern = try VisualTestUtility.generateCheckerboardPattern(
+    size: CGSize(width: 512, height: 512),
+    checkSize: 64,
+    colors: [.black, .white]
 )
 ```
 
 ### PerformanceTestUtility
 
-`PerformanceTestUtility` helps with performance testing and tracking:
+`PerformanceTestUtility` measures and tracks performance metrics over time.
 
-- Measure execution time and memory usage of operations
-- Track performance metrics over time
-- Compare performance against baselines with acceptable deviation
-
+Usage:
 ```swift
-// Example: Measure execution time
-let executionTime = measureExecutionTime(name: "hdr_merge") {
-    processor.processImage(input)
+// Measure execution time
+try measureExecutionTime(
+    name: "operation_name",
+    baselineValue: 100.0,  // 100ms
+    acceptableDeviation: 0.1  // 10%
+) {
+    // Code to measure
+    performOperation()
 }
 
-// Example: Measure memory usage
-let memoryUsage = measureMemoryUsage(name: "hdr_alignment") {
-    aligner.alignFrames(burstFrames)
+// Measure memory usage
+try measureMemoryUsage(
+    name: "operation_memory",
+    baselineValue: 50.0  // 50MB
+) {
+    // Code to measure
+    performOperation()
 }
 ```
 
 ### ParameterizedTestUtility
 
-`ParameterizedTestUtility` enables data-driven testing:
+`ParameterizedTestUtility` enables data-driven testing with multiple input sets.
 
-- Run tests with multiple input parameters
-- Load test data from JSON and CSV files
-- Create parameter grids for testing combinations of parameters
-
+Usage:
 ```swift
-// Example: Run tests with multiple parameters
-runParameterized(name: "exposure_test", parameters: [0.5, 1.0, 2.0]) { value, testName in
-    let result = processor.adjustExposure(input, value: value)
-    XCTAssertNotNil(result, "\(testName): Result should not be nil")
+// Test with multiple inputs
+let testCases = [
+    (input: 0.0, expected: 1.0),
+    (input: 1.0, expected: 2.0),
+    (input: -1.0, expected: 0.5)
+]
+
+try runParameterizedTest(with: testCases) { input, expected, index in
+    let result = calculator.calculate(input)
+    XCTAssertEqual(result, expected, accuracy: 0.001)
 }
 
-// Example: Run tests with parameter combinations
-runParameterizedGrid(
-    name: "tonemap_test",
-    parameters1: [(0.5, "lowExposure"), (1.0, "normalExposure"), (2.0, "highExposure")],
-    parameters2: [("filmic", "filmicTonemap"), ("aces", "acesTonemap")]
-) { exposure, tonemapType, testName in
-    let result = processor.tonemap(input, exposure: exposure, type: tonemapType)
-    XCTAssertNotNil(result, "\(testName): Result should not be nil")
-}
+// Load test data from JSON
+let testData: [TestCase] = try loadTestData(fromJSON: "test_cases")
 ```
 
 ### MetalTestUtility
 
-`MetalTestUtility` helps with testing Metal GPU code:
+`MetalTestUtility` simplifies testing Metal shaders and compute kernels.
 
-- Run compute shaders with test data
-- Compare results with expected values
-- Skip tests automatically when Metal is not available
-
+Usage:
 ```swift
-// Example: Create a Metal test utility
+// Create utility and pipeline
 let metalUtil = try createMetalTestUtility()
+let pipeline = try metalUtil.createComputePipelineState(functionName: "shader_name")
 
-// Example: Run a 1D compute shader
+// Create buffers
+let inputBuffer = try metalUtil.createBuffer(from: inputData)
+let outputBuffer = try metalUtil.createBuffer(count: outputSize, type: Float.self)
+
+// Run shader
 try metalUtil.runComputeShader1D(
-    functionName: "add_arrays",
-    inputBuffers: [(0, inputBuffer1), (1, inputBuffer2)],
-    outputBuffers: [(2, outputBuffer)],
-    count: 1024
+    pipelineState: pipeline,
+    inputBuffers: [inputBuffer],
+    outputBuffers: [outputBuffer],
+    count: inputData.count
 )
 
-// Example: Verify results
-let results = metalUtil.getBufferData(from: outputBuffer, type: Float.self, count: 1024)
-try metalUtil.compareArrays(actual: results, expected: expectedResults, tolerance: 0.001)
+// Verify results
+let result: [Float] = try metalUtil.extractData(from: outputBuffer, count: outputSize)
+try metalUtil.verifyArraysEqual(result: result, expected: expectedOutput, tolerance: 0.001)
 ```
-
-## Test Categories
-
-The test suite is organized into the following categories:
-
-### Unit Tests
-
-Located in `Tests/UnitTests/`, these tests focus on testing individual components in isolation.
-
-### Integration Tests
-
-Located in `Tests/IntegrationTests/`, these tests verify the interaction between multiple components.
-
-### Visual Tests
-
-Located in `Tests/VisualTests/`, these tests compare generated images with reference images to detect visual regressions.
-
-### Performance Tests
-
-Located in `Tests/PerformanceTests/`, these tests measure the performance of operations and track changes over time.
-
-### Metal Tests
-
-Located in `Tests/MetalTests/`, these tests verify the correctness of Metal compute shaders.
 
 ## Running Tests
 
-The project includes several ways to run tests:
-
-### Running in Xcode
+### Using Xcode
 
 1. Open the project in Xcode
 2. Select the test scheme
-3. Press Cmd+U or select Product > Test
+3. Use Cmd+U to run all tests, or select specific tests to run
 
-### Running from Command Line
+### Using Command Line
 
-```bash
-# Run all tests
-swift test
-
-# Run a specific test target
-swift test --filter VisualTests
-
-# Run a specific test case
-swift test --filter VisualTests/HDRToneMapVisualTests
-
-# Run a specific test method
-swift test --filter VisualTests/HDRToneMapVisualTests/testBasicToneMapping
-```
-
-### Using the Test Runner Script
-
-The project includes a test runner script at `Scripts/run-tests.sh`:
+Use the test runner scripts in the `Scripts` directory:
 
 ```bash
 # Run all tests
-./Scripts/run-tests.sh
+Scripts/run-tests.sh
 
-# Run with options
-./Scripts/run-tests.sh --unit --visual --performance --verbose
+# Run specific test types
+Scripts/run-tests.sh --unit-only
+Scripts/run-tests.sh --integration-only
+Scripts/run-tests.sh --visual-only
+Scripts/run-tests.sh --performance-only
+Scripts/run-tests.sh --metal-only
 
-# Run with retry for flaky tests
-./Scripts/run-tests.sh --retry 3
+# Filter tests by name
+Scripts/run-tests.sh --regex "HDRMerge"
 
-# Generate a test report
-./Scripts/run-tests.sh --report
+# Generate reports
+Scripts/run-tests.sh --report-format html
 ```
 
-## Writing Tests
+### Using CI
 
-### Unit Tests
+The project includes GitHub Actions workflows for running tests in CI:
 
-```swift
-import XCTest
-@testable import HDRPlus
+- Push to main or develop branches triggers a full test suite
+- Pull requests trigger relevant tests based on changed files
+- Manual workflow runs can be triggered with specific test filters
 
-class MyComponentTests: XCTestCase {
-    func testSomeFunction() {
-        // Arrange
-        let component = MyComponent()
-        
-        // Act
-        let result = component.someFunction()
-        
-        // Assert
-        XCTAssertEqual(result, expectedResult)
-    }
-}
-```
+## Test Resources
 
-### Visual Tests
+Test resources are stored in the `TestResources` directory, organized by category:
 
-```swift
-import XCTest
-@testable import HDRPlus
+- `TestResources/Images/` - Test images for visual tests
+- `TestResources/References/` - Reference images for comparison
+- `TestResources/TestData/` - JSON and CSV data for parameterized tests
+- `TestResources/Mock/` - Mock data for simulating inputs
 
-class MyVisualTests: XCTestCase {
-    func testImageProcessing() {
-        // Arrange
-        let processor = ImageProcessor()
-        let input = createTestImage()
-        
-        // Act
-        let result = processor.process(input)
-        
-        // Assert using visual comparison
-        let matches = VisualTestUtility.compareImage(
-            result,
-            toReferenceNamed: "processed_image",
-            tolerance: 0.01,
-            in: self
-        )
-        
-        XCTAssertTrue(matches)
-    }
-}
-```
+## Contributing Tests
 
-### Performance Tests
+When adding new tests to the project:
 
-```swift
-import XCTest
-@testable import HDRPlus
+1. Follow the [Testing Guidelines](TestingGuidelines.md)
+2. Place tests in the appropriate directory based on type
+3. Use the provided test utilities for consistent testing
+4. Include necessary test resources
+5. Ensure tests run reliably and are not flaky
 
-class MyPerformanceTests: XCTestCase {
-    func testProcessingPerformance() {
-        // Arrange
-        let processor = ImageProcessor()
-        let input = createTestImage()
-        
-        // Act and assert with performance measurement
-        measureExecutionTime(name: "image_processing") {
-            _ = processor.process(input)
-        }
-    }
-}
-```
+## Additional Documentation
 
-### Metal Tests
-
-```swift
-import XCTest
-@testable import HDRPlus
-
-class MyMetalTests: XCTestCase {
-    func testComputeShader() throws {
-        // Skip test if Metal is not available
-        skipIfMetalUnavailable()
-        
-        // Arrange
-        let metalUtil = try createMetalTestUtility()
-        let input = [Float](repeating: 1.0, count: 1024)
-        
-        // Create buffers
-        let inputBuffer = try metalUtil.createBuffer(from: input)
-        let outputBuffer = try metalUtil.createBuffer(length: MemoryLayout<Float>.stride * 1024)
-        
-        // Act
-        try metalUtil.runComputeShader1D(
-            functionName: "square_values",
-            inputBuffers: [(0, inputBuffer)],
-            outputBuffers: [(1, outputBuffer)],
-            count: 1024
-        )
-        
-        // Assert
-        let results = metalUtil.getBufferData(from: outputBuffer, type: Float.self, count: 1024)
-        let expected = input.map { $0 * $0 }
-        try metalUtil.compareArrays(actual: results, expected: expected, tolerance: 0.001)
-    }
-}
-```
-
-## Best Practices
-
-1. **Use Test Fixtures**: Create and clean up test data with `TestFixtureUtility` to ensure tests are isolated.
-2. **Parameterize Tests**: Use `ParameterizedTestUtility` to test multiple scenarios without duplicating code.
-3. **Track Performance**: Use `PerformanceTestUtility` to catch performance regressions early.
-4. **Visual Regression Testing**: Create reference images for important visual outputs and compare against them.
-5. **Skip Tests When Appropriate**: Use `skipIfMetalUnavailable()` to skip tests that can't run on the current device.
-6. **Use Named Test Parameters**: Give descriptive names to test parameters to make test failures easier to understand.
-
-## Troubleshooting
-
-### Visual Tests Failing
-
-1. Check if reference images exist in the reference directory.
-2. Look at the failed test image and diff to see what's different.
-3. If the changes are expected, update the reference images.
-
-### Performance Tests Failing
-
-1. Check if the baseline exists and if it's reasonable.
-2. Look at the performance history to see if there's a trend.
-3. Update the baseline if the performance change is expected.
-
-### Metal Tests Failing
-
-1. Check if Metal is available on the device.
-2. Verify shader function names match those in the Metal library.
-3. Check buffer sizes and types.
-
-### Flaky Tests
-
-1. Use the test retry feature to identify flaky tests.
-2. Review the test for race conditions or external dependencies.
-3. Consider using more stable test fixtures or mocks. 
+- [Testing Guidelines](TestingGuidelines.md) - Best practices for writing effective tests
+- [Test Infrastructure Enhancements](TestInfrastructureEnhancements.md) - Overview of the test infrastructure
+- [Metal Tests README](MetalTests/README.md) - Specific guidance for Metal tests 
