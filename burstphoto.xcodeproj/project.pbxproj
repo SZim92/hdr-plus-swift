@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 70;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -764,10 +764,26 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		B02711EF2D812D2F002532CE /* UnitTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = UnitTests; sourceTree = "<group>"; };
-		B02711FC2D812D71002532CE /* VisualTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = VisualTests; sourceTree = "<group>"; };
-		B027120B2D812E11002532CE /* PerformanceTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = PerformanceTests; sourceTree = "<group>"; };
-		B02712182D812E23002532CE /* IntegrationTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = IntegrationTests; sourceTree = "<group>"; };
+		B02711EF2D812D2F002532CE /* UnitTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = UnitTests;
+			sourceTree = "<group>";
+		};
+		B02711FC2D812D71002532CE /* VisualTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = VisualTests;
+			sourceTree = "<group>";
+		};
+		B027120B2D812E11002532CE /* PerformanceTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = PerformanceTests;
+			sourceTree = "<group>";
+		};
+		B02712182D812E23002532CE /* IntegrationTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = IntegrationTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1852,7 +1868,6 @@
 				};
 			};
 			buildConfigurationList = E1ACED6126A490A0009B14EB /* Build configuration list for PBXProject "burstphoto" */;
-			compatibilityVersion = "Xcode 12.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -1860,6 +1875,7 @@
 				Base,
 			);
 			mainGroup = E1ACED5D26A490A0009B14EB;
+			preferredProjectObjectVersion = 77;
 			productRefGroup = E1ACED6726A490A1009B14EB /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
