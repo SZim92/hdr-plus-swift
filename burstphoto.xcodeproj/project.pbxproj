@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 54;
+	objectVersion = 70;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -298,7 +298,42 @@
 		FAED70FE2A53A30E00BF63BD /* exposure.metal in Sources */ = {isa = PBXBuildFile; fileRef = FAED70FC2A53A30E00BF63BD /* exposure.metal */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		B02711F22D812D2F002532CE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E1ACED5E26A490A0009B14EB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E1ACED6526A490A1009B14EB;
+			remoteInfo = gui;
+		};
+		B02712012D812D71002532CE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E1ACED5E26A490A0009B14EB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E1ACED6526A490A1009B14EB;
+			remoteInfo = gui;
+		};
+		B027120E2D812E11002532CE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E1ACED5E26A490A0009B14EB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E1ACED6526A490A1009B14EB;
+			remoteInfo = gui;
+		};
+		B027121B2D812E23002532CE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E1ACED5E26A490A0009B14EB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E1ACED6526A490A1009B14EB;
+			remoteInfo = gui;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		B02711EE2D812D2F002532CE /* UnitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = UnitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B02711FB2D812D71002532CE /* VisualTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VisualTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B027120A2D812E11002532CE /* PerformanceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PerformanceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B02712172D812E23002532CE /* IntegrationTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = IntegrationTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E133ABCA28FEF8770058B799 /* XMPAssetManagement.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = XMPAssetManagement.cpp; sourceTree = "<group>"; };
 		E133ABCB28FEF8770058B799 /* IAssetArtboardPart.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = IAssetArtboardPart.cpp; sourceTree = "<group>"; };
 		E133ABCC28FEF8770058B799 /* IComposedAssetManager.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = IComposedAssetManager.cpp; sourceTree = "<group>"; };
@@ -688,7 +723,42 @@
 		FAED70FC2A53A30E00BF63BD /* exposure.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = exposure.metal; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		B02711EF2D812D2F002532CE /* UnitTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = UnitTests; sourceTree = "<group>"; };
+		B02711FC2D812D71002532CE /* VisualTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = VisualTests; sourceTree = "<group>"; };
+		B027120B2D812E11002532CE /* PerformanceTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = PerformanceTests; sourceTree = "<group>"; };
+		B02712182D812E23002532CE /* IntegrationTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = IntegrationTests; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
+
 /* Begin PBXFrameworksBuildPhase section */
+		B02711EB2D812D2F002532CE /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B02711F82D812D71002532CE /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B02712072D812E11002532CE /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B02712142D812E23002532CE /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E1ACED6326A490A1009B14EB /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -1281,6 +1351,10 @@
 			children = (
 				E133ABC528FEF8770058B799 /* dng_sdk */,
 				E1ACED6826A490A1009B14EB /* burstphoto */,
+				B02711EF2D812D2F002532CE /* UnitTests */,
+				B02711FC2D812D71002532CE /* VisualTests */,
+				B027120B2D812E11002532CE /* PerformanceTests */,
+				B02712182D812E23002532CE /* IntegrationTests */,
 				E1ACED6726A490A1009B14EB /* Products */,
 				E141516726CBFB2C006806D3 /* Frameworks */,
 			);
@@ -1291,6 +1365,10 @@
 			children = (
 				E1ACED6626A490A1009B14EB /* Burst Photo.app */,
 				E1F0A28B2909D80D00AB127E /* cli.app */,
+				B02711EE2D812D2F002532CE /* UnitTests.xctest */,
+				B02711FB2D812D71002532CE /* VisualTests.xctest */,
+				B027120A2D812E11002532CE /* PerformanceTests.xctest */,
+				B02712172D812E23002532CE /* IntegrationTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -1386,6 +1464,98 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		B02711ED2D812D2F002532CE /* UnitTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B02711F62D812D2F002532CE /* Build configuration list for PBXNativeTarget "UnitTests" */;
+			buildPhases = (
+				B02711EA2D812D2F002532CE /* Sources */,
+				B02711EB2D812D2F002532CE /* Frameworks */,
+				B02711EC2D812D2F002532CE /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B02711F32D812D2F002532CE /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B02711EF2D812D2F002532CE /* UnitTests */,
+			);
+			name = UnitTests;
+			packageProductDependencies = (
+			);
+			productName = UnitTests;
+			productReference = B02711EE2D812D2F002532CE /* UnitTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		B02711FA2D812D71002532CE /* VisualTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B02712032D812D71002532CE /* Build configuration list for PBXNativeTarget "VisualTests" */;
+			buildPhases = (
+				B02711F72D812D71002532CE /* Sources */,
+				B02711F82D812D71002532CE /* Frameworks */,
+				B02711F92D812D71002532CE /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B02712022D812D71002532CE /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B02711FC2D812D71002532CE /* VisualTests */,
+			);
+			name = VisualTests;
+			packageProductDependencies = (
+			);
+			productName = VisualTests;
+			productReference = B02711FB2D812D71002532CE /* VisualTests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		B02712092D812E11002532CE /* PerformanceTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B02712102D812E11002532CE /* Build configuration list for PBXNativeTarget "PerformanceTests" */;
+			buildPhases = (
+				B02712062D812E11002532CE /* Sources */,
+				B02712072D812E11002532CE /* Frameworks */,
+				B02712082D812E11002532CE /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B027120F2D812E11002532CE /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B027120B2D812E11002532CE /* PerformanceTests */,
+			);
+			name = PerformanceTests;
+			packageProductDependencies = (
+			);
+			productName = PerformanceTests;
+			productReference = B027120A2D812E11002532CE /* PerformanceTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		B02712162D812E23002532CE /* IntegrationTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B027121D2D812E23002532CE /* Build configuration list for PBXNativeTarget "IntegrationTests" */;
+			buildPhases = (
+				B02712132D812E23002532CE /* Sources */,
+				B02712142D812E23002532CE /* Frameworks */,
+				B02712152D812E23002532CE /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B027121C2D812E23002532CE /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B02712182D812E23002532CE /* IntegrationTests */,
+			);
+			name = IntegrationTests;
+			packageProductDependencies = (
+			);
+			productName = IntegrationTests;
+			productReference = B02712172D812E23002532CE /* IntegrationTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		E1ACED6526A490A1009B14EB /* gui */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = E1ACED7626A490A2009B14EB /* Build configuration list for PBXNativeTarget "gui" */;
@@ -1427,9 +1597,25 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastSwiftUpdateCheck = 1250;
+				LastSwiftUpdateCheck = 1620;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					B02711ED2D812D2F002532CE = {
+						CreatedOnToolsVersion = 16.2;
+						TestTargetID = E1ACED6526A490A1009B14EB;
+					};
+					B02711FA2D812D71002532CE = {
+						CreatedOnToolsVersion = 16.2;
+						TestTargetID = E1ACED6526A490A1009B14EB;
+					};
+					B02712092D812E11002532CE = {
+						CreatedOnToolsVersion = 16.2;
+						TestTargetID = E1ACED6526A490A1009B14EB;
+					};
+					B02712162D812E23002532CE = {
+						CreatedOnToolsVersion = 16.2;
+						TestTargetID = E1ACED6526A490A1009B14EB;
+					};
 					E1ACED6526A490A1009B14EB = {
 						CreatedOnToolsVersion = 12.5.1;
 					};
@@ -1450,11 +1636,43 @@
 			targets = (
 				E1ACED6526A490A1009B14EB /* gui */,
 				E1F0A1FD2909D80D00AB127E /* cli */,
+				B02711ED2D812D2F002532CE /* UnitTests */,
+				B02711FA2D812D71002532CE /* VisualTests */,
+				B02712092D812E11002532CE /* PerformanceTests */,
+				B02712162D812E23002532CE /* IntegrationTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		B02711EC2D812D2F002532CE /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B02711F92D812D71002532CE /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B02712082D812E11002532CE /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B02712152D812E23002532CE /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E1ACED6426A490A1009B14EB /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -1494,6 +1712,34 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		B02711EA2D812D2F002532CE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B02711F72D812D71002532CE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B02712062D812E11002532CE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B02712132D812E23002532CE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E1ACED6226A490A1009B14EB /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -1773,7 +2019,232 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		B02711F32D812D2F002532CE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E1ACED6526A490A1009B14EB /* gui */;
+			targetProxy = B02711F22D812D2F002532CE /* PBXContainerItemProxy */;
+		};
+		B02712022D812D71002532CE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E1ACED6526A490A1009B14EB /* gui */;
+			targetProxy = B02712012D812D71002532CE /* PBXContainerItemProxy */;
+		};
+		B027120F2D812E11002532CE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E1ACED6526A490A1009B14EB /* gui */;
+			targetProxy = B027120E2D812E11002532CE /* PBXContainerItemProxy */;
+		};
+		B027121C2D812E23002532CE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E1ACED6526A490A1009B14EB /* gui */;
+			targetProxy = B027121B2D812E23002532CE /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		B02711F42D812D2F002532CE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.burstphoto.UnitTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Burst Photo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Burst Photo";
+			};
+			name = Debug;
+		};
+		B02711F52D812D2F002532CE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.burstphoto.UnitTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Burst Photo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Burst Photo";
+			};
+			name = Release;
+		};
+		B02712042D812D71002532CE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.burstphoto.VisualTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = gui;
+			};
+			name = Debug;
+		};
+		B02712052D812D71002532CE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.burstphoto.VisualTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = gui;
+			};
+			name = Release;
+		};
+		B02712112D812E11002532CE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.burstphoto.PerformanceTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Burst Photo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Burst Photo";
+			};
+			name = Debug;
+		};
+		B02712122D812E11002532CE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.burstphoto.PerformanceTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Burst Photo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Burst Photo";
+			};
+			name = Release;
+		};
+		B027121E2D812E23002532CE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.burstphoto.IntegrationTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Burst Photo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Burst Photo";
+			};
+			name = Debug;
+		};
+		B027121F2D812E23002532CE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.burstphoto.IntegrationTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Burst Photo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Burst Photo";
+			};
+			name = Release;
+		};
 		E1ACED7426A490A2009B14EB /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -2074,6 +2545,42 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		B02711F62D812D2F002532CE /* Build configuration list for PBXNativeTarget "UnitTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B02711F42D812D2F002532CE /* Debug */,
+				B02711F52D812D2F002532CE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B02712032D812D71002532CE /* Build configuration list for PBXNativeTarget "VisualTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B02712042D812D71002532CE /* Debug */,
+				B02712052D812D71002532CE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B02712102D812E11002532CE /* Build configuration list for PBXNativeTarget "PerformanceTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B02712112D812E11002532CE /* Debug */,
+				B02712122D812E11002532CE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B027121D2D812E23002532CE /* Build configuration list for PBXNativeTarget "IntegrationTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B027121E2D812E23002532CE /* Debug */,
+				B027121F2D812E23002532CE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		E1ACED6126A490A0009B14EB /* Build configuration list for PBXProject "burstphoto" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
