@@ -20,12 +20,21 @@
 #include "dng_tag_values.h"
 #include "dng_jxl_dummy.h"
 #include "dng_ifd.h"
-#include "dng_noise_profile.h"
 #include "dng_image.h"
 #include "dng_image_writer.h"
+#include "dng_std_types.h"
 
 #include <memory>
-#include <vector>
+
+/*****************************************************************************/
+
+// Forward declarations
+namespace std {
+    template<typename T> class vector;
+    template<typename T> class shared_ptr;
+}
+
+class dng_memory_block;
 
 /*****************************************************************************/
 
@@ -34,7 +43,7 @@ class dng_compressed_image_tiles
 	
 	public:
 	
-		std::vector<std::shared_ptr<dng_memory_block>> fData;
+		dng_std::vector<dng_std::shared_ptr<dng_memory_block>> fData;
 		
 	public:
 
@@ -190,10 +199,10 @@ class dng_jxl_image : public dng_lossy_compressed_image
 					 const dng_image &image,
 					 const dng_jxl_encode_settings &encodeSettings,
 #if !DISABLE_JXL_SUPPORT
-					 const JxlColorEncoding *colorEncoding = nullptr,
+					 const JxlColorEncoding *colorEncoding,
 					 dng_ifd &ifd);
 #else
-					 const void *colorEncoding = nullptr,
+					 const void *colorEncoding,
 					 dng_ifd &ifd);
 #endif
 

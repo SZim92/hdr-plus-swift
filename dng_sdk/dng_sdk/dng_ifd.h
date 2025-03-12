@@ -19,7 +19,6 @@
 
 #include "dng_classes.h"
 #include "dng_fingerprint.h"
-#include "dng_negative.h"
 #include "dng_rect.h"
 #include "dng_shared.h"
 #include "dng_stream.h"
@@ -27,8 +26,18 @@
 #include "dng_sdk_limits.h"
 #include "dng_tag_values.h"
 #include "dng_jxl_dummy.h"
+#include "dng_std_types.h"
+#include "dng_noise_profile.h"
+#include "dng_rational.h"
+#include "dng_gain_map.h"
+#include "dng_urational.h"
 
 #include <memory>
+
+/*****************************************************************************/
+
+// Forward declarations
+class dng_image_stats;
 
 /*****************************************************************************/
 
