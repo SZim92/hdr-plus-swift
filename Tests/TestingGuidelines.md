@@ -1,274 +1,319 @@
 # HDR+ Swift Testing Guidelines
 
-This document provides guidelines, best practices, and patterns for creating effective tests for the HDR+ Swift project. Following these guidelines will help ensure test consistency, reliability, and maintainability across the project.
+This document provides guidelines and best practices for writing effective tests for the HDR+ Swift project. Following these guidelines will ensure consistent, maintainable, and valuable tests.
 
 ## Table of Contents
-1. [General Testing Principles](#general-testing-principles)
-2. [Test Structure](#test-structure)
-3. [Test Types](#test-types)
-   - [Unit Tests](#unit-tests)
-   - [Integration Tests](#integration-tests)
-   - [Visual Tests](#visual-tests)
-   - [Performance Tests](#performance-tests)
-   - [Metal Tests](#metal-tests)
-4. [Using Test Utilities](#using-test-utilities)
-5. [Test Data Management](#test-data-management)
-6. [CI Integration](#ci-integration)
-7. [Debugging Tests](#debugging-tests)
-8. [Common Pitfalls](#common-pitfalls)
 
-## General Testing Principles
+1. [Test Types and Organization](#test-types-and-organization)
+2. [General Principles](#general-principles)
+3. [Unit Testing Guidelines](#unit-testing-guidelines)
+4. [Integration Testing Guidelines](#integration-testing-guidelines)
+5. [Visual Testing Guidelines](#visual-testing-guidelines)
+6. [Performance Testing Guidelines](#performance-testing-guidelines)
+7. [Metal Testing Guidelines](#metal-testing-guidelines)
+8. [Mocking Best Practices](#mocking-best-practices)
+9. [Test Utilities](#test-utilities)
+10. [Continuous Integration](#continuous-integration)
 
-### 1. Test Independence
-- Each test should be independent and not rely on the state from other tests
-- Tests should be able to run in any order
-- Use setup and teardown methods to create a clean environment for each test
+## Test Types and Organization
 
-### 2. Test Clarity
-- Test names should clearly describe what is being tested
-- Use the AAA pattern (Arrange, Act, Assert)
-- Include comments for complex test logic
+The HDR+ Swift project uses several types of tests, each with a specific purpose:
 
-### 3. Test Coverage
-- Aim for comprehensive coverage of code paths
-- Include edge cases and error conditions
-- Test boundary conditions
+| Test Type | Purpose | Directory | Example |
+|-----------|---------|-----------|---------|
+| Unit Tests | Test individual components in isolation | `Tests/UnitTests/` | `AlignmentAlgorithmTests.swift` |
+| Integration Tests | Test interactions between components | `Tests/IntegrationTests/` | `HDRPipelineIntegrationTests.swift` |
+| Visual Tests | Verify visual output with image comparisons | `Tests/VisualTests/` | `ToneMappingVisualTests.swift` |
+| Performance Tests | Verify execution time and memory usage | `Tests/PerformanceTests/` | `HDRMergePerformanceTests.swift` |
+| Metal Tests | Test GPU-accelerated code | `Tests/MetalTests/` | `NoiseReductionShaderTests.swift` |
 
-### 4. Test Reliability
-- Tests should yield consistent results
-- Avoid flaky tests with non-deterministic behavior
-- Use TestFixtureUtility to set up controlled test environments
+Organize test files to mirror the structure of the source code they test, but within their respective test type directory.
 
-### 5. Test Performance
-- Tests should run quickly to encourage frequent execution
-- Use PerformanceTestUtility for dedicated performance tests
-- Mark slow tests appropriately to allow selective execution
+## General Principles
 
-## Test Structure
+Follow these principles for all types of tests:
 
-### Class Structure
+1. **Test Independence**: Each test should be independent and not rely on the state from other tests.
+2. **Descriptive Names**: Use descriptive names that clearly indicate what is being tested.
+3. **Arrange-Act-Assert**: Structure tests using the AAA pattern:
+   ```swift
+   func testExampleFunction() {
+       // Arrange: Set up the test conditions
+       let input = "example"
+       
+       // Act: Call the function being tested
+       let result = exampleFunction(input)
+       
+       // Assert: Verify the expected outcome
+       XCTAssertEqual(result, "EXAMPLE")
+   }
+   ```
+4. **One Assertion Per Test**: Prefer one or a small number of related assertions per test.
+5. **Clean Setup/Teardown**: Use `setUp()` and `tearDown()` methods to handle common setup and cleanup.
+6. **Self-contained Tests**: Include all necessary context in the test method or setup.
+7. **Test Edge Cases**: Include tests for boundary conditions and error cases.
+8. **Consistent Formatting**: Follow the project's Swift style guide.
 
-```swift
-import XCTest
-@testable import HDRPlus
+## Unit Testing Guidelines
 
-class FeatureTests: XCTestCase {
-    // MARK: - Properties
-    private var testFixture: TestFixtureUtility.Fixture!
-    
-    // MARK: - Setup/Teardown
-    override func setUp() async throws {
-        try await super.setUp()
-        testFixture = try createFixture()
-        // Additional setup...
-    }
-    
-    override func tearDown() async throws {
-        // Specific teardown...
-        testFixture = nil
-        try await super.tearDown()
-    }
-    
-    // MARK: - Tests
-    func testFeatureWithValidInput() throws {
-        // Arrange
-        // ...
-        
-        // Act
-        // ...
-        
-        // Assert
-        // ...
-    }
-    
-    func testFeatureWithInvalidInput() throws {
-        // ...
-    }
-    
-    // MARK: - Helper Methods
-    private func helperMethod() -> Any {
-        // ...
-    }
-}
-```
+Unit tests verify that individual components work correctly in isolation.
 
-### Naming Conventions
+### Do's and Don'ts
 
-- **Test Class**: `{Feature}Tests`
-- **Test Method**: `test{Scenario}_{ExpectedOutcome}`
-- **Helper Method**: Descriptive name indicating its purpose
+✅ **Do:**
+- Test one function or method per test
+- Use mocks or stubs for dependencies
+- Test edge cases and error conditions
+- Keep tests simple and focused
 
-## Test Types
+❌ **Don't:**
+- Access external resources (network, database, files)
+- Write overly complex tests with too many assertions
+- Create tests that depend on each other
+- Test private implementation details unless necessary
 
-### Unit Tests
-
-Unit tests verify individual components in isolation.
-
-**Best Practices:**
-- Focus on testing a single function or method
-- Mock dependencies using test doubles
-- Verify all code paths including error handling
-- Keep tests small and focused
-
-**Example:**
+### Example Unit Test
 
 ```swift
-func testExposureCalculation_WithNormalInput_ReturnsCorrectValue() throws {
+func testExposureCalculation() {
     // Arrange
+    let calculator = ExposureCalculator()
     let iso = 100
     let shutterSpeed = 1.0/125.0
-    let calculator = ExposureCalculator()
+    let aperture = 2.8
     
     // Act
-    let ev = calculator.calculateEV(iso: iso, shutterSpeed: shutterSpeed)
+    let ev = calculator.calculateEV(
+        iso: iso,
+        shutterSpeed: shutterSpeed,
+        aperture: aperture
+    )
     
     // Assert
-    XCTAssertEqual(ev, 13.0, accuracy: 0.01)
+    XCTAssertEqual(ev, 11.0, accuracy: 0.01, "EV calculation should be accurate")
 }
 ```
 
-### Integration Tests
+## Integration Testing Guidelines
 
-Integration tests verify that multiple components work together correctly.
+Integration tests verify that components work together correctly.
 
-**Best Practices:**
-- Test interactions between related components
-- Use realistic test data
-- Focus on the integration points
-- Ensure components work together as expected
+### Do's and Don'ts
 
-**Example:**
+✅ **Do:**
+- Test interactions between components
+- Use real implementations when appropriate
+- Focus on critical paths through the system
+- Use test fixtures to set up a controlled environment
+
+❌ **Don't:**
+- Create excessively complex scenarios
+- Rely on external systems unless absolutely necessary
+- Write brittle tests that break with minor changes
+
+### Example Integration Test
 
 ```swift
-func testImageCaptureAndProcessing() throws {
+func testHDRPipelineProcessing() {
     // Arrange
-    let camera = MockCamera()
-    let processor = HDRProcessor()
-    let pipeline = ProcessingPipeline(camera: camera, processor: processor)
+    let fixture = createFixture()
+    let images = loadTestImages(count: 3, from: fixture)
+    let pipeline = createPipeline()
     
     // Act
-    let result = try pipeline.captureAndProcessHDR(frameCount: 3)
+    let result = pipeline.process(images: images)
     
     // Assert
-    XCTAssertNotNil(result.finalImage)
-    XCTAssertEqual(result.metadata.frameCount, 3)
-    // Additional assertions...
+    XCTAssertNotNil(result.finalImage, "Pipeline should produce a final image")
+    XCTAssertEqual(result.metadata["processed"], true, "Metadata should indicate processing")
 }
 ```
 
-### Visual Tests
+## Visual Testing Guidelines
 
-Visual tests verify that image processing operations produce the expected visual results.
+Visual tests verify that image processing operations produce the expected visual output.
 
-**Best Practices:**
-- Use the VisualTestUtility for image comparisons
-- Include reference images in the test resources
-- Set appropriate tolerance values for pixel comparison
-- Generate visual diffs for debugging failed tests
+### Do's and Don'ts
 
-**Example:**
+✅ **Do:**
+- Compare against reference images
+- Use small, representative test images
+- Set appropriate tolerance levels for comparisons
+- Include test patterns that verify specific aspects
+
+❌ **Don't:**
+- Use excessively large test images
+- Set tolerance too low (causing flaky tests) or too high (missing issues)
+- Compare images with different dimensions or formats
+
+### Example Visual Test
 
 ```swift
-func testToneMapping_WithHighDynamicRangeImage_ProducesExpectedResult() throws {
+func testToneMapping() throws {
     // Arrange
-    let hdrImage = try loadTestImage("hdr_test_image")
+    let input = try VisualTestUtility.generateHDRTestImage(width: 256, height: 256)
     let toneMapper = HDRToneMapper()
     
     // Act
-    let mappedImage = toneMapper.apply(to: hdrImage)
+    let result = toneMapper.process(input)
     
     // Assert
     try VisualTestUtility.compareImages(
-        actual: mappedImage,
+        actual: result,
         expected: "tone_mapped_reference",
-        tolerance: 0.02,
-        saveDiffOnFailure: true
+        tolerance: 0.02
     )
 }
 ```
 
-### Performance Tests
+## Performance Testing Guidelines
 
 Performance tests verify that operations meet performance requirements.
 
-**Best Practices:**
-- Use PerformanceTestUtility for consistent measurements
-- Include baseline values for comparison
-- Set appropriate deviation thresholds
-- Test with realistic data sizes
+### Do's and Don'ts
 
-**Example:**
+✅ **Do:**
+- Set realistic baseline values
+- Allow for reasonable deviation (typically 10-20%)
+- Use representative, real-world sized inputs
+- Test on consistent hardware configurations
+
+❌ **Don't:**
+- Set overly strict performance requirements
+- Measure operations with inconsistent timing
+- Ignore memory usage
+- Create tests that are too sensitive to hardware variations
+
+### Example Performance Test
 
 ```swift
-func testAlignmentPerformance() throws {
+func testMergePerformance() throws {
     // Arrange
-    let images = try loadTestImages(count: 8, size: CGSize(width: 2048, height: 1536))
-    let aligner = HDRAligner()
+    let images = try loadTestImages(count: 8)
+    let merger = HDRMerger()
     
     // Act & Assert
     try measureExecutionTime(
-        name: "hdr_alignment_8_frames",
-        baselineValue: 200.0,  // 200ms baseline
+        name: "hdr_merge_8_images",
+        baselineValue: 150.0,  // 150ms baseline
         acceptableDeviation: 0.2  // 20% deviation allowed
     ) {
-        _ = try aligner.alignImages(images)
+        _ = merger.mergeImages(images)
     }
 }
 ```
 
-### Metal Tests
+## Metal Testing Guidelines
 
-Metal tests verify GPU-accelerated code works correctly.
+Metal tests verify that GPU-accelerated code works correctly.
 
-**Best Practices:**
-- Use MetalTestUtility for shader testing
-- Include both functional and performance tests
-- Test with different input sizes
-- Verify results against CPU implementations when possible
+### Do's and Don'ts
 
-**Example:**
+✅ **Do:**
+- Verify results against CPU implementations
+- Test with various input sizes and configurations
+- Handle devices where Metal is not available
+- Use appropriate tolerances for floating-point comparisons
+
+❌ **Don't:**
+- Assume Metal is always available
+- Compare CPU and GPU results with exact equality
+- Ignore memory cleanup for GPU resources
+- Create tests that require specific GPU hardware
+
+### Example Metal Test
 
 ```swift
 func testNoiseReductionShader() throws {
     // Arrange
     let metalUtil = try createMetalTestUtility()
-    let pipelineState = try metalUtil.createComputePipelineState(functionName: "denoise_shader")
+    let pipeline = try metalUtil.createComputePipelineState(functionName: "denoise")
     
-    // Create test data
-    let inputData: [Float] = createNoisyTestData(width: 512, height: 512)
+    let inputData: [Float] = createNoiseTestPattern(size: 64)
+    let expectedData: [Float] = computeExpectedResult(inputData)
+    
     let inputBuffer = try metalUtil.createBuffer(from: inputData)
-    
-    let outputBuffer = try metalUtil.createBuffer(
-        count: inputData.count,
-        type: Float.self
-    )
+    let outputBuffer = try metalUtil.createBuffer(count: inputData.count, type: Float.self)
     
     // Act
-    try metalUtil.runComputeShader2D(
-        pipelineState: pipelineState,
+    try metalUtil.runComputeShader1D(
+        pipelineState: pipeline,
         inputBuffers: [inputBuffer],
         outputBuffers: [outputBuffer],
-        width: 512,
-        height: 512
+        count: inputData.count
     )
     
     // Assert
     let result: [Float] = try metalUtil.extractData(from: outputBuffer, count: inputData.count)
-    let expectedOutput = calculateExpectedOutput(from: inputData)
-    
-    try metalUtil.verifyArraysEqual(
-        result: result,
-        expected: expectedOutput,
-        tolerance: 0.001
-    )
+    try metalUtil.verifyArraysEqual(result: result, expected: expectedData, tolerance: 0.001)
 }
 ```
 
-## Using Test Utilities
+## Mocking Best Practices
+
+Mocks allow testing components in isolation by simulating dependencies.
+
+### Do's and Don'ts
+
+✅ **Do:**
+- Create focused mocks that only implement what's needed
+- Use protocols to define interfaces for easy mocking
+- Verify important interactions with mocks
+- Keep mocks simple and maintainable
+
+❌ **Don't:**
+- Create overly complex mock implementations
+- Mock everything by default
+- Tightly couple tests to mock implementation details
+- Use mocks when real implementations are simple and deterministic
+
+### Example Mock
+
+```swift
+// Protocol defining the interface
+protocol ImageAligner {
+    func alignImages(_ images: [CGImage]) -> [CGImage]
+}
+
+// Mock implementation for testing
+class MockImageAligner: ImageAligner {
+    var alignImagesCalled = false
+    var lastImagesInput: [CGImage]? = nil
+    var alignedImagesResult: [CGImage] = []
+    
+    func alignImages(_ images: [CGImage]) -> [CGImage] {
+        alignImagesCalled = true
+        lastImagesInput = images
+        return alignedImagesResult.isEmpty ? images : alignedImagesResult
+    }
+}
+
+// Usage in a test
+func testHDRPipelineWithMockAligner() {
+    // Arrange
+    let mockAligner = MockImageAligner()
+    let expectedResult = createTestImage()
+    mockAligner.alignedImagesResult = [expectedResult]
+    
+    let pipeline = HDRPipeline(aligner: mockAligner)
+    let inputImages = [createTestImage(), createTestImage()]
+    
+    // Act
+    let result = pipeline.process(images: inputImages)
+    
+    // Assert
+    XCTAssertTrue(mockAligner.alignImagesCalled, "Aligner should be called")
+    XCTAssertEqual(mockAligner.lastImagesInput?.count, 2, "Aligner should receive the input images")
+}
+```
+
+## Test Utilities
+
+The HDR+ Swift project provides several utilities to simplify testing:
 
 ### TestConfig
 
-Use TestConfig to access standardized paths and configuration settings.
+Centralized configuration for all tests.
 
 ```swift
 // Access test resources directory
@@ -276,241 +321,161 @@ let resourceURL = TestConfig.shared.testResourcesDir.appendingPathComponent("ima
 
 // Check verbose logging setting
 if TestConfig.shared.verboseLogging {
-    print("Running test with parameters: \(parameters)")
+    print("Debug info: \(debugInfo)")
 }
 ```
 
 ### TestFixtureUtility
 
-Use TestFixtureUtility to create and manage test environments.
+Manages test environments with temporary directories and files.
 
 ```swift
-// Create a fixture in setUp
-func setUp() {
-    super.setUp()
-    testFixture = try createFixture()
+func testWithFixture() {
+    // Create a test fixture
+    let fixture = createFixture()
     
     // Create test files
-    try testFixture.createFile(
-        at: "test.json",
-        content: """
-        {
-            "key": "value"
-        }
-        """
-    )
-}
-
-// Use the fixture in tests
-func testFileProcessing() throws {
-    let fileURL = testFixture.url(for: "test.json")
-    let processor = JSONProcessor()
-    let result = try processor.process(fileURL: fileURL)
-    XCTAssertEqual(result["key"] as? String, "value")
+    let configFile = fixture.createJSONFile(named: "config.json", object: ["key": "value"])
+    
+    // Use the fixture in the test
+    let result = processConfigFile(configFile)
+    
+    // Fixture is automatically cleaned up when it goes out of scope
 }
 ```
 
 ### VisualTestUtility
 
-Use VisualTestUtility for image comparison tests.
+Provides tools for comparing images and verifying visual output.
 
 ```swift
-// Compare an image with a reference
-func testImageFilter() throws {
-    let inputImage = try loadTestImage(named: "test_image")
-    let filteredImage = applyFilter(to: inputImage)
+func testImageProcessing() throws {
+    // Generate or load a test image
+    let input = try VisualTestUtility.generateTestImage(width: 512, height: 512)
     
+    // Process the image
+    let result = processImage(input)
+    
+    // Compare with a reference image
     try VisualTestUtility.compareImages(
-        actual: filteredImage,
-        expected: "filtered_reference",
-        tolerance: 0.01,
-        saveDiffOnFailure: true
+        actual: result,
+        expected: "reference_image",
+        tolerance: 0.02
     )
-}
-
-// Generate a test pattern
-func testWithGeneratedPattern() throws {
-    let testPattern = try VisualTestUtility.generateGradientImage(
-        size: CGSize(width: 512, height: 512),
-        startColor: .black,
-        endColor: .white
-    )
-    
-    let result = applyFilter(to: testPattern)
-    
-    // Verify properties of the result
-    XCTAssertEqual(result.size, testPattern.size)
-    // Additional assertions...
 }
 ```
 
 ### PerformanceTestUtility
 
-Use PerformanceTestUtility to measure and track performance.
+Measures execution time and memory usage.
 
 ```swift
-// Measure execution time
-func testProcessingTime() throws {
-    let image = try loadTestImage(named: "high_res")
-    
+func testPerformanceCriticalOperation() throws {
+    // Measure execution time
     try measureExecutionTime(
-        name: "noise_reduction_4k",
-        baselineValue: 100.0, // 100ms
-        acceptableDeviation: 0.1 // 10%
+        name: "critical_operation",
+        baselineValue: 100.0,  // 100ms
+        acceptableDeviation: 0.15  // 15%
     ) {
-        _ = processor.applyNoiseReduction(to: image)
+        performCriticalOperation()
     }
-}
-
-// Measure memory usage
-func testMemoryUsage() throws {
-    let images = try loadTestImages(count: 10)
     
+    // Measure memory usage
     try measureMemoryUsage(
-        name: "hdr_merge_memory",
-        baselineValue: 50.0, // 50MB
-        acceptableDeviation: 0.2 // 20%
+        name: "critical_operation_memory",
+        baselineValue: 50.0  // 50MB
     ) {
-        _ = merger.mergeImages(images)
+        performCriticalOperation()
     }
 }
 ```
 
 ### ParameterizedTestUtility
 
-Use ParameterizedTestUtility for data-driven tests.
+Enables data-driven testing with multiple input sets.
 
 ```swift
-// Test with multiple inputs
 func testExposureAdjustment() throws {
+    // Define test cases
     let testCases = [
         (input: 0.0, expected: 1.0),
         (input: 1.0, expected: 2.0),
         (input: -1.0, expected: 0.5)
     ]
     
-    try runParameterizedTest(with: testCases) { input, expected, index in
+    // Run test for each case
+    try runParameterizedTest(with: testCases) { input, expected, _ in
         let result = calculateExposureValue(input)
         XCTAssertEqual(result, expected, accuracy: 0.001)
     }
 }
+```
 
-// Load test data from JSON
-func testWithJsonData() throws {
-    let testData: [TestCase] = try loadTestData(fromJSON: "exposure_test_cases")
+### MetalTestUtility
+
+Simplifies testing Metal shaders and compute pipelines.
+
+```swift
+func testMetalShader() throws {
+    // Create the utility and pipeline
+    let metalUtil = try createMetalTestUtility()
+    let pipeline = try metalUtil.createComputePipelineState(functionName: "testShader")
     
-    try runParameterizedTest(with: testData) { testCase, index in
-        let result = calculator.calculate(ev: testCase.input)
-        XCTAssertEqual(result, testCase.expected, accuracy: 0.01)
-    }
+    // Create input/output buffers
+    let inputBuffer = try metalUtil.createBuffer(from: inputData)
+    let outputBuffer = try metalUtil.createBuffer(count: outputSize, type: Float.self)
+    
+    // Run the shader
+    try metalUtil.runComputeShader1D(
+        pipelineState: pipeline,
+        inputBuffers: [inputBuffer],
+        outputBuffers: [outputBuffer],
+        count: inputData.count
+    )
+    
+    // Verify results
+    let result: [Float] = try metalUtil.extractData(from: outputBuffer, count: outputSize)
+    try metalUtil.verifyArraysEqual(result: result, expected: expectedOutput, tolerance: 0.001)
 }
 ```
 
-## Test Data Management
+## Continuous Integration
 
-### Organization
+The HDR+ Swift project uses GitHub Actions for continuous integration testing.
 
-- Store test data in the `TestResources` directory
-- Organize by test type and feature
-- Use descriptive file names
+### Key CI Features
 
-### Resource Types
+- **Automated Test Runs**: Tests run automatically on pull requests and pushes to main branches.
+- **Test Matrix**: Tests run on multiple platforms and configurations.
+- **Test Reports**: Results are reported as GitHub check status and detailed reports.
+- **Flaky Test Detection**: Tests that pass inconsistently are flagged for review.
+- **Performance Tracking**: Performance metrics are tracked over time to detect regressions.
 
-- **Images**: Store in PNG format for lossless quality
-- **JSON**: Use for structured test data and configurations
-- **CSV**: Use for tabular test data
-- **Raw**: Use for camera sensor data
+### Pull Request Workflow
 
-### Generation
+1. Create a pull request
+2. CI automatically runs all relevant tests
+3. Test results appear as checks on the PR
+4. Fix any issues identified by tests
+5. Once all tests pass, the PR can be merged
 
-- Use `Scripts/generate-test-data.sh` to create test patterns and sample data
-- Document the source and purpose of each test resource
-- Version control test data alongside code
+### Local Test Verification
 
-## CI Integration
+Before submitting a PR, run tests locally:
 
-### Test Selection
+```bash
+# Run all tests
+Scripts/run-tests.sh
 
-- Tag tests for selective execution:
-  - `@slow` for time-consuming tests
-  - `@requires_gpu` for tests needing GPU
-  - `@visual` for visual comparison tests
+# Run specific test types
+Scripts/run-tests.sh --unit-only
+Scripts/run-tests.sh --integration-only
+Scripts/run-tests.sh --visual-only
+Scripts/run-tests.sh --performance-only
+Scripts/run-tests.sh --metal-only
 
-### Troubleshooting CI Failures
-
-- Check test logs in the TestResults directory
-- Review visual diffs for failed visual tests
-- Compare performance metrics against baselines
-- Look for environment-specific issues
-
-## Debugging Tests
-
-### Enabling Verbose Output
-
-```swift
-// Enable verbose logging for a specific test
-TestConfig.shared.verboseLogging = true
+# Filter tests by name
+Scripts/run-tests.sh --regex "HDRMerge"
 ```
 
-### Inspecting Visual Diffs
-
-- Visual test failures generate diff images in the `TestResults/VisualTests/Diffs` directory
-- Red pixels indicate areas where the actual image is darker
-- Blue pixels indicate areas where the actual image is lighter
-- The greater the color intensity, the larger the difference
-
-### Analyzing Performance Issues
-
-- Check the performance history in `TestResults/Performance/History`
-- Look for gradual performance degradation over time
-- Identify sudden changes that might indicate a regression
-
-## Common Pitfalls
-
-### Flaky Tests
-
-**Causes:**
-- Dependency on system state or timing
-- Race conditions
-- Resource contention
-
-**Solutions:**
-- Ensure test isolation
-- Use deterministic input data
-- Implement retry mechanisms for external dependencies
-
-### Slow Tests
-
-**Causes:**
-- Processing large datasets
-- Inefficient test setup
-- Unnecessary operations
-
-**Solutions:**
-- Use smaller test data when possible
-- Share setup across multiple tests where appropriate
-- Mark slow tests and run them less frequently
-
-### Brittle Visual Tests
-
-**Causes:**
-- Pixel-perfect comparison with zero tolerance
-- Platform-specific rendering differences
-- Dependency on external rendering engines
-
-**Solutions:**
-- Use appropriate tolerance values
-- Focus comparisons on relevant regions
-- Test image properties rather than exact pixels when appropriate
-
-### Resource Leaks
-
-**Causes:**
-- Unclosed files or streams
-- Unfreed memory or GPU resources
-- Improperly terminated processes
-
-**Solutions:**
-- Use defer blocks or try-with-resources patterns
-- Implement proper tearDown methods
-- Use memory and resource monitoring in CI 
+Following these guidelines will help maintain high-quality tests that effectively validate the HDR+ Swift project functionality, performance, and visual output. 
