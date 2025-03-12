@@ -6,6 +6,27 @@ This document provides documentation for the CI/CD system used in the HDR+ Swift
 
 For GitHub Actions workflow development best practices, please refer to the [GitHub Actions Guide](GITHUB_ACTIONS_GUIDE.md).
 
+## Development Environment Setup
+
+### Prerequisites
+
+1. **Xcode Installation**:
+   - Full Xcode.app installation (NOT just Command Line Tools)
+   - Xcode 15.0+ is required (see README.md for specific version requirements)
+   - Accept Xcode license: `sudo xcodebuild -license accept`
+   - Run first-launch setup: `xcodebuild -runFirstLaunch`
+
+2. **Environment Configuration**:
+   - Ensure xcode-select points to the Xcode.app installation:
+     ```bash
+     sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+     ```
+   - Verify configuration: `xcode-select --print-path`
+
+3. **Test Scheme Setup**:
+   - Run the included setup script: `Scripts/setup-test-scheme.sh`
+   - This creates an Xcode test scheme configured for running tests
+
 ## Core Workflows
 
 ### Main CI Workflow (main.yml)
@@ -62,7 +83,43 @@ Handles ongoing maintenance like README badge updates.
   - Idempotent badge management (prevents duplicate badges)
   - Skips CI on badge commits to avoid unnecessary runs
 
+## Running Tests Locally
+
+The project includes comprehensive test scripts that can be used to run tests locally:
+
+```bash
+# Run all tests
+Scripts/run-tests.sh --verbose
+
+# Run specific test types
+Scripts/run-tests.sh --unit --verbose
+Scripts/run-tests.sh --integration --verbose
+Scripts/run-tests.sh --visual --verbose
+Scripts/run-tests.sh --performance --verbose
+
+# Run tests with a specific filter
+Scripts/run-tests.sh --filter "TestName" --verbose
+
+# Generate coverage reports
+Scripts/run-tests.sh --coverage --verbose
+```
+
 ## Troubleshooting Guide
+
+### Test Configuration Issues
+
+**Problem**: "Scheme X is not currently configured for the test action" error.
+
+**Solution**:
+1. Open the project in Xcode: `open burstphoto.xcodeproj`
+2. Go to Product > Scheme > Edit Scheme
+3. Select the scheme you're trying to use
+4. Click on the "Test" action in the sidebar
+5. Add the appropriate test targets
+6. Save the scheme as shared
+
+**Alternative Solution**:
+- Run `Scripts/setup-test-scheme.sh` to create a properly configured test scheme
 
 ### Swift Warning Tracker Issues
 
@@ -143,14 +200,11 @@ Located at `.github/workflow-config.yml`, this file contains shared configuratio
 The configuration is loaded by the `load-config` action and makes values available as outputs. Example:
 
 ```yaml
-
 - name: Load configuration
-
   id: load-config
   uses: ./.github/actions/load-config
 
 - name: Use configuration values
-
   run: |
     echo "Project: ${{ steps.load-config.outputs.project }}"
     echo "Main branch: ${{ steps.load-config.outputs.main_branch }}"
@@ -184,3 +238,7 @@ Loads shared configuration values.
 3. **Add Error Handling**: Include fallbacks and error handling for critical steps
 4. **Avoid Pipes for Large Outputs**: Use file redirection instead of pipes for large command outputs
 5. **Be Explicit with Permissions**: Set minimum required permissions for each workflow
+6. **Ensure Test Environment Consistency**: Local and CI environments should match
+   - Full Xcode installation required
+   - Proper test target and scheme configuration
+   - Test dependencies properly installed

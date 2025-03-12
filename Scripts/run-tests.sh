@@ -26,7 +26,7 @@ RETRY_COUNT=2
 GENERATE_REPORTS=1
 GENERATE_COVERAGE=0
 TEST_FILTER=""
-TEST_SCHEME="HDRPlus"
+TEST_SCHEME="gui"
 DEVICE="platform=macOS"
 
 # Colors for pretty output

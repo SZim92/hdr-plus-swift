@@ -59,3 +59,20 @@ coverage/
 htmlcov/
 test-results/
 .qodo
+
+# Additional test artifacts
+TestResults/
+PerformanceResults/
+FailedTestArtifacts/
+*/VisualTests/reports/
+*/UnitTests/reports/
+*/TestResources/generated/
+*.xcresult
+# Keep test reference images
+!*/TestResources/reference_images/
+
+# Temporary scheme configurations
+*.xcscheme.backup
+
+# CI Fix Plan temporary files
+CI_FIX_PLAN_UPDATED.md
