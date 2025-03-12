@@ -1,291 +1,243 @@
 import Foundation
 import XCTest
 
-/// TestConfig provides centralized configuration for test parameters and settings
-/// across the HDR+ Swift test suite.
-struct TestConfig {
-    /// Singleton instance of the test configuration
-    static let shared = TestConfig()
+/// TestConfig provides centralized configuration for all tests in the HDR+ Swift project.
+/// This allows for consistent test behavior and easier maintenance.
+public class TestConfig {
     
-    // MARK: - Environment Variables
+    // MARK: - Singleton
     
-    /// Check if a specific environment variable is set
-    /// - Parameter name: The name of the environment variable
-    /// - Returns: True if the environment variable is set and not empty
-    static func hasEnvironmentVariable(_ name: String) -> Bool {
-        guard let value = ProcessInfo.processInfo.environment[name] else {
-            return false
-        }
-        return !value.isEmpty
-    }
+    /// Shared instance of the test configuration
+    public static let shared = TestConfig()
     
-    /// Get the value of an environment variable
-    /// - Parameter name: The name of the environment variable
-    /// - Returns: The value of the environment variable, or nil if not set
-    static func environmentVariable(_ name: String) -> String? {
-        return ProcessInfo.processInfo.environment[name]
-    }
+    // MARK: - Properties
     
-    /// Get the value of an environment variable as a Boolean
-    /// - Parameter name: The name of the environment variable
-    /// - Parameter defaultValue: The default value to return if the environment variable is not set
-    /// - Returns: The Boolean value of the environment variable, or the default value if not set
-    static func boolEnvironmentVariable(_ name: String, defaultValue: Bool = false) -> Bool {
-        guard let value = environmentVariable(name)?.lowercased() else {
-            return defaultValue
-        }
-        return ["true", "yes", "1"].contains(value)
-    }
+    /// Base directory for test resources
+    public let resourcesDirectory: URL
     
-    /// Get the value of an environment variable as an Int
-    /// - Parameter name: The name of the environment variable
-    /// - Parameter defaultValue: The default value to return if the environment variable is not set
-    /// - Returns: The Int value of the environment variable, or the default value if not set
-    static func intEnvironmentVariable(_ name: String, defaultValue: Int) -> Int {
-        guard let value = environmentVariable(name), let intValue = Int(value) else {
-            return defaultValue
-        }
-        return intValue
-    }
+    /// Directory for reference images used in visual tests
+    public let referenceImagesDirectory: URL
     
-    /// Get the value of an environment variable as a Double
-    /// - Parameter name: The name of the environment variable
-    /// - Parameter defaultValue: The default value to return if the environment variable is not set
-    /// - Returns: The Double value of the environment variable, or the default value if not set
-    static func doubleEnvironmentVariable(_ name: String, defaultValue: Double) -> Double {
-        guard let value = environmentVariable(name), let doubleValue = Double(value) else {
-            return defaultValue
-        }
-        return doubleValue
-    }
+    /// Directory for failed test images
+    public let failedImagesDirectory: URL
     
-    // MARK: - Test Mode Configuration
+    /// Directory for difference images generated during visual tests
+    public let diffImagesDirectory: URL
     
-    /// Whether the tests are running in CI mode
-    let isRunningInCI: Bool
+    /// Directory for test fixtures
+    public let fixturesDirectory: URL
     
-    /// Whether test reports should be generated
-    let shouldGenerateReports: Bool
+    /// Directory for performance test results
+    public let performanceResultsDirectory: URL
     
-    /// Whether verbose logging is enabled
-    let verboseLogging: Bool
+    /// Directory for temporary test files
+    public let temporaryDirectory: URL
     
-    // MARK: - Visual Test Configuration
+    /// Default tolerance for image comparison in visual tests
+    public let defaultImageComparisonTolerance: Double
     
-    /// The base directory for visual test resources
-    let visualTestResourcesDir: URL
+    /// Whether to save failed images in visual tests
+    public let saveFailedImages: Bool
     
-    /// The directory for reference images
-    let referenceImagesDir: URL
+    /// Whether to generate difference images in visual tests
+    public let generateDiffImages: Bool
     
-    /// The directory for failed test artifacts
-    let failedTestArtifactsDir: URL
+    /// Whether to automatically update reference images when visual tests fail
+    public let updateReferenceImagesAutomatically: Bool
     
-    /// The tolerance for visual image comparisons (0.0-1.0)
-    let visualTestTolerance: Double
+    /// Whether tests are running in CI environment
+    public let isRunningInCI: Bool
     
-    /// Whether to automatically update reference images when they don't exist
-    let autoUpdateReferenceImages: Bool
+    /// Whether to enable verbose logging in tests
+    public let verboseLogging: Bool
     
-    /// Whether to save diff images for failed visual tests
-    let saveDiffImages: Bool
+    /// Whether to use accelerated Metal testing when available
+    public let useMetalWhenAvailable: Bool
     
-    // MARK: - Performance Test Configuration
+    /// Maximum memory usage allowed for performance tests (in MB)
+    public let maxMemoryUsageMB: Int
     
-    /// The base directory for performance test resources
-    let performanceTestResourcesDir: URL
+    /// Maximum execution time allowed for performance tests (in seconds)
+    public let maxExecutionTimeSeconds: Double
     
-    /// The number of iterations to run for performance tests
-    let performanceTestIterations: Int
+    /// Number of warm-up iterations for performance tests
+    public let performanceTestWarmupIterations: Int
     
-    /// The tolerance for performance metrics (0.0-1.0)
-    let performanceTestTolerance: Double
-    
-    /// Whether to track performance history
-    let trackPerformanceHistory: Bool
-    
-    // MARK: - Metal Test Configuration
-    
-    /// Whether to skip Metal tests if Metal is not available
-    let skipMetalTestsIfUnavailable: Bool
-    
-    /// Whether to run Metal tests even on simulators (where they might crash)
-    let runMetalTestsOnSimulator: Bool
-    
-    // MARK: - Test Fixtures Configuration
-    
-    /// The base directory for test fixtures
-    let testFixturesDir: URL
-    
-    /// Whether to clean up test fixtures after tests
-    let cleanupTestFixtures: Bool
-    
-    // MARK: - Test Input Resources
-    
-    /// The base directory for test input resources
-    let testInputsDir: URL
-    
-    /// The directory for pattern test images
-    let patternImagesDir: URL
-    
-    /// The directory for RAW test images
-    let rawImagesDir: URL
-    
-    /// The directory for burst sequence test images
-    let burstImagesDir: URL
-    
-    // MARK: - Flaky Test Tracking
-    
-    /// Whether to track flaky tests
-    let trackFlakyTests: Bool
-    
-    /// The number of retries for flaky tests
-    let flakyTestRetries: Int
-    
-    /// The directory for flaky test tracking data
-    let flakyTestsDir: URL
+    /// Number of measurement iterations for performance tests
+    public let performanceTestMeasurementIterations: Int
     
     // MARK: - Initialization
     
     private init() {
-        // Test mode configuration
-        self.isRunningInCI = TestConfig.boolEnvironmentVariable("HDR_TEST_CI_MODE", defaultValue: false)
-        self.shouldGenerateReports = TestConfig.boolEnvironmentVariable("HDR_TEST_GENERATE_REPORTS", defaultValue: true)
-        self.verboseLogging = TestConfig.boolEnvironmentVariable("HDR_TEST_VERBOSE", defaultValue: false)
+        // Get environment variables if they exist
+        let env = ProcessInfo.processInfo.environment
         
-        // Base directories
-        let baseDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("HDRTests")
-        let baseResourcesDir = URL(fileURLWithPath: #file)
-            .deletingLastPathComponent()
-            .appendingPathComponent("TestResources")
+        // Determine base test directory
+        let baseTestDirectory: URL
+        if let testDataPath = env["HDR_TEST_DATA_PATH"] {
+            baseTestDirectory = URL(fileURLWithPath: testDataPath)
+        } else {
+            baseTestDirectory = URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("HDRPlusTests")
+        }
         
-        // Visual test configuration
-        self.visualTestResourcesDir = baseResourcesDir.appendingPathComponent("VisualTests")
-        self.referenceImagesDir = visualTestResourcesDir.appendingPathComponent("ReferenceImages")
-        self.failedTestArtifactsDir = baseDir.appendingPathComponent("FailedTestArtifacts")
-        self.visualTestTolerance = TestConfig.doubleEnvironmentVariable("HDR_VISUAL_TEST_TOLERANCE", defaultValue: 0.02)
-        self.autoUpdateReferenceImages = TestConfig.boolEnvironmentVariable("HDR_AUTO_UPDATE_REFERENCE_IMAGES", defaultValue: false)
-        self.saveDiffImages = TestConfig.boolEnvironmentVariable("HDR_SAVE_DIFF_IMAGES", defaultValue: true)
+        // Set up directory paths
+        resourcesDirectory = baseTestDirectory.appendingPathComponent("Resources")
+        referenceImagesDirectory = baseTestDirectory.appendingPathComponent("ReferenceImages")
+        failedImagesDirectory = baseTestDirectory.appendingPathComponent("FailedImages")
+        diffImagesDirectory = baseTestDirectory.appendingPathComponent("DiffImages")
+        fixturesDirectory = baseTestDirectory.appendingPathComponent("Fixtures")
+        performanceResultsDirectory = baseTestDirectory.appendingPathComponent("PerformanceResults")
+        temporaryDirectory = baseTestDirectory.appendingPathComponent("Temp")
         
-        // Performance test configuration
-        self.performanceTestResourcesDir = baseResourcesDir.appendingPathComponent("PerformanceTests")
-        self.performanceTestIterations = TestConfig.intEnvironmentVariable("HDR_PERFORMANCE_TEST_ITERATIONS", defaultValue: 10)
-        self.performanceTestTolerance = TestConfig.doubleEnvironmentVariable("HDR_PERFORMANCE_TEST_TOLERANCE", defaultValue: 0.2)
-        self.trackPerformanceHistory = TestConfig.boolEnvironmentVariable("HDR_TRACK_PERFORMANCE_HISTORY", defaultValue: true)
+        // Set up visual test configurations
+        defaultImageComparisonTolerance = Double(env["HDR_IMAGE_COMPARISON_TOLERANCE"] ?? "0.01") ?? 0.01
+        saveFailedImages = env["HDR_SAVE_FAILED_IMAGES"]?.lowercased() != "false"
+        generateDiffImages = env["HDR_GENERATE_DIFF_IMAGES"]?.lowercased() != "false"
+        updateReferenceImagesAutomatically = env["HDR_UPDATE_REFERENCE_IMAGES"]?.lowercased() == "true"
         
-        // Metal test configuration
-        self.skipMetalTestsIfUnavailable = TestConfig.boolEnvironmentVariable("HDR_SKIP_METAL_TESTS_IF_UNAVAILABLE", defaultValue: true)
-        self.runMetalTestsOnSimulator = TestConfig.boolEnvironmentVariable("HDR_RUN_METAL_TESTS_ON_SIMULATOR", defaultValue: false)
+        // Set up general test configurations
+        isRunningInCI = env["CI"]?.lowercased() == "true"
+        verboseLogging = env["HDR_VERBOSE_LOGGING"]?.lowercased() == "true"
+        useMetalWhenAvailable = env["HDR_USE_METAL"]?.lowercased() != "false"
         
-        // Test fixtures configuration
-        self.testFixturesDir = baseDir.appendingPathComponent("TestFixtures")
-        self.cleanupTestFixtures = TestConfig.boolEnvironmentVariable("HDR_CLEANUP_TEST_FIXTURES", defaultValue: true)
+        // Set up performance test configurations
+        maxMemoryUsageMB = Int(env["HDR_MAX_MEMORY_USAGE_MB"] ?? "1024") ?? 1024
+        maxExecutionTimeSeconds = Double(env["HDR_MAX_EXECUTION_TIME_SECONDS"] ?? "10.0") ?? 10.0
+        performanceTestWarmupIterations = Int(env["HDR_PERFORMANCE_WARMUP_ITERATIONS"] ?? "3") ?? 3
+        performanceTestMeasurementIterations = Int(env["HDR_PERFORMANCE_MEASUREMENT_ITERATIONS"] ?? "10") ?? 10
         
-        // Test input resources
-        self.testInputsDir = baseResourcesDir.appendingPathComponent("TestInputs")
-        self.patternImagesDir = testInputsDir.appendingPathComponent("Patterns")
-        self.rawImagesDir = testInputsDir.appendingPathComponent("RAW")
-        self.burstImagesDir = testInputsDir.appendingPathComponent("Bursts")
-        
-        // Flaky test tracking
-        self.trackFlakyTests = TestConfig.boolEnvironmentVariable("HDR_TRACK_FLAKY_TESTS", defaultValue: true)
-        self.flakyTestRetries = TestConfig.intEnvironmentVariable("HDR_FLAKY_TEST_RETRIES", defaultValue: 3)
-        self.flakyTestsDir = baseDir.appendingPathComponent("FlakyTests")
+        // Create directories if they don't exist
+        createDirectories()
     }
     
-    // MARK: - Helper Methods
+    // MARK: - Directory Management
     
-    /// Creates all required directories for the test configuration
-    func createDirectories() {
+    /// Creates the necessary directories for tests
+    public func createDirectories() {
         let fileManager = FileManager.default
         let directories = [
-            visualTestResourcesDir,
-            referenceImagesDir,
-            failedTestArtifactsDir,
-            performanceTestResourcesDir,
-            testFixturesDir,
-            testInputsDir,
-            patternImagesDir,
-            rawImagesDir,
-            burstImagesDir,
-            flakyTestsDir
+            resourcesDirectory,
+            referenceImagesDirectory,
+            failedImagesDirectory,
+            diffImagesDirectory,
+            fixturesDirectory,
+            performanceResultsDirectory,
+            temporaryDirectory
         ]
         
         for directory in directories {
             do {
                 if !fileManager.fileExists(atPath: directory.path) {
-                    try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+                    try fileManager.createDirectory(
+                        at: directory,
+                        withIntermediateDirectories: true,
+                        attributes: nil
+                    )
                 }
             } catch {
-                print("Warning: Failed to create directory at \(directory.path): \(error)")
+                print("Error creating directory at \(directory.path): \(error)")
             }
         }
     }
     
-    /// Gets the reference image URL for a given test case
-    /// - Parameters:
-    ///   - name: The name of the reference image
-    ///   - testCase: The test case that's requesting the reference image
-    /// - Returns: The URL to the reference image
-    func referenceImageURL(named name: String, for testCase: XCTestCase) -> URL {
-        let className = String(describing: type(of: testCase))
-        return referenceImagesDir
-            .appendingPathComponent(className)
-            .appendingPathComponent("\(name).png")
+    /// Cleans up temporary test directories
+    public func cleanupTemporaryDirectories() {
+        let fileManager = FileManager.default
+        do {
+            if fileManager.fileExists(atPath: temporaryDirectory.path) {
+                try fileManager.removeItem(at: temporaryDirectory)
+                try fileManager.createDirectory(
+                    at: temporaryDirectory,
+                    withIntermediateDirectories: true,
+                    attributes: nil
+                )
+            }
+        } catch {
+            print("Error cleaning up temporary directory: \(error)")
+        }
     }
     
-    /// Gets the URL for a failed test artifact
+    // MARK: - Helper Methods
+    
+    /// Returns the reference image URL for a given test name
     /// - Parameters:
-    ///   - name: The name of the artifact
-    ///   - testCase: The test case that's requesting the artifact
-    /// - Returns: The URL to the artifact
-    func failedTestArtifactURL(named name: String, for testCase: XCTestCase) -> URL {
-        let className = String(describing: type(of: testCase))
-        return failedTestArtifactsDir
+    ///   - testName: The name of the test
+    ///   - testClass: The test class
+    /// - Returns: URL for the reference image
+    public func referenceImageURL(for testName: String, in testClass: XCTestCase.Type) -> URL {
+        let className = String(describing: testClass)
+        return referenceImagesDirectory
             .appendingPathComponent(className)
-            .appendingPathComponent("\(name)")
+            .appendingPathComponent("\(testName).png")
     }
     
-    /// Gets the URL for a test input resource
+    /// Returns the failed image URL for a given test name
+    /// - Parameters:
+    ///   - testName: The name of the test
+    ///   - testClass: The test class
+    /// - Returns: URL for the failed image
+    public func failedImageURL(for testName: String, in testClass: XCTestCase.Type) -> URL {
+        let className = String(describing: testClass)
+        return failedImagesDirectory
+            .appendingPathComponent(className)
+            .appendingPathComponent("\(testName).png")
+    }
+    
+    /// Returns the diff image URL for a given test name
+    /// - Parameters:
+    ///   - testName: The name of the test
+    ///   - testClass: The test class
+    /// - Returns: URL for the diff image
+    public func diffImageURL(for testName: String, in testClass: XCTestCase.Type) -> URL {
+        let className = String(describing: testClass)
+        return diffImagesDirectory
+            .appendingPathComponent(className)
+            .appendingPathComponent("\(testName).png")
+    }
+    
+    /// Returns a URL for a test resource
     /// - Parameter name: The name of the resource
-    /// - Returns: The URL to the resource
-    func testInputURL(named name: String) -> URL {
-        return testInputsDir.appendingPathComponent(name)
+    /// - Returns: URL for the resource
+    public func resourceURL(for name: String) -> URL {
+        return resourcesDirectory.appendingPathComponent(name)
     }
     
-    /// Gets the URL for a pattern image
-    /// - Parameter name: The name of the pattern image
-    /// - Returns: The URL to the pattern image
-    func patternImageURL(named name: String) -> URL {
-        return patternImagesDir.appendingPathComponent(name)
+    /// Returns a URL for a performance result file
+    /// - Parameters:
+    ///   - testName: The name of the performance test
+    ///   - testClass: The test class
+    /// - Returns: URL for the performance result
+    public func performanceResultURL(for testName: String, in testClass: XCTestCase.Type) -> URL {
+        let className = String(describing: testClass)
+        return performanceResultsDirectory
+            .appendingPathComponent(className)
+            .appendingPathComponent("\(testName).json")
     }
     
-    /// Gets the URL for a RAW image
-    /// - Parameter name: The name of the RAW image
-    /// - Returns: The URL to the RAW image
-    func rawImageURL(named name: String) -> URL {
-        return rawImagesDir.appendingPathComponent(name)
+    /// Logs a message if verbose logging is enabled
+    /// - Parameter message: The message to log
+    public func logVerbose(_ message: String) {
+        if verboseLogging {
+            print("[HDR+ Test] \(message)")
+        }
     }
     
-    /// Gets the URL for a burst sequence
-    /// - Parameter name: The name of the burst sequence
-    /// - Returns: The URL to the burst sequence directory
-    func burstSequenceURL(named name: String) -> URL {
-        return burstImagesDir.appendingPathComponent(name)
-    }
-    
-    /// Gets the URL for performance history data
-    /// - Parameter name: The name of the performance metric
-    /// - Returns: The URL to the performance history data
-    func performanceHistoryURL(named name: String) -> URL {
-        return performanceTestResourcesDir.appendingPathComponent("\(name)_history.json")
-    }
-    
-    /// Gets the URL for flaky test data
-    /// - Parameter testName: The name of the test
-    /// - Returns: The URL to the flaky test data
-    func flakyTestDataURL(named testName: String) -> URL {
-        return flakyTestsDir.appendingPathComponent("\(testName).json")
+    /// Gets a temporary directory for a specific test
+    /// - Parameters:
+    ///   - testName: The name of the test
+    ///   - testClass: The test class
+    /// - Returns: URL for the temporary directory
+    public func temporaryDirectory(for testName: String, in testClass: XCTestCase.Type) -> URL {
+        let className = String(describing: testClass)
+        let tempDir = temporaryDirectory
+            .appendingPathComponent(className)
+            .appendingPathComponent(testName)
+        
+        let fileManager = FileManager.default
+        try? fileManager.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        
+        return tempDir
     }
 }
 
