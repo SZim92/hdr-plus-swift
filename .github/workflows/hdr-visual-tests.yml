@@ -1,0 +1,244 @@
+name: HDR Visual Tests
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'Sources/**'
+      - 'Tests/**'
+      - '.github/workflows/hdr-visual-tests.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'Sources/**'
+      - 'Tests/**'
+      - '.github/workflows/hdr-visual-tests.yml'
+  workflow_dispatch:
+    inputs:
+      test_filter:
+        description: 'Test filter pattern (optional)'
+        required: false
+        default: ''
+      force_run:
+        description: 'Force run all tests regardless of changes'
+        required: false
+        default: 'false'
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    name: Preflight Check
+    runs-on: ubuntu-latest
+    outputs:
+      run_tests: ${{ steps.check-changes.outputs.run_tests }}
+    
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for accurate change detection
+      
+      - name: Check for HDR-related changes
+        id: check-changes
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.force_run }}" == "true" ]]; then
+            echo "Force run requested, running all tests"
+            echo "run_tests=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Check if this is a PR or a push
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            # For push events, compare with the previous commit
+            BASE_SHA=$(git rev-parse HEAD~1)
+            HEAD_SHA=$(git rev-parse HEAD)
+          fi
+          
+          echo "Comparing changes between $BASE_SHA and $HEAD_SHA"
+          
+          # Check for HDR-related code changes
+          HDR_CHANGES=$(git diff --name-only $BASE_SHA $HEAD_SHA | grep -E 'HDR|hdr|VisualTest|visualtest')
+          
+          if [[ -n "$HDR_CHANGES" ]]; then
+            echo "HDR-related changes detected, running tests"
+            echo "Changes:"
+            echo "$HDR_CHANGES"
+            echo "run_tests=true" >> $GITHUB_OUTPUT
+          else
+            echo "No HDR-related changes detected, skipping tests"
+            echo "run_tests=false" >> $GITHUB_OUTPUT
+          fi
+
+  run-visual-tests:
+    name: HDR Visual Tests (${{ matrix.os }})
+    needs: preflight
+    if: needs.preflight.outputs.run_tests == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14]  # Use macOS only as it supports Metal fully
+    
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      
+      - name: Set up Swift
+        uses: swift-actions/setup-swift@v1
+        with:
+          swift-version: '5.9'
+      
+      - name: Set up Xcode
+        if: contains(matrix.os, 'macos')
+        run: sudo xcode-select -s /Applications/Xcode.app
+      
+      - name: Cache Swift packages
+        uses: actions/cache@v3
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+      
+      - name: Build project
+        run: swift build -c release
+      
+      - name: Create test results directory
+        run: mkdir -p TestResults/VisualTests
+      
+      - name: Run HDR visual tests
+        env:
+          CI: true
+          TEST_RESULTS_DIR: ${{ github.workspace }}/TestResults
+          REFERENCE_IMAGES_DIR: ${{ github.workspace }}/Tests/ReferenceImages
+        run: |
+          FILTER="${{ github.event.inputs.test_filter }}"
+          if [[ -z "$FILTER" ]]; then
+            FILTER="HDRVisualTests"
+          fi
+          
+          # Run visual tests with specified filter
+          swift test --filter "$FILTER" -c release \
+            --enable-code-coverage \
+            --xunit-output TestResults/visual-test-results.xml \
+            --parallel
+      
+      - name: Generate test report
+        if: always()
+        run: |
+          echo "## HDR Visual Test Results" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "TestResults/visual-test-results.xml" ]; then
+            TOTAL_TESTS=$(grep -c "<testcase" TestResults/visual-test-results.xml || echo 0)
+            FAILED_TESTS=$(grep -c "<failure" TestResults/visual-test-results.xml || echo 0)
+            PASSED_TESTS=$((TOTAL_TESTS - FAILED_TESTS))
+            
+            echo "- ✅ **$PASSED_TESTS** tests passed" >> $GITHUB_STEP_SUMMARY
+            echo "- ❌ **$FAILED_TESTS** tests failed" >> $GITHUB_STEP_SUMMARY
+            echo "- 🧪 **$TOTAL_TESTS** total tests" >> $GITHUB_STEP_SUMMARY
+            
+            if [ $FAILED_TESTS -gt 0 ]; then
+              echo "### Failed Tests" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "| Test Name | Message |" >> $GITHUB_STEP_SUMMARY
+              echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
+              
+              # Extract failed test names and messages
+              grep -A 3 "<failure" TestResults/visual-test-results.xml | grep -E "(testcase name=|message=)" | \
+                awk 'BEGIN{ORS=""} {if ($0 ~ "testcase") {print "| " substr($0, index($0, "name=\"") + 6, index(substr($0, index($0, "name=\"") + 6), "\"") - 1) " | "} else if ($0 ~ "message") {print substr($0, index($0, "message=\"") + 9, index(substr($0, index($0, "message=\"") + 9), "\"") - 1) " |\n"}}' >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "⚠️ No test results found" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Upload visual test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: visual-test-results-${{ matrix.os }}
+          path: |
+            TestResults/VisualTests
+            TestResults/*.xml
+          retention-days: 14
+      
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "HDR Visual Tests failed on ${{ matrix.os }}"
+          # Add notification logic here if needed
+
+  update-reference-images:
+    name: Update Reference Images
+    needs: run-visual-tests
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.force_run == 'true'
+    runs-on: macos-14
+    
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      
+      - name: Download test artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: visual-test-results-macos-14
+          path: TestResults
+      
+      - name: Update reference images
+        run: |
+          # Check if there are any new reference images
+          if [ -d "TestResults/VisualTests/ReferenceImages" ]; then
+            echo "Updating reference images from test results"
+            
+            # Create reference directory if it doesn't exist
+            mkdir -p Tests/ReferenceImages
+            
+            # Copy new reference images
+            cp -R TestResults/VisualTests/ReferenceImages/* Tests/ReferenceImages/
+            
+            # Check if any files were actually updated
+            if git diff --quiet Tests/ReferenceImages/; then
+              echo "No reference images were updated"
+            else
+              echo "Reference images were updated"
+              
+              # Commit the changes
+              git config --local user.email "github-actions@github.com"
+              git config --local user.name "GitHub Actions"
+              git add Tests/ReferenceImages/
+              git commit -m "Update reference images from HDR visual tests [skip ci]"
+              git push
+            fi
+          else
+            echo "No new reference images found"
+          fi
+      
+      - name: Generate update report
+        run: |
+          echo "## Reference Images Update" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -d "TestResults/VisualTests/ReferenceImages" ]; then
+            NEW_IMAGES=$(find TestResults/VisualTests/ReferenceImages -type f | wc -l)
+            echo "- 🖼️ **$NEW_IMAGES** reference images updated" >> $GITHUB_STEP_SUMMARY
+            
+            if [ $NEW_IMAGES -gt 0 ]; then
+              echo "### Updated Images" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "| Image | Path |" >> $GITHUB_STEP_SUMMARY
+              echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
+              
+              # List updated images
+              find TestResults/VisualTests/ReferenceImages -type f | while read img; do
+                FILENAME=$(basename "$img")
+                echo "| $FILENAME | $img |" >> $GITHUB_STEP_SUMMARY
+              done
+            fi
+          else
+            echo "⚠️ No new reference images found" >> $GITHUB_STEP_SUMMARY
+          fi 

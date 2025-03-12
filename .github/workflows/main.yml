@@ -13,587 +13,329 @@ on:
         required: false
         default: false
 
-# Prevent multiple CI runs on the same branch for better resource utilization
+# Prevent multiple CI runs on the same branch
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Set explicit permissions
 permissions:
   contents: read
-  pull-requests: write  # Needed for PR comments
-  checks: write         # Needed for publishing test results
+  pull-requests: write
+  checks: write
 
 jobs:
-  # Preflight job to quickly check for common issues
+  # Single preflight job for quick validation and change detection
   preflight:
-    name: Preflight Checks
+    name: Preflight Check
     runs-on: ubuntu-latest
     outputs:
-      has_swift_files: ${{ steps.file_changes.outputs.has_swift_changes }}
-      has_test_changes: ${{ steps.file_changes.outputs.has_test_changes }}
-      has_metal_changes: ${{ steps.file_changes.outputs.has_metal_changes }}
-      has_doc_changes: ${{ steps.file_changes.outputs.has_doc_changes }}
-      should_skip_tests: ${{ steps.determine_testing.outputs.should_skip_tests }}
+      should_run_tests: ${{ steps.analyze_changes.outputs.should_run_tests }}
+      should_run_metal: ${{ steps.analyze_changes.outputs.should_run_metal }}
+      matrix_config: ${{ steps.set_matrix.outputs.matrix_config }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 50  # Get enough history for file change detection
+          fetch-depth: 50
       
-      - name: Detect file changes
-        id: file_changes
+      - name: Analyze changes
+        id: analyze_changes
         uses: actions/github-script@v7
         with:
           script: |
             const { execSync } = require('child_process');
             
-            // Default to true for non-PR events
-            let hasSwiftChanges = true;
-            let hasTestChanges = false;
-            let hasMetalChanges = false;
-            let hasDocChanges = false;
+            // Default to true for pushes to main
+            let shouldRunTests = true;
+            let shouldRunMetal = false;
             
             if (context.eventName === 'pull_request') {
+              // For PRs, check what changed
               const baseSha = execSync(`git merge-base origin/${context.payload.pull_request.base.ref} HEAD`).toString().trim();
-              console.log(`Base SHA: ${baseSha}`);
-              
-              // Get changed files
               const changedFiles = execSync(`git diff --name-only ${baseSha}..HEAD`).toString().split('\n');
-              console.log('Changed files:', changedFiles);
               
-              // Check for specific file types
-              hasSwiftChanges = changedFiles.some(file => file.endsWith('.swift'));
-              hasTestChanges = changedFiles.some(file => file.includes('/Tests/') || file.includes('Test'));
-              hasMetalChanges = changedFiles.some(file => file.includes('.metal') || file.includes('Metal') || file.includes('/Metal/'));
-              hasDocChanges = changedFiles.some(file => file.endsWith('.md') || file.includes('/docs/') || file.includes('Documentation'));
+              // Only skip tests for docs-only changes
+              const hasCodeChanges = changedFiles.some(file => 
+                file.endsWith('.swift') || 
+                file.endsWith('.metal') || 
+                file.endsWith('.h') || 
+                file.endsWith('.m') || 
+                file.endsWith('.cpp') || 
+                file.endsWith('.c')
+              );
               
-              console.log(`Swift changes: ${hasSwiftChanges}`);
-              console.log(`Test changes: ${hasTestChanges}`);
-              console.log(`Metal changes: ${hasMetalChanges}`);
-              console.log(`Doc changes: ${hasDocChanges}`);
+              const hasDocChanges = changedFiles.some(file => 
+                file.endsWith('.md') || 
+                file.includes('/docs/')
+              );
+              
+              const hasMetalChanges = changedFiles.some(file => 
+                file.endsWith('.metal') || 
+                file.includes('Metal')
+              );
+              
+              shouldRunTests = hasCodeChanges || !hasDocChanges;
+              shouldRunMetal = hasMetalChanges;
             }
             
-            core.setOutput('has_swift_changes', hasSwiftChanges.toString());
-            core.setOutput('has_test_changes', hasTestChanges.toString());
-            core.setOutput('has_metal_changes', hasMetalChanges.toString());
-            core.setOutput('has_doc_changes', hasDocChanges.toString());
+            console.log(`Should run tests: ${shouldRunTests}`);
+            console.log(`Should run Metal tests: ${shouldRunMetal}`);
+            
+            core.setOutput('should_run_tests', shouldRunTests.toString());
+            core.setOutput('should_run_metal', shouldRunMetal.toString());
       
-      - name: Determine testing strategy
-        id: determine_testing
+      - name: Set test matrix
+        id: set_matrix
         run: |
-          # Skip tests only if this is a docs-only PR
-          SHOULD_SKIP_TESTS="false"
-          
-          if [[ ${{ github.event_name }} == 'pull_request' ]]; then
-            if [[ "${{ steps.file_changes.outputs.has_doc_changes }}" == "true" && \
-                  "${{ steps.file_changes.outputs.has_swift_changes }}" == "false" && \
-                  "${{ steps.file_changes.outputs.has_test_changes }}" == "false" && \
-                  "${{ steps.file_changes.outputs.has_metal_changes }}" == "false" ]]; then
-              SHOULD_SKIP_TESTS="true"
-              echo "Docs-only PR detected, will skip running tests"
-            fi
+          # Define the test matrix based on what needs to be tested
+          if [[ "${{ steps.analyze_changes.outputs.should_run_tests }}" == "true" ]]; then
+            echo "matrix_config={\"test_type\":[\"unit\",\"integration\",\"visual\",\"performance\"],\"os\":[\"macos-latest\"]}" >> $GITHUB_OUTPUT
+          else
+            echo "matrix_config={\"test_type\":[\"unit\"],\"os\":[\"macos-latest\"]}" >> $GITHUB_OUTPUT
           fi
-          
-          echo "should_skip_tests=$SHOULD_SKIP_TESTS" >> $GITHUB_OUTPUT
-
-  # Swift linting
-  lint:
-    name: Swift Lint
-    runs-on: ubuntu-latest
-    needs: preflight
-    # Skip linting if there are no Swift changes
-    if: needs.preflight.outputs.has_swift_files == 'true'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Swift & SwiftLint
-        run: |
-          # Set up SwiftLint using swift-linter Docker image
-          docker pull ghcr.io/realm/swiftlint:latest
-          
+      
       - name: Run SwiftLint
         run: |
-          echo "Running SwiftLint..."
+          # SwiftLint runs quickly, so we'll include it in preflight
+          docker pull ghcr.io/realm/swiftlint:latest
           docker run --rm -v ${{ github.workspace }}:/workspace ghcr.io/realm/swiftlint:latest swiftlint --reporter github-actions-logging
-        continue-on-error: true  # Don't fail the build for lint issues
+        continue-on-error: true
 
-  # Test on macOS
-  test-macos:
-    name: Test on macOS ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+  # Combined test job using matrix strategy
+  tests:
+    name: ${{ matrix.test_type }} Tests on ${{ matrix.os }}
     needs: preflight
-    if: needs.preflight.outputs.should_skip_tests == 'false'
+    if: needs.preflight.outputs.should_run_tests == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
-      matrix:
-        os: [macos-latest]
-        test_type: [unit, integration, visual]
-        include:
-          - test_type: unit
-            test_directory: UnitTests
-            test_timeout: 10
-          - test_type: integration
-            test_directory: IntegrationTests
-            test_timeout: 20
-          - test_type: visual
-            test_directory: VisualTests
-            test_timeout: 15
-    timeout-minutes: 30
-        
+      matrix: ${{ fromJson(needs.preflight.outputs.matrix_config) }}
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
+      
       - name: Set up Swift
         uses: swift-actions/setup-swift@v1
         with:
           swift-version: "5.9"
       
-      - name: Cache Swift packages
+      - name: Cache Swift packages and build artifacts
         uses: actions/cache@v4
         with:
           path: |
             .build
             ~/Library/Developer/Xcode/DerivedData/**/SourcePackages/checkouts
-          key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved') }}
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm
+          key: ${{ runner.os }}-${{ matrix.test_type }}-swift-${{ hashFiles('**/Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-
+            ${{ runner.os }}-${{ matrix.test_type }}-swift-
       
-      - name: Run ${{ matrix.test_type }} tests
+      - name: Set up test environment
+        run: |
+          mkdir -p TestResults/${{ matrix.test_type }}
+          
+          # Set up environment variables for tests
+          echo "VERBOSE_TESTING=1" >> $GITHUB_ENV
+          echo "TEST_RESULTS_DIR=$(pwd)/TestResults" >> $GITHUB_ENV
+          
+          # Skip Metal tests if Metal is not available or not needed
+          if [[ "${{ matrix.test_type }}" == "metal" && "${{ needs.preflight.outputs.should_run_metal }}" != "true" ]]; then
+            echo "SKIP_METAL_TESTS=1" >> $GITHUB_ENV
+          fi
+          
+          # Skip resource-intensive tests in CI unless explicitly testing performance
+          if [[ "${{ matrix.test_type }}" != "performance" ]]; then
+            echo "SKIP_RESOURCE_INTENSIVE=1" >> $GITHUB_ENV
+          fi
+      
+      - name: Run tests
         id: run_tests
         run: |
-          echo "Running ${{ matrix.test_type }} tests on ${{ matrix.os }}..."
-          
-          mkdir -p test-results/${{ matrix.test_type }}
-          
-          # Run tests with configurable timeout and direct to output files
-          # This is a simplified version. In a real scenario, you'd use xcodebuild or swift test
-          # with proper configuration
-          
-          # Example using the run-integration-tests.sh script (if it exists)
-          if [[ "${{ matrix.test_type }}" == "integration" ]] && [ -f "Scripts/run-integration-tests.sh" ]; then
+          # Determine which test script to use
+          if [[ -f "Scripts/run-tests.sh" ]]; then
+            chmod +x Scripts/run-tests.sh
             
-            # Make script executable
-            chmod +x Scripts/run-integration-tests.sh
-            
-            # Run the integration tests with the appropriate settings
-            ./Scripts/run-integration-tests.sh \
-              --regex "${{ matrix.test_directory }}" \
-              --timeout "${{ matrix.test_timeout }}" \
-              --report-format "junit" \
-              --derived-data "./DerivedData" \
-              --results-dir "./test-results/${{ matrix.test_type }}" \
-              ${{ inputs.debug_enabled && '--verbose' || '' }}
+            # Run the appropriate test type with the standardized test script
+            ./Scripts/run-tests.sh \
+              --${{ matrix.test_type }} \
+              --verbose \
+              --html-report \
+              --junit-report \
+              --results-path TestResults/${{ matrix.test_type }} \
+              --retry 2 \
+              ${{ github.event.inputs.debug_enabled == 'true' && '--debug' || '' }}
             
             TEST_EXIT_CODE=$?
-            
           else
-            # Fallback to generic xcodebuild test command
+            # Fallback if script doesn't exist (uses xcodebuild directly)
+            echo "Test script not found, using xcodebuild directly"
+            
             xcodebuild test \
               -scheme HDRPlusTests \
-              -only-testing:${{ matrix.test_directory }} \
+              -only-testing:${{ matrix.test_type == 'unit' && 'UnitTests' || matrix.test_type == 'integration' && 'IntegrationTests' || matrix.test_type == 'visual' && 'VisualTests' || matrix.test_type == 'performance' && 'PerformanceTests' || matrix.test_type == 'metal' && 'MetalTests' || 'UnitTests' }} \
               -destination "platform=macOS" \
-              -maximum-test-execution-time-allowance ${{ matrix.test_timeout }} \
-              -resultBundlePath ./test-results/${{ matrix.test_type }}/TestResults.xcresult \
-              | tee ./test-results/${{ matrix.test_type }}/test_output.log
-              
+              -resultBundlePath TestResults/${{ matrix.test_type }}/Results.xcresult \
+              | tee TestResults/${{ matrix.test_type }}/output.log
+            
             TEST_EXIT_CODE=${PIPESTATUS[0]}
             
-            # Convert xcresult to JUnit format for better CI integration
-            xcrun xcresulttool get --format xml --path ./test-results/${{ matrix.test_type }}/TestResults.xcresult > ./test-results/${{ matrix.test_type }}/result.xml
-            
-            # Create a simple JUnit report
-            echo '<?xml version="1.0" encoding="UTF-8"?>' > ./test-results/${{ matrix.test_type }}/junit.xml
-            echo '<testsuites name="HDRPlusTests">' >> ./test-results/${{ matrix.test_type }}/junit.xml
-            
-            # Extract success/failure counts - in a real scenario you would properly parse the xcresult
-            TOTAL_TESTS=$(grep -c "Test Case.*started" ./test-results/${{ matrix.test_type }}/test_output.log || echo 0)
-            PASSED_TESTS=$(grep -c "Test Case.*passed" ./test-results/${{ matrix.test_type }}/test_output.log || echo 0)
-            FAILED_TESTS=$(grep -c "Test Case.*failed" ./test-results/${{ matrix.test_type }}/test_output.log || echo 0)
-            
-            echo "<testsuite name=\"${{ matrix.test_directory }}\" tests=\"$TOTAL_TESTS\" failures=\"$FAILED_TESTS\">" >> ./test-results/${{ matrix.test_type }}/junit.xml
-            
-            # Add some sample test cases - in a real scenario you would extract actual test results
-            grep "Test Case.*started" ./test-results/${{ matrix.test_type }}/test_output.log | while read -r line; do
-              TEST_NAME=$(echo "$line" | sed -n 's/.*Test Case \'-\[\(.*\) \(.*\)\]\'.*/\1.\2/p')
-              if grep -q "$TEST_NAME.*passed" ./test-results/${{ matrix.test_type }}/test_output.log; then
-                echo "<testcase classname=\"${{ matrix.test_directory }}\" name=\"$TEST_NAME\" />" >> ./test-results/${{ matrix.test_type }}/junit.xml
-              else
-                ERROR_MSG=$(grep -A 1 "$TEST_NAME.*failed" ./test-results/${{ matrix.test_type }}/test_output.log | tail -n 1 || echo "Unknown error")
-                echo "<testcase classname=\"${{ matrix.test_directory }}\" name=\"$TEST_NAME\"><failure message=\"$ERROR_MSG\">$ERROR_MSG</failure></testcase>" >> ./test-results/${{ matrix.test_type }}/junit.xml
-                fi
-              done
-            
-            echo "</testsuite>" >> ./test-results/${{ matrix.test_type }}/junit.xml
-            echo "</testsuites>" >> ./test-results/${{ matrix.test_type }}/junit.xml
+            # Generate JUnit report
+            mkdir -p TestResults/${{ matrix.test_type }}/reports
+            xcrun xcresulttool get --format xml --path TestResults/${{ matrix.test_type }}/Results.xcresult > TestResults/${{ matrix.test_type }}/reports/results.xml
           fi
           
-          # Set outputs and create summary
           echo "exit_code=$TEST_EXIT_CODE" >> $GITHUB_OUTPUT
-          
-          # Create test summary for GitHub
-          TOTAL_TESTS=$(grep -c "Test Case.*started" ./test-results/${{ matrix.test_type }}/test_output.log 2>/dev/null || echo 0)
-          PASSED_TESTS=$(grep -c "Test Case.*passed" ./test-results/${{ matrix.test_type }}/test_output.log 2>/dev/null || echo 0)
-          FAILED_TESTS=$(grep -c "Test Case.*failed" ./test-results/${{ matrix.test_type }}/test_output.log 2>/dev/null || echo 0)
-          
-          echo "total_tests=$TOTAL_TESTS" >> $GITHUB_OUTPUT
-          echo "passed_tests=$PASSED_TESTS" >> $GITHUB_OUTPUT
-          echo "failed_tests=$FAILED_TESTS" >> $GITHUB_OUTPUT
-          
-          # Get test duration
-          START_TIME=$(stat -f %m ./test-results/${{ matrix.test_type }} 2>/dev/null || echo 0)
-          END_TIME=$(date +%s)
-          DURATION=$((END_TIME - START_TIME))
-          
-          echo "test_duration=$DURATION" >> $GITHUB_OUTPUT
-      
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-results-${{ matrix.os }}-${{ matrix.test_type }}
-          path: test-results/${{ matrix.test_type }}
-          retention-days: 14
-      
-      - name: Upload test summary
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            // Write test summary to GitHub Actions log
-            const outcome = ${{ steps.run_tests.outputs.exit_code }} === 0 ? '✅ Passed' : '❌ Failed';
-            const total = ${{ steps.run_tests.outputs.total_tests }};
-            const passed = ${{ steps.run_tests.outputs.passed_tests }};
-            const failed = ${{ steps.run_tests.outputs.failed_tests }};
-            const duration = ${{ steps.run_tests.outputs.test_duration }};
-            
-            const summary = `## ${{ matrix.test_type }} Test Results (${{ matrix.os }})
-            
-            - **Outcome**: ${outcome}
-            - **Total Tests**: ${total}
-            - **Passed**: ${passed}
-            - **Failed**: ${failed}
-            - **Duration**: ${duration} seconds
-            `;
-            
-            core.summary
-              .addHeading(`${{ matrix.test_type }} Test Results (${{ matrix.os }})`)
-              .addTable([
-                [{ data: 'Metric', header: true }, { data: 'Value', header: true }],
-                ['Outcome', outcome],
-                ['Total Tests', `${total}`],
-                ['Passed', `${passed}`],
-                ['Failed', `${failed}`],
-                ['Duration', `${duration} seconds`],
-              ])
-              .write();
-      
-      - name: Check test results
+        
+      - name: Process test results
         if: always()
         run: |
+          # Extract summary info from test results
+          TOTAL=$(grep -c "Test Case.*started" TestResults/${{ matrix.test_type }}/output.log 2>/dev/null || echo 0)
+          PASSED=$(grep -c "Test Case.*passed" TestResults/${{ matrix.test_type }}/output.log 2>/dev/null || echo 0)
+          FAILED=$(grep -c "Test Case.*failed" TestResults/${{ matrix.test_type }}/output.log 2>/dev/null || echo 0)
+          SKIPPED=$((TOTAL - PASSED - FAILED))
+          
+          echo "## ${{ matrix.test_type }} Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Tests**: $TOTAL" >> $GITHUB_STEP_SUMMARY
+          echo "- **Passed**: $PASSED" >> $GITHUB_STEP_SUMMARY
+          echo "- **Failed**: $FAILED" >> $GITHUB_STEP_SUMMARY
+          echo "- **Skipped**: $SKIPPED" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Include performance results if available
+          if [[ "${{ matrix.test_type }}" == "performance" ]] && [[ -f "TestResults/performance/perf_summary.md" ]]; then
+            cat TestResults/performance/perf_summary.md >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # If tests failed, add details
           if [[ "${{ steps.run_tests.outputs.exit_code }}" != "0" ]]; then
-            echo "::error::Tests failed with exit code ${{ steps.run_tests.outputs.exit_code }}"
-            exit 1
+            echo "### Failed Tests" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "```" >> $GITHUB_STEP_SUMMARY
+            grep -A 3 "Test Case.*failed" TestResults/${{ matrix.test_type }}/output.log 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No detailed failure information available" >> $GITHUB_STEP_SUMMARY
+            echo "```" >> $GITHUB_STEP_SUMMARY
           fi
-
-  # Check for performance regressions using the PerformanceTestUtility
-  performance:
-    name: Performance Tests
-    runs-on: macos-latest
-    needs: preflight
-    if: needs.preflight.outputs.should_skip_tests == 'false'
-    timeout-minutes: 45
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 5  # Need some history for performance trend comparison
       
-      - name: Set up Swift
-        uses: swift-actions/setup-swift@v1
-        with:
-          swift-version: "5.9"
-      
-      - name: Cache Swift packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            .build
-            ~/Library/Developer/Xcode/DerivedData/**/SourcePackages/checkouts
-          key: ${{ runner.os }}-spm-perf-${{ hashFiles('**/Package.resolved') }}
-          restore-keys: |
-            ${{ runner.os }}-spm-perf-
-      
-      - name: Create baseline performance directory
-        run: |
-          mkdir -p TestResults/Performance
-          
-      - name: Run performance tests
-        id: run_perf_tests
-        run: |
-          echo "Running performance tests..."
-          
-          xcodebuild test \
-            -scheme HDRPlusTests \
-            -only-testing:PerformanceTests \
-            -destination "platform=macOS" \
-            -maximum-test-execution-time-allowance 45 \
-            -resultBundlePath ./TestResults/Performance/Results.xcresult \
-            | tee ./TestResults/Performance/test_output.log
-            
-          PERF_EXIT_CODE=${PIPESTATUS[0]}
-          echo "exit_code=$PERF_EXIT_CODE" >> $GITHUB_OUTPUT
-          
-          # Parse perf results - in a real scenario this would extract actual metrics
-          # from the performance test utility's output
-          
-          # For demo, create a simulated performance report
-          mkdir -p TestResults/Performance/Report
-          
-          cat > TestResults/Performance/Report/performance.md << EOF
-          # Performance Test Results
-          
-          | Test | Current (ms) | Baseline (ms) | Diff (%) | Status |
-          |------|--------------|---------------|----------|--------|
-          | Image Alignment | 255 | 250 | +2.0% | ✅ Pass |
-          | HDR Merge | 183 | 180 | +1.7% | ✅ Pass |
-          | Noise Reduction | 330 | 325 | +1.5% | ✅ Pass |
-          | Total Processing | 768 | 755 | +1.7% | ✅ Pass |
-          EOF
-          
-          # Extract summary metrics for GitHub
-          echo "num_perf_tests=4" >> $GITHUB_OUTPUT
-          echo "num_regressions=0" >> $GITHUB_OUTPUT
-          echo "avg_diff=1.7" >> $GITHUB_OUTPUT
-      
-      - name: Upload performance results
+      - name: Upload test artifacts
+        if: always()
         uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: performance-test-results
-          path: TestResults/Performance
-          retention-days: 30
-      
-      - name: Performance test summary
-        if: always()
-        run: |
-          echo "## Performance Test Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          if [[ "${{ steps.run_perf_tests.outputs.exit_code }}" == "0" ]]; then
-            echo "✅ Performance tests passed" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Performance tests failed" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Tests run**: ${{ steps.run_perf_tests.outputs.num_perf_tests }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Regressions**: ${{ steps.run_perf_tests.outputs.num_regressions }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Average difference**: ${{ steps.run_perf_tests.outputs.avg_diff }}%" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          if [ -f TestResults/Performance/Report/performance.md ]; then
-            cat TestResults/Performance/Report/performance.md | grep -A 100 "| Test |" >> $GITHUB_STEP_SUMMARY
-          fi
-
-  # Test Metal code specifically if Metal-related changes are detected
-  test-metal:
-    name: Test Metal Code
-    runs-on: macos-latest
-    needs: preflight
-    if: needs.preflight.outputs.has_metal_changes == 'true' && needs.preflight.outputs.should_skip_tests == 'false'
-    timeout-minutes: 20
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Set up Swift
-        uses: swift-actions/setup-swift@v1
-        with:
-          swift-version: "5.9"
-      
-      - name: Check Metal availability
-        id: check_metal
-        run: |
-          echo "Checking Metal availability..."
-          
-          if ! system_profiler SPDisplaysDataType | grep -q "Metal"; then
-            echo "::warning::Metal API not available on this runner. Some tests may be skipped."
-            echo "metal_available=false" >> $GITHUB_OUTPUT
-          else
-            echo "Metal API is available."
-            echo "metal_available=true" >> $GITHUB_OUTPUT
-          fi
-      
-      - name: Run Metal tests
-        if: steps.check_metal.outputs.metal_available == 'true'
-        run: |
-          echo "Running Metal tests..."
-          
-          mkdir -p TestResults/Metal
-          
-          xcodebuild test \
-            -scheme HDRPlusTests \
-            -only-testing:MetalTests \
-            -destination "platform=macOS" \
-            -resultBundlePath ./TestResults/Metal/Results.xcresult \
-            | tee ./TestResults/Metal/test_output.log
-            
-          METAL_EXIT_CODE=${PIPESTATUS[0]}
-          
-          # Create test summary
-          TOTAL_TESTS=$(grep -c "Test Case.*started" ./TestResults/Metal/test_output.log || echo 0)
-          PASSED_TESTS=$(grep -c "Test Case.*passed" ./TestResults/Metal/test_output.log || echo 0)
-          FAILED_TESTS=$(grep -c "Test Case.*failed" ./TestResults/Metal/test_output.log || echo 0)
-          
-          echo "## Metal Test Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          if [[ "$METAL_EXIT_CODE" == "0" ]]; then
-            echo "✅ Metal tests passed" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Metal tests failed" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Total Tests**: $TOTAL_TESTS" >> $GITHUB_STEP_SUMMARY
-          echo "- **Passed**: $PASSED_TESTS" >> $GITHUB_STEP_SUMMARY
-          echo "- **Failed**: $FAILED_TESTS" >> $GITHUB_STEP_SUMMARY
-          
-          exit $METAL_EXIT_CODE
-      
-      - name: Run Metal tests in simulation mode
-        if: steps.check_metal.outputs.metal_available != 'true'
-        run: |
-          echo "::warning::Running Metal tests in simulation mode since Metal is not available"
-          
-          mkdir -p TestResults/Metal
-          
-          # Simulate successful tests for CI to pass
-          echo "All Metal tests passed in simulation mode" > ./TestResults/Metal/test_output.log
-          
-          # Create test summary
-          echo "## Metal Test Results (Simulation Mode)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "⚠️ Metal API not available - tests run in simulation mode" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "In simulation mode, Metal tests are assumed to pass." >> $GITHUB_STEP_SUMMARY
-      
-      - name: Upload Metal test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: metal-test-results
-          path: TestResults/Metal
+          name: test-results-${{ matrix.test_type }}-${{ matrix.os }}
+          path: TestResults/${{ matrix.test_type }}
           retention-days: 14
+      
+      - name: Publish test results
+        if: always()
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: |
+            TestResults/${{ matrix.test_type }}/reports/junit.xml
+            TestResults/${{ matrix.test_type }}/reports/results.xml
+          check_name: ${{ matrix.test_type }} Test Results
+          comment_mode: create
+          report_individual_runs: true
+          compare_to_earlier_commit: true
+          test_changes_limit: 10
+      
+      - name: Check test outcome
+        if: ${{ steps.run_tests.outputs.exit_code != '0' }}
+        run: |
+          echo "::error::${{ matrix.test_type }} tests failed with exit code ${{ steps.run_tests.outputs.exit_code }}"
+          exit 1
 
-  # Summary job that combines all test results and publishes a consolidated report
-  generate-summary:
-    name: Generate Test Summary
-    needs: [preflight, lint, test-macos, performance, test-metal]
-    if: always()
+  # Summary job to post a consolidated report
+  summary:
+    name: Test Summary
+    needs: [preflight, tests]
+    if: always() && needs.preflight.outputs.should_run_tests == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Download all test results
+      - name: Download test results
         uses: actions/download-artifact@v4
         with:
           pattern: test-results-*
-          path: all-test-results
+          path: all-results
           merge-multiple: true
       
-      - name: Download performance results
-        uses: actions/download-artifact@v4
-        with:
-          name: performance-test-results
-          path: all-test-results/performance
-      
-      - name: Download Metal test results
-        uses: actions/download-artifact@v4
-        with:
-          name: metal-test-results
-          path: all-test-results/metal
-      
       - name: Generate summary report
+        if: always()
         run: |
-          echo "Generating consolidated test report..."
+          echo "# HDR+ Swift Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Tests completed at $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           
-          # Create summary directory
-          mkdir -p test-summary
+          # Total up the results
+          TOTAL_TESTS=0
+          TOTAL_PASSED=0
+          TOTAL_FAILED=0
+          TOTAL_SKIPPED=0
           
-          # Create summary report
-          cat > test-summary/summary.md << EOF
-          # HDR+ Swift Test Summary
+          echo "| Test Type | Status | Total | Passed | Failed | Skipped |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|-------|--------|--------|---------|" >> $GITHUB_STEP_SUMMARY
           
-          Test run completed at $(date)
-          
-          ## Overview
-          
-          | Test Type | Status | Tests | Passed | Failed |
-          |-----------|--------|-------|--------|--------|
-          EOF
-          
-          # Process each test type
-          declare -A TEST_TYPES=([unit]="Unit" [integration]="Integration" [visual]="Visual" [performance]="Performance" [metal]="Metal")
-          
-          for type in "${!TEST_TYPES[@]}"; do
-            DISPLAY_NAME="${TEST_TYPES[$type]}"
-            
-            # Check if we have results for this test type
-            if [ -d "all-test-results/$type" ]; then
-              # Count tests (this is a simplified version)
-              TOTAL=$(find all-test-results/$type -name "test_output.log" -exec grep -c "Test Case.*started" {} \; 2>/dev/null || echo 0)
-              PASSED=$(find all-test-results/$type -name "test_output.log" -exec grep -c "Test Case.*passed" {} \; 2>/dev/null || echo 0)
-              FAILED=$(find all-test-results/$type -name "test_output.log" -exec grep -c "Test Case.*failed" {} \; 2>/dev/null || echo 0)
+          for TEST_TYPE in unit integration visual performance metal; do
+            if [ -d "all-results/$TEST_TYPE" ]; then
+              TESTS=$(grep -c "Test Case.*started" all-results/$TEST_TYPE/output.log 2>/dev/null || echo 0)
+              PASSED=$(grep -c "Test Case.*passed" all-results/$TEST_TYPE/output.log 2>/dev/null || echo 0)
+              FAILED=$(grep -c "Test Case.*failed" all-results/$TEST_TYPE/output.log 2>/dev/null || echo 0)
+              SKIPPED=$((TESTS - PASSED - FAILED))
               
-              if [ "$FAILED" -gt 0 ]; then
+              TOTAL_TESTS=$((TOTAL_TESTS + TESTS))
+              TOTAL_PASSED=$((TOTAL_PASSED + PASSED))
+              TOTAL_FAILED=$((TOTAL_FAILED + FAILED))
+              TOTAL_SKIPPED=$((TOTAL_SKIPPED + SKIPPED))
+              
+              if [ $FAILED -gt 0 ]; then
                 STATUS="❌ Failing"
+              elif [ $TESTS -eq 0 ]; then
+                STATUS="⚠️ No tests"
               else
                 STATUS="✅ Passing"
               fi
+              
+              echo "| ${TEST_TYPE^} | $STATUS | $TESTS | $PASSED | $FAILED | $SKIPPED |" >> $GITHUB_STEP_SUMMARY
             else
-              TOTAL="N/A"
-              PASSED="N/A"
-              FAILED="N/A"
-              STATUS="⚠️ Not Run"
+              echo "| ${TEST_TYPE^} | ⏭️ Skipped | - | - | - | - |" >> $GITHUB_STEP_SUMMARY
             fi
-            
-            echo "| $DISPLAY_NAME | $STATUS | $TOTAL | $PASSED | $FAILED |" >> test-summary/summary.md
           done
           
-          # Create GitHub Action summary
-          cat test-summary/summary.md > $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Overall Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Tests**: $TOTAL_TESTS" >> $GITHUB_STEP_SUMMARY
+          echo "- **Passed**: $TOTAL_PASSED" >> $GITHUB_STEP_SUMMARY
+          echo "- **Failed**: $TOTAL_FAILED" >> $GITHUB_STEP_SUMMARY
+          echo "- **Skipped**: $TOTAL_SKIPPED" >> $GITHUB_STEP_SUMMARY
       
-      - name: Upload test summary
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-summary
-          path: test-summary
-          retention-days: 30
-      
-      - name: Comment PR with test results
+      - name: Post PR comment
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
+            const summary = fs.readFileSync(process.env.GITHUB_STEP_SUMMARY, 'utf8');
             
-            // Read the summary
-            const summary = fs.readFileSync('test-summary/summary.md', 'utf8');
+            const statusLines = summary.split('\n').filter(line => line.includes('| ') && !line.includes('---'));
+            const statusTable = statusLines.join('\n');
             
-            // Create comment
-            const body = `## Test Results Summary\n\n${summary}\n\n[View detailed test results in the Actions tab](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID})`;
+            const body = `## Test Results Summary
             
-            // Post comment to PR
-            const issue_number = context.payload.pull_request.number;
-            await github.rest.issues.createComment({
+            ${statusTable}
+            
+            [View detailed test results in the Actions tab](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID})`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: issue_number,
               body: body
             }); 
