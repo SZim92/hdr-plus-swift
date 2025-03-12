@@ -11,11 +11,16 @@ public class TestConfig {
     // MARK: - Test Environment Settings
     
     /// Whether the tests are running in a CI environment
-    public var isCI: Bool {
+    public var isRunningInCI: Bool {
         return ProcessInfo.processInfo.environment["CI"] != nil ||
                ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] != nil ||
                ProcessInfo.processInfo.environment["TRAVIS"] != nil ||
                ProcessInfo.processInfo.environment["JENKINS_URL"] != nil
+    }
+    
+    /// Alias for isRunningInCI for backward compatibility
+    public var isCI: Bool {
+        return isRunningInCI
     }
     
     /// Whether verbose logging is enabled
@@ -104,6 +109,11 @@ public class TestConfig {
     /// Baseline performance metrics file path
     public lazy var performanceBaselinesPath: URL = {
         return testResourcesDir.appendingPathComponent("performance_baselines.json")
+    }()
+    
+    /// Directory for performance baselines
+    public lazy var performanceBaselinesDir: URL = {
+        return testResourcesDir.appendingPathComponent("PerformanceBaselines", isDirectory: true)
     }()
     
     // MARK: - Visual Test Settings
@@ -225,6 +235,13 @@ public class TestConfig {
             print("Warning: Failed to reset temporary test directory: \(error)")
         }
     }
+    
+    /// Log a message if verbose logging is enabled
+    public func logVerbose(_ message: String) {
+        if verboseLogging {
+            print(message)
+        }
+    }
 }
 
 // MARK: - XCTestCase Extensions
@@ -237,21 +254,21 @@ extension XCTestCase {
     }
     
     /// Skip test if it's running in CI
-    public func skipOnCI(_ message: String = "Test skipped in CI environment") {
+    public func skipOnCI(_ message: String = "Test skipped in CI environment") throws {
         if config.isCI {
             throw XCTSkip(message)
         }
     }
     
     /// Skip test if it requires excessive resources and we're configured to skip them
-    public func skipIfResourceIntensive(_ message: String = "Test requires excessive resources") {
+    public func skipIfResourceIntensive(_ message: String = "Test requires excessive resources") throws {
         if config.skipResourceIntensiveTests {
             throw XCTSkip(message)
         }
     }
     
     /// Skip test if it requires Metal and Metal isn't available or we're configured to skip Metal tests
-    public func skipIfMetalUnavailable(_ message: String = "Test requires Metal API") {
+    public func skipIfMetalUnavailable(_ message: String = "Test requires Metal API") throws {
         if config.skipMetalTests {
             throw XCTSkip(message)
         }

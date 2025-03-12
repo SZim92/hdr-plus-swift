@@ -133,24 +133,23 @@ public class HDRResultVisualizer {
             let x = margin + col * (scaledInputWidth + margin)
             let y = totalHeight - margin - 40 - (row + 1) * scaledInputHeight - row * margin
             
-            if let inputImage = inputImages[i] {
-                // Draw image
-                context.draw(
-                    inputImage,
-                    in: CGRect(x: x, y: y, width: scaledInputWidth, height: scaledInputHeight)
-                )
-                
-                // Draw label
-                drawText(
-                    in: context,
-                    text: "Input \(i+1)",
-                    rect: CGRect(x: x, y: y - 20, width: scaledInputWidth, height: 20),
-                    attributes: [
-                        .foregroundColor: CGColor(red: 1, green: 1, blue: 1, alpha: 1),
-                        .font: NSFont.systemFont(ofSize: 12)
-                    ]
-                )
-            }
+            let inputImage = inputImages[i]
+            // Draw image
+            context.draw(
+                inputImage,
+                in: CGRect(x: x, y: y, width: scaledInputWidth, height: scaledInputHeight)
+            )
+            
+            // Draw label
+            drawText(
+                in: context,
+                text: "Input \(i+1)",
+                rect: CGRect(x: x, y: y - 20, width: scaledInputWidth, height: 20),
+                attributes: [
+                    .foregroundColor: CGColor(red: 1, green: 1, blue: 1, alpha: 1),
+                    .font: NSFont.systemFont(ofSize: 12)
+                ]
+            )
         }
         
         // Draw output image
@@ -360,8 +359,8 @@ public class HDRResultVisualizer {
         context.clip()
         
         let colors = [
-            context.strokeColor?.copy(alpha: 0.1) ?? CGColor(red: 1, green: 1, blue: 1, alpha: 0.1),
-            context.strokeColor?.copy(alpha: 0.4) ?? CGColor(red: 1, green: 1, blue: 1, alpha: 0.4)
+            CGColor(red: 1, green: 1, blue: 1, alpha: 0.1),
+            CGColor(red: 1, green: 1, blue: 1, alpha: 0.4)
         ] as CFArray
         
         let locations: [CGFloat] = [0.0, 1.0]
@@ -482,7 +481,7 @@ public class HDRResultVisualizer {
                     rect: CGRect(x: contentRect.origin.x, y: contentRect.origin.y, width: contentRect.size.width, height: 15),
                     attributes: [
                         .foregroundColor: CGColor(red: 0.7, green: 0.7, blue: 0.7, alpha: 1),
-                        .font: NSFont.italicSystemFont(ofSize: 10)
+                        .font: NSFont.systemFont(ofSize: 10, weight: .light)
                     ]
                 )
                 break

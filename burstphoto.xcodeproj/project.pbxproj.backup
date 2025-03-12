@@ -25,6 +25,7 @@
 		B02712762D813552002532CE /* TestHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B02712602D813350002532CE /* TestHelper.swift */; };
 		B02712772D813552002532CE /* TestFixtureUtility.swift in Sources */ = {isa = PBXBuildFile; fileRef = B027125F2D813350002532CE /* TestFixtureUtility.swift */; };
 		B02712782D813552002532CE /* HDRResultVisualizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B02712562D813350002532CE /* HDRResultVisualizer.swift */; };
+		B02712792D813552002532CE /* VisualTestUtility.swift in Sources */ = {isa = PBXBuildFile; fileRef = B02712652D813350002532CE /* VisualTestUtility.swift */; };
 		B027127A2D813552002532CE /* TestConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B027125D2D813350002532CE /* TestConfig.swift */; };
 		B027127B2D813552002532CE /* TestOutputFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B02712632D813350002532CE /* TestOutputFormatter.swift */; };
 		B027127C2D813552002532CE /* MetalTestUtility.swift in Sources */ = {isa = PBXBuildFile; fileRef = B02712582D813350002532CE /* MetalTestUtility.swift */; };
@@ -2009,6 +2010,7 @@
 				B02712772D813552002532CE /* TestFixtureUtility.swift in Sources */,
 				B02712782D813552002532CE /* HDRResultVisualizer.swift in Sources */,
 				B027127E2D81355E002532CE /* VisualTestUtility.swift in Sources */,
+				B02712792D813552002532CE /* VisualTestUtility.swift in Sources */,
 				B027127A2D813552002532CE /* TestConfig.swift in Sources */,
 				B027127B2D813552002532CE /* TestOutputFormatter.swift in Sources */,
 				B027127C2D813552002532CE /* MetalTestUtility.swift in Sources */,

@@ -20,12 +20,7 @@ public enum TestQuarantine {
     
     /// Registry of quarantined tests, mapping test identifiers to their status
     /// Format: "TestClassName.testMethodName"
-    private static let quarantinedTests: [String: Status] = [
-        // Add quarantined tests here
-        //"HDRPipelineTests.testProcessImageBatch": .flaky(reason: "Fails randomly due to race condition"),
-        //"AlignmentTests.testHighContrastAlignment": .expectedToFail,
-        //"PerformanceTests.testLargeImageProcessing": .skip(reason: "Takes too long, only run locally"),
-    ]
+    private static let quarantinedTests: [String: Status] = [:]
     
     /// List of all quarantined tests, for reference and reporting
     public static var allQuarantinedTests: [String] {
@@ -98,7 +93,8 @@ public enum TestQuarantine {
 public extension XCTestCase {
     
     /// Check if the current test is quarantined and should be skipped or handled specially
-    func checkQuarantine() {
+    /// - Throws: XCTSkip if the test should be skipped
+    func checkQuarantineStatus() throws {
         let testName = "\(type(of: self)).\(name)"
         if TestQuarantine.shouldSkip(testName) {
             if case .skip(let reason)? = TestQuarantine.statusForTest(testName) {
@@ -111,7 +107,7 @@ public extension XCTestCase {
     }
     
     /// Run potentially flaky code and handle failures if the test is quarantined
-    func quarantineRunning(_ block: () throws -> Void) {
+    func quarantineRunning(_ block: () throws -> Void) throws {
         do {
             try block()
         } catch {
@@ -174,19 +170,19 @@ public extension XCTestCase {
 ///
 /// Usage:
 /// ```swift
-/// @TestQuarantine(reason: "Network timeout", ticketID: "HDR-123", failureRate: 0.2)
+/// @TestQuarantineWrapper(reason: "Network timeout", ticketID: "HDR-123", failureRate: 0.2)
 /// func testFlaky() {
 ///    // Test implementation
 /// }
 /// ```
 @propertyWrapper
-public struct TestQuarantine<T> {
+public struct TestQuarantineWrapper<T> {
     private let reason: String
     private let ticketID: String?
     private let failureRate: Double?
     private let skipInCI: Bool
     private let skipOnPlatforms: [String]
-    private let wrappedValue: T
+    public let wrappedValue: T
     private let createdAt: Date
     
     /// Initialize a test quarantine

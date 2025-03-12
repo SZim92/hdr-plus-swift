@@ -1,6 +1,10 @@
 import Foundation
 import CoreGraphics
 
+#if os(macOS)
+import AppKit
+#endif
+
 /// A utility for generating test data for HDR+ tests.
 /// This class provides methods to create various types of test data including images,
 /// matrices, histograms, and other inputs needed for testing the HDR+ pipeline.
@@ -254,7 +258,7 @@ public class TestDataGenerator {
                 height: config.height - 4 * patchSize
             )
             
-            let colors = [
+            let gradientColors = [
                 CGColor(gray: 0.0, alpha: 1.0),
                 CGColor(gray: 1.0, alpha: 1.0)
             ] as CFArray
@@ -264,7 +268,7 @@ public class TestDataGenerator {
             
             if let gradient = CGGradient(
                 colorsSpace: colorSpace,
-                colors: colors,
+                colors: gradientColors,
                 locations: locations
             ) {
                 context.saveGState()
@@ -272,8 +276,8 @@ public class TestDataGenerator {
                 
                 context.drawLinearGradient(
                     gradient,
-                    start: CGPoint(x: 0, y: 4 * patchSize),
-                    end: CGPoint(x: CGFloat(config.width), y: 4 * patchSize),
+                    start: CGPoint(x: 0, y: CGFloat(4 * patchSize)),
+                    end: CGPoint(x: CGFloat(config.width), y: CGFloat(4 * patchSize)),
                     options: []
                 )
                 context.restoreGState()
@@ -644,11 +648,21 @@ public class TestDataGenerator {
         guard let data: Data = {
             switch fileExtension {
             case "jpg", "jpeg":
-                return nsImage.jpegData(compressionQuality: 0.9)
+                if let tiffData = nsImage.tiffRepresentation,
+                   let bitmap = NSBitmapImageRep(data: tiffData),
+                   let jpegData = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.9]) {
+                    return jpegData
+                }
+                return Data()
             case "png":
-                return nsImage.pngData()
+                if let tiffData = nsImage.tiffRepresentation,
+                   let bitmap = NSBitmapImageRep(data: tiffData),
+                   let pngData = bitmap.representation(using: .png, properties: [:]) {
+                    return pngData
+                }
+                return Data()
             default:
-                return nsImage.tiffRepresentation
+                return nsImage.tiffRepresentation ?? Data()
             }
         }() else {
             throw TestDataError.fileSaveError("Failed to convert image to data")

@@ -1,320 +1,365 @@
-import XCTest
 import Foundation
+import XCTest
 import CoreGraphics
 import CoreImage
 
-/// VisualTestUtility provides functionality for visual regression testing, 
-/// including comparing images, generating visual diffs, and managing reference images.
-class VisualTestUtility {
+#if os(macOS)
+import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
+
+/// Utility for visual testing and image comparison.
+/// Provides methods for comparing images, generating diff visualizations, and managing reference images.
+public final class VisualTestUtility {
     
-    // MARK: - Image Comparison
+    /// Enum defining possible comparison results
+    public enum ComparisonStatus {
+        case match
+        case differ
+        case referenceNotFound
+    }
     
-    /// Compares a test image with a reference image for visual regression testing
-    /// - Parameters:
-    ///   - testImage: The test image to compare
-    ///   - referenceName: The name of the reference image
-    ///   - tolerance: The tolerance for pixel differences (0.0-1.0)
-    ///   - testCase: The test case that's performing the comparison
-    /// - Returns: True if the images match within the specified tolerance
-    static func compareImage(_ testImage: CGImage, 
-                             toReferenceNamed referenceName: String,
-                             tolerance: Double = TestConfig.shared.visualTestTolerance,
-                             in testCase: XCTestCase) -> Bool {
-        let config = TestConfig.shared
-        config.createDirectories()
+    /// Error types for visual testing
+    public enum VisualTestError: Error, LocalizedError {
+        /// Reference image not found
+        case referenceImageNotFound(String)
+        /// Failed to load reference image
+        case referenceImageLoadFailed(String, Error)
+        /// Failed to load actual image
+        case actualImageLoadFailed(String, Error)
+        /// Images have different dimensions
+        case dimensionMismatch(expected: CGSize, actual: CGSize)
+        /// Images have different pixel formats
+        case formatMismatch(expected: String, actual: String)
+        /// Image comparison failed
+        case comparisonFailed(diff: Double)
+        /// Failed to create diff image
+        case diffImageCreationFailed(Error)
         
-        let referenceURL = config.referenceImageURL(named: referenceName, for: testCase)
-        
-        // Check if reference image exists
-        if !FileManager.default.fileExists(atPath: referenceURL.path) {
-            if config.autoUpdateReferenceImages {
-                try? saveReferenceImage(testImage, named: referenceName, in: testCase)
-                return true
-            } else {
-                XCTFail("Reference image \(referenceName) does not exist at \(referenceURL.path)")
-                return false
+        public var errorDescription: String? {
+            switch self {
+            case .referenceImageNotFound(let name):
+                return "Reference image not found: \(name)"
+            case .referenceImageLoadFailed(let name, let error):
+                return "Failed to load reference image '\(name)': \(error.localizedDescription)"
+            case .actualImageLoadFailed(let name, let error):
+                return "Failed to load actual image '\(name)': \(error.localizedDescription)"
+            case .dimensionMismatch(let expected, let actual):
+                return "Image dimensions don't match: expected \(expected), got \(actual)"
+            case .formatMismatch(let expected, let actual):
+                return "Image formats don't match: expected \(expected), got \(actual)"
+            case .comparisonFailed(let diff):
+                return "Images differ by \(String(format: "%.2f", diff))%"
+            case .diffImageCreationFailed(let error):
+                return "Failed to create diff image: \(error.localizedDescription)"
             }
         }
+    }
+    
+    /// Options for image comparison
+    public struct ComparisonOptions {
+        /// Threshold for considering images as matching (0.0 - 100.0)
+        public let threshold: Double
+        /// Whether to generate a diff image for failed comparisons
+        public let generateDiffImage: Bool
+        /// Directory for storing diff images
+        public let diffDirectory: URL?
         
-        // Load reference image
-        guard let referenceImage = loadImage(from: referenceURL) else {
-            XCTFail("Failed to load reference image from \(referenceURL.path)")
-            return false
+        /// Initialize with default options
+        public init(
+            threshold: Double = 0.1,
+            generateDiffImage: Bool = true,
+            diffDirectory: URL? = nil
+        ) {
+            self.threshold = threshold
+            self.generateDiffImage = generateDiffImage
+            self.diffDirectory = diffDirectory
+        }
+    }
+    
+    /// Result of image comparison
+    public struct ComparisonResult {
+        /// Whether the comparison passed
+        public let passed: Bool
+        /// Percentage difference between images (0.0 - 100.0)
+        public let difference: Double
+        /// URL to the diff image if generated
+        public let diffImageURL: URL?
+        /// Time taken for comparison
+        public let comparisonTime: TimeInterval
+        
+        /// Create a success result
+        public static func success(difference: Double = 0.0, time: TimeInterval) -> VisualTestUtility.ComparisonResult {
+            return VisualTestUtility.ComparisonResult(passed: true, difference: difference, diffImageURL: nil, comparisonTime: time)
         }
         
-        // Check dimensions
-        guard testImage.width == referenceImage.width && testImage.height == referenceImage.height else {
-            XCTFail("Image dimensions do not match: Test image: \(testImage.width)x\(testImage.height), Reference image: \(referenceImage.width)x\(referenceImage.height)")
-            saveFailedTestImage(testImage, named: "\(referenceName)_failed", in: testCase)
-            return false
+        /// Create a failure result
+        public static func failure(difference: Double, diffImageURL: URL?, time: TimeInterval) -> VisualTestUtility.ComparisonResult {
+            return VisualTestUtility.ComparisonResult(passed: false, difference: difference, diffImageURL: diffImageURL, comparisonTime: time)
+        }
+    }
+    
+    /// Shared instance
+    public static let shared = VisualTestUtility()
+    
+    /// Directory for reference images
+    private let referenceImagesDirectory: URL?
+    
+    /// Initialize with default reference directory
+    public init(referenceImagesDirectory: URL? = nil) {
+        self.referenceImagesDirectory = referenceImagesDirectory
+    }
+    
+    /// Verify an image against a reference image
+    /// - Parameters:
+    ///   - image: The image to verify
+    ///   - referenceImage: Optional reference image, if nil will be loaded from disk
+    ///   - testName: Name of the test (used for storing results)
+    ///   - options: Comparison options
+    /// - Returns: Comparison result
+    /// - Throws: VisualTestError if the comparison fails
+    public func verifyImage(
+        image: CGImage,
+        referenceImage: CGImage? = nil,
+        testName: String,
+        options: ComparisonOptions = ComparisonOptions()
+    ) throws -> VisualTestUtility.ComparisonResult {
+        // If reference image not provided, load from disk
+        let reference: CGImage
+        if let referenceImage = referenceImage {
+            reference = referenceImage
+        } else {
+            guard let referenceImagesDirectory = referenceImagesDirectory else {
+                throw VisualTestError.referenceImageNotFound(testName)
+            }
+            
+            let referenceURL = referenceImagesDirectory.appendingPathComponent("\(testName).png")
+            
+            guard let data = try? Data(contentsOf: referenceURL) else {
+                throw VisualTestError.referenceImageNotFound(testName)
+            }
+            
+            guard let provider = CGDataProvider(data: data as CFData),
+                  let loadedReference = CGImage(
+                    pngDataProviderSource: provider,
+                    decode: nil,
+                    shouldInterpolate: false,
+                    intent: .defaultIntent
+                  ) else {
+                throw VisualTestError.referenceImageLoadFailed(testName, NSError(domain: "VisualTestUtility", code: 1, userInfo: nil))
+            }
+            
+            reference = loadedReference
         }
         
         // Compare images
-        let (diffPercentage, diffImage) = compareImages(testImage, referenceImage)
+        let result = try compareImages(
+            actual: image,
+            reference: reference,
+            testName: testName,
+            options: options
+        )
         
-        // Check if difference is within tolerance
-        let matches = diffPercentage <= tolerance
-        
-        if !matches {
-            // Save failed test artifacts
-            saveFailedTestImage(testImage, named: "\(referenceName)_failed", in: testCase)
-            
-            if let diffImage = diffImage, config.saveDiffImages {
-                saveFailedTestImage(diffImage, named: "\(referenceName)_diff", in: testCase)
-            }
-            
-            XCTFail("Images differ by \(String(format: "%.2f", diffPercentage * 100))%, which exceeds the tolerance of \(String(format: "%.2f", tolerance * 100))%")
+        // Handle failures
+        if !result.passed {
+            throw VisualTestError.comparisonFailed(diff: result.difference)
         }
         
-        return matches
+        return result
     }
     
-    /// Compares two images and returns the percentage difference and a diff image
+    /// Compare two images and generate a comparison result
     /// - Parameters:
-    ///   - image1: The first image to compare
-    ///   - image2: The second image to compare
-    /// - Returns: A tuple containing the percentage difference (0.0-1.0) and an optional diff image
-    private static func compareImages(_ image1: CGImage, _ image2: CGImage) -> (Double, CGImage?) {
-        // Create CIImages from CGImages
-        let ciImage1 = CIImage(cgImage: image1)
-        let ciImage2 = CIImage(cgImage: image2)
+    ///   - actual: The actual image
+    ///   - reference: The reference image
+    ///   - testName: Name of the test (used for storing results)
+    ///   - options: Comparison options
+    /// - Returns: Comparison result
+    /// - Throws: VisualTestError if the comparison fails
+    public func compareImages(
+        actual: CGImage,
+        reference: CGImage,
+        testName: String,
+        options: ComparisonOptions
+    ) throws -> VisualTestUtility.ComparisonResult {
+        let startTime = Date()
         
-        // Create a difference filter
-        let differenceFilter = CIFilter(name: "CIDifferenceBlendMode")!
-        differenceFilter.setValue(ciImage1, forKey: kCIInputImageKey)
-        differenceFilter.setValue(ciImage2, forKey: kCIInputBackgroundImageKey)
-        
-        // Apply the filter
-        guard let differenceOutput = differenceFilter.outputImage else {
-            return (1.0, nil) // Assume maximum difference if filter fails
+        // Check dimensions
+        if actual.width != reference.width || actual.height != reference.height {
+            throw VisualTestError.dimensionMismatch(
+                expected: CGSize(width: reference.width, height: reference.height),
+                actual: CGSize(width: actual.width, height: actual.height)
+            )
         }
         
-        // Create a context to render the diff image
-        let context = CIContext()
-        guard let diffCGImage = context.createCGImage(differenceOutput, from: differenceOutput.extent) else {
-            return (1.0, nil)
+        // Create a bitmap context for comparison
+        let width = actual.width
+        let height = actual.height
+        let bytesPerPixel = 4
+        let bytesPerRow = bytesPerPixel * width
+        let bitsPerComponent = 8
+        
+        var differentPixels = 0
+        var diffImage: CGImage?
+        var diffData: UnsafeMutablePointer<UInt8>?
+        
+        // Allocate memory for pixel data
+        guard let actualData = getCGImageData(actual) else {
+            throw VisualTestError.actualImageLoadFailed("actual", NSError(domain: "VisualTestUtility", code: 2, userInfo: nil))
+        }
+        defer { free(actualData) }
+        
+        guard let referenceData = getCGImageData(reference) else {
+            throw VisualTestError.referenceImageLoadFailed("reference", NSError(domain: "VisualTestUtility", code: 3, userInfo: nil))
+        }
+        defer { free(referenceData) }
+        
+        // If generating diff image, allocate memory for it
+        if options.generateDiffImage {
+            diffData = UnsafeMutablePointer<UInt8>.allocate(capacity: width * height * bytesPerPixel)
+            defer { diffData?.deallocate() }
+            
+            // Initialize diff image with white
+            for y in 0..<height {
+                for x in 0..<width {
+                    let pixelIndex = (y * width + x) * bytesPerPixel
+                    diffData?[pixelIndex] = 255     // R
+                    diffData?[pixelIndex + 1] = 255 // G
+                    diffData?[pixelIndex + 2] = 255 // B
+                    diffData?[pixelIndex + 3] = 255 // A
+                }
+            }
         }
         
-        // Calculate the average pixel difference
-        let pixelData = calculateAveragePixelValue(diffCGImage)
+        // Compare pixels
+        for y in 0..<height {
+            for x in 0..<width {
+                let pixelIndex = (y * width + x) * bytesPerPixel
+                
+                let actualR = actualData[pixelIndex]
+                let actualG = actualData[pixelIndex + 1]
+                let actualB = actualData[pixelIndex + 2]
+                let actualA = actualData[pixelIndex + 3]
+                
+                let referenceR = referenceData[pixelIndex]
+                let referenceG = referenceData[pixelIndex + 1]
+                let referenceB = referenceData[pixelIndex + 2]
+                let referenceA = referenceData[pixelIndex + 3]
+                
+                // Check if pixels differ
+                if actualR != referenceR || actualG != referenceG || actualB != referenceB || actualA != referenceA {
+                    differentPixels += 1
+                    
+                    // Mark different pixels in diff image
+                    if options.generateDiffImage, let diffData = diffData {
+                        diffData[pixelIndex] = 255     // R (red)
+                        diffData[pixelIndex + 1] = 0   // G
+                        diffData[pixelIndex + 2] = 0   // B
+                        diffData[pixelIndex + 3] = 255 // A
+                    }
+                }
+            }
+        }
         
-        // Create a highlighted diff image for visualization
-        let highlightedDiff = createHighlightedDiffImage(diffCGImage)
+        // Calculate difference percentage
+        let totalPixels = width * height
+        let differencePercentage = Double(differentPixels) / Double(totalPixels) * 100.0
         
-        return (pixelData, highlightedDiff)
+        // Create diff image if needed
+        var diffImageURL: URL?
+        if options.generateDiffImage && differencePercentage > options.threshold, let diffData = diffData {
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+            
+            if let context = CGContext(
+                data: diffData,
+                width: width,
+                height: height,
+                bitsPerComponent: bitsPerComponent,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: bitmapInfo.rawValue
+            ), let cgImage = context.makeImage() {
+                diffImage = cgImage
+                
+                // Save diff image if directory provided
+                if let diffDirectory = options.diffDirectory {
+                    let fileManager = FileManager.default
+                    
+                    // Create directory if it doesn't exist
+                    if !fileManager.fileExists(atPath: diffDirectory.path) {
+                        try? fileManager.createDirectory(at: diffDirectory, withIntermediateDirectories: true)
+                    }
+                    
+                    let diffURL = diffDirectory.appendingPathComponent("\(testName)_diff.png")
+                    diffImageURL = diffURL
+                    
+                    #if os(macOS)
+                    let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
+                    if let pngData = nsImage.tiffRepresentation,
+                       let bitmap = NSBitmapImageRep(data: pngData),
+                       let pngData = bitmap.representation(using: .png, properties: [:]) {
+                        try? pngData.write(to: diffURL)
+                    }
+                    #elseif os(iOS)
+                    if let uiImage = UIImage(cgImage: cgImage) {
+                        if let pngData = uiImage.pngData() {
+                            try? pngData.write(to: diffURL)
+                        }
+                    }
+                    #endif
+                }
+            }
+        }
+        
+        let endTime = Date()
+        let comparisonTime = endTime.timeIntervalSince(startTime)
+        
+        // Create result
+        let passed = differencePercentage <= options.threshold
+        let result = VisualTestUtility.ComparisonResult(
+            passed: passed,
+            difference: differencePercentage,
+            diffImageURL: diffImageURL,
+            comparisonTime: comparisonTime
+        )
+        
+        return result
     }
     
-    /// Calculates the average pixel value of an image
-    /// - Parameter image: The image to analyze
-    /// - Returns: The average pixel value (0.0-1.0)
-    private static func calculateAveragePixelValue(_ image: CGImage) -> Double {
+    // MARK: - Private Methods
+    
+    /// Get raw pixel data from a CGImage
+    private func getCGImageData(_ image: CGImage) -> UnsafeMutablePointer<UInt8>? {
         let width = image.width
         let height = image.height
-        let bytesPerRow = width * 4
-        let totalBytes = bytesPerRow * height
+        let bytesPerPixel = 4
+        let bytesPerRow = bytesPerPixel * width
+        let bitsPerComponent = 8
         
-        guard let pixelData = calloc(totalBytes, MemoryLayout<UInt8>.size) else {
-            return 1.0 // Assume maximum difference if memory allocation fails
-        }
-        defer { free(pixelData) }
+        let data = UnsafeMutablePointer<UInt8>.allocate(capacity: width * height * bytesPerPixel)
         
         let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let context = CGContext(data: pixelData,
-                               width: width,
-                               height: height,
-                               bitsPerComponent: 8,
-                               bytesPerRow: bytesPerRow,
-                               space: colorSpace,
-                               bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
         
-        context?.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        
-        // Calculate the sum of all pixel values
-        var sum: UInt64 = 0
-        var count: UInt64 = 0
-        
-        let buffer = pixelData.bindMemory(to: UInt8.self, capacity: totalBytes)
-        for i in stride(from: 0, to: totalBytes, by: 4) {
-            let r = buffer[i]
-            let g = buffer[i + 1]
-            let b = buffer[i + 2]
-            
-            // Calculate luminance using standard weights
-            let luminance = 0.299 * Double(r) + 0.587 * Double(g) + 0.114 * Double(b)
-            sum += UInt64(luminance)
-            count += 1
-        }
-        
-        // Calculate the average pixel value (normalized to 0.0-1.0)
-        let average = Double(sum) / (Double(count) * 255.0)
-        
-        return average
-    }
-    
-    /// Creates a highlighted diff image for better visualization of differences
-    /// - Parameter diffImage: The difference image
-    /// - Returns: A highlighted diff image
-    private static func createHighlightedDiffImage(_ diffImage: CGImage) -> CGImage? {
-        let width = diffImage.width
-        let height = diffImage.height
-        let bytesPerRow = width * 4
-        let totalBytes = bytesPerRow * height
-        
-        guard let pixelData = calloc(totalBytes, MemoryLayout<UInt8>.size) else {
-            return nil
-        }
-        defer { free(pixelData) }
-        
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let context = CGContext(data: pixelData,
-                               width: width,
-                               height: height,
-                               bitsPerComponent: 8,
-                               bytesPerRow: bytesPerRow,
-                               space: colorSpace,
-                               bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-        
-        context?.draw(diffImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-        
-        // Create a new buffer for the highlighted image
-        guard let highlightedData = calloc(totalBytes, MemoryLayout<UInt8>.size) else {
-            return nil
-        }
-        defer { free(highlightedData) }
-        
-        let buffer = pixelData.bindMemory(to: UInt8.self, capacity: totalBytes)
-        let highlightedBuffer = highlightedData.bindMemory(to: UInt8.self, capacity: totalBytes)
-        
-        // Highlight differences in red
-        for i in stride(from: 0, to: totalBytes, by: 4) {
-            let r = buffer[i]
-            let g = buffer[i + 1]
-            let b = buffer[i + 2]
-            let a = buffer[i + 3]
-            
-            // Calculate luminance
-            let luminance = 0.299 * Double(r) + 0.587 * Double(g) + 0.114 * Double(b)
-            
-            // If there's a significant difference, highlight it
-            if luminance > 10.0 {
-                // Bright red for differences
-                highlightedBuffer[i] = 255     // R
-                highlightedBuffer[i + 1] = 0   // G
-                highlightedBuffer[i + 2] = 0   // B
-                highlightedBuffer[i + 3] = 255 // A
-            } else {
-                // Original pixel values for matching areas
-                highlightedBuffer[i] = r
-                highlightedBuffer[i + 1] = g
-                highlightedBuffer[i + 2] = b
-                highlightedBuffer[i + 3] = a
-            }
-        }
-        
-        // Create a context for the highlighted image
-        let highlightedContext = CGContext(data: highlightedData,
-                                         width: width,
-                                         height: height,
-                                         bitsPerComponent: 8,
-                                         bytesPerRow: bytesPerRow,
-                                         space: colorSpace,
-                                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-        
-        return highlightedContext?.makeImage()
-    }
-    
-    // MARK: - Image Management
-    
-    /// Saves an image as a reference image
-    /// - Parameters:
-    ///   - image: The image to save
-    ///   - name: The name for the reference image
-    ///   - testCase: The test case that's saving the reference image
-    static func saveReferenceImage(_ image: CGImage, named name: String, in testCase: XCTestCase) throws {
-        let config = TestConfig.shared
-        let referenceURL = config.referenceImageURL(named: name, for: testCase)
-        
-        // Create the directory if it doesn't exist
-        let directoryURL = referenceURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        
-        // Save the image
-        try saveImage(image, to: referenceURL)
-        
-        print("Saved reference image: \(referenceURL.path)")
-    }
-    
-    /// Saves an image for a failed test
-    /// - Parameters:
-    ///   - image: The image to save
-    ///   - name: The name for the failed test image
-    ///   - testCase: The test case that's saving the failed test image
-    private static func saveFailedTestImage(_ image: CGImage, named name: String, in testCase: XCTestCase) {
-        let config = TestConfig.shared
-        let failedURL = config.failedTestArtifactURL(named: "\(name).png", for: testCase)
-        
-        // Create the directory if it doesn't exist
-        let directoryURL = failedURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        
-        // Save the image
-        try? saveImage(image, to: failedURL)
-        
-        print("Saved failed test image: \(failedURL.path)")
-    }
-    
-    /// Saves an image to a file
-    /// - Parameters:
-    ///   - image: The image to save
-    ///   - url: The URL to save the image to
-    private static func saveImage(_ image: CGImage, to url: URL) throws {
-        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, kUTTypePNG, 1, nil) else {
-            throw NSError(domain: "VisualTestUtility", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to create image destination"])
-        }
-        
-        CGImageDestinationAddImage(destination, image, nil)
-        
-        if !CGImageDestinationFinalize(destination) {
-            throw NSError(domain: "VisualTestUtility", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to write image to file"])
-        }
-    }
-    
-    /// Loads an image from a file
-    /// - Parameter url: The URL to load the image from
-    /// - Returns: The loaded image, or nil if loading failed
-    private static func loadImage(from url: URL) -> CGImage? {
-        guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+        guard let context = CGContext(
+            data: data,
+            width: width,
+            height: height,
+            bitsPerComponent: bitsPerComponent,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo.rawValue
+        ) else {
+            free(data)
             return nil
         }
         
-        return CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
-    }
-    
-    // MARK: - Convenience Methods
-    
-    /// Checks if a reference image exists for a given test
-    /// - Parameters:
-    ///   - name: The name of the reference image
-    ///   - testCase: The test case that's checking for the reference image
-    /// - Returns: True if the reference image exists
-    static func referenceImageExists(named name: String, for testCase: XCTestCase) -> Bool {
-        let config = TestConfig.shared
-        let referenceURL = config.referenceImageURL(named: name, for: testCase)
-        return FileManager.default.fileExists(atPath: referenceURL.path)
-    }
-    
-    /// Gets the URL for a reference image
-    /// - Parameters:
-    ///   - name: The name of the reference image
-    ///   - testCase: The test case that's requesting the reference image
-    /// - Returns: The URL for the reference image
-    static func referenceImageURL(named name: String, for testCase: XCTestCase) -> URL {
-        return TestConfig.shared.referenceImageURL(named: name, for: testCase)
-    }
-    
-    /// Cleans up all failed test artifacts
-    static func cleanupFailedTestArtifacts() {
-        let config = TestConfig.shared
-        try? FileManager.default.removeItem(at: config.failedTestArtifactsDir)
+        // Draw image into context
+        let rect = CGRect(x: 0, y: 0, width: width, height: height)
+        context.draw(image, in: rect)
+        
+        return data
     }
 } 

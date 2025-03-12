@@ -11,13 +11,13 @@ public struct TestHelper {
     /// - Parameters:
     ///   - name: The resource name (without extension)
     ///   - extension: The file extension
-    ///   - bundle: The bundle containing the resource (default: Bundle.module)
+    ///   - bundle: The bundle containing the resource (default: Bundle.main)
     /// - Returns: URL to the resource
     /// - Throws: TestHelperError if the resource could not be found
     public static func urlForResource(
         named name: String,
         withExtension extension: String,
-        in bundle: Bundle = Bundle.module
+        in bundle: Bundle = Bundle.main
     ) throws -> URL {
         guard let url = bundle.url(forResource: name, withExtension: `extension`) else {
             throw TestHelperError.resourceNotFound(name: name, extension: `extension`)
@@ -29,13 +29,13 @@ public struct TestHelper {
     /// - Parameters:
     ///   - name: The resource name (without extension)
     ///   - extension: The file extension
-    ///   - bundle: The bundle containing the resource (default: Bundle.module)
+    ///   - bundle: The bundle containing the resource (default: Bundle.main)
     /// - Returns: The data from the resource
     /// - Throws: TestHelperError if the resource could not be loaded
     public static func dataFromResource(
         named name: String,
         withExtension extension: String,
-        in bundle: Bundle = Bundle.module
+        in bundle: Bundle = Bundle.main
     ) throws -> Data {
         let url = try urlForResource(named: name, withExtension: `extension`, in: bundle)
         do {
@@ -49,13 +49,13 @@ public struct TestHelper {
     /// - Parameters:
     ///   - name: The JSON resource name (without extension)
     ///   - type: The type to decode into
-    ///   - bundle: The bundle containing the resource (default: Bundle.module)
+    ///   - bundle: The bundle containing the resource (default: Bundle.main)
     /// - Returns: The decoded object
     /// - Throws: TestHelperError if the resource could not be loaded or decoded
     public static func loadJSON<T: Decodable>(
         named name: String,
         as type: T.Type,
-        from bundle: Bundle = Bundle.module
+        from bundle: Bundle = Bundle.main
     ) throws -> T {
         let data = try dataFromResource(named: name, withExtension: "json", in: bundle)
         do {
@@ -238,6 +238,62 @@ public struct TestHelper {
             return 0
         }
     }
+    
+    // MARK: - File Operations
+    
+    /// Remove a file or directory at the specified URL
+    /// - Parameter url: The URL of the file or directory to remove
+    /// - Throws: An error if the removal fails
+    public static func removeItem(at url: URL) throws {
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+    
+    /// Convert a CGImage to Data for comparison
+    /// - Parameter image: The image to convert
+    /// - Returns: The image data
+    public static func imageToData(_ image: CGImage) -> Data {
+        #if os(macOS)
+        let nsImage = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+        if let tiffData = nsImage.tiffRepresentation {
+            return tiffData
+        }
+        #endif
+        
+        // Fallback to PNG representation
+        guard let context = CGContext(
+            data: nil,
+            width: image.width,
+            height: image.height,
+            bitsPerComponent: image.bitsPerComponent,
+            bytesPerRow: 0, // Let the context calculate the bytes per row
+            space: image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: image.bitmapInfo.rawValue
+        ) else {
+            return Data()
+        }
+        
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        
+        if let outputImage = context.makeImage(),
+           let data = outputImage.dataProvider?.data {
+            return data as Data
+        }
+        
+        return Data()
+    }
+    
+    /// Load a CGImage from a URL
+    /// - Parameter url: The URL to load the image from
+    /// - Returns: The loaded CGImage, or nil if loading failed
+    public static func loadImage(from url: URL) -> CGImage? {
+        guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+            return nil
+        }
+        
+        return CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
+    }
 }
 
 // MARK: - Errors
@@ -301,18 +357,17 @@ extension XCTestCase {
         let tempDirURL = try TestHelper.createTemporaryDirectory()
         defer {
             // Clean up after the test
-            try? FileManager.default.removeItem(at: tempDirURL)
+            try? TestHelper.removeItem(at: tempDirURL)
         }
         
         try testBlock(tempDirURL)
     }
     
-    /// Check if the test should be skipped on CI
-    /// - Parameter message: Optional message explaining why the test is skipped on CI
-    /// - Returns: True if running on CI, false otherwise
-    @discardableResult
-    public func skipOnCI(_ message: String = "Test skipped on CI") -> Bool {
-        // Check common CI environment variables
+    /// Skip a test if running in CI
+    /// - Parameter message: Message explaining why the test is skipped in CI
+    /// - Returns: Whether the test is running in CI
+    /// - Throws: XCTSkip if running in CI
+    public func skipIfCI(_ message: String = "Test not supported in CI") throws -> Bool {
         let isCI = ProcessInfo.processInfo.environment["CI"] != nil ||
                    ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] != nil ||
                    ProcessInfo.processInfo.environment["TRAVIS"] != nil ||
@@ -327,7 +382,8 @@ extension XCTestCase {
     
     /// Skip a test if it requires excessive resources
     /// - Parameter message: Message explaining why the test requires excessive resources
-    public func skipIfExcessiveResources(_ message: String = "Test requires excessive resources") {
+    /// - Throws: XCTSkip if excessive resources should be skipped
+    public func skipIfExcessiveResources(_ message: String = "Test requires excessive resources") throws {
         let shouldSkip = ProcessInfo.processInfo.environment["SKIP_RESOURCE_INTENSIVE"] != nil
         
         if shouldSkip {

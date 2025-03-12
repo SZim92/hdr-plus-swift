@@ -76,3 +76,22 @@ FailedTestArtifacts/
 
 # CI Fix Plan temporary files
 CI_FIX_PLAN_UPDATED.md
+
+# Visual testing artifacts
+visual-testing/
+*/VisualTests/diff/
+*/VisualTests/current/
+*.diff.png
+
+# Metal specific
+.metal-cache/
+
+# Custom derived data paths
+DerivedData_*/
+
+# iOS/macOS crash logs
+*.crash
+*.ips
+
+# Build products
+build/

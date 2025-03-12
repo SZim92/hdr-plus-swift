@@ -65,6 +65,8 @@ public class HDRPerformanceTestHelper {
     private var metalCounterSet: MTLCounterSet?
     private var metalCounterSampleBuffer: MTLCounterSampleBuffer?
     private var metalDevice: MTLDevice?
+    private var metalTimestamps: [String: UInt64] = [:]
+    private var gpuTimes: [TimeInterval] = []
     
     /// Initialize with default settings
     public init() {
@@ -84,13 +86,16 @@ public class HDRPerformanceTestHelper {
         
         // Check if performance counters are supported
         if #available(macOS 10.15, iOS 14.0, *) {
-            guard device.supportsCounterSampling(.timestamp) else {
+            // For Swift 5.7 and newer, use the updated API
+            let timestampPoint = MTLCounterSamplingPoint(rawValue: 0)!
+            guard device.supportsCounterSampling(timestampPoint) else {
                 print("Metal timestamp counters not supported")
                 return
             }
             
             // Get counter set for timestamps
-            guard let counterSet = device.counterSets.first(where: { $0.name.contains("Timestamp") }) else {
+            guard let counterSets = device.counterSets,
+                  let counterSet = counterSets.first(where: { $0.name.contains("Timestamp") }) else {
                 print("Metal timestamp counter set not available")
                 return
             }
@@ -129,37 +134,26 @@ public class HDRPerformanceTestHelper {
     }
     
     /// Read Metal performance counters
+    /// - Returns: Dictionary of counter values
     private func readMetalCounters() -> [String: Double]? {
-        #if os(macOS) || os(iOS)
-        if #available(macOS 10.15, iOS 14.0, *) {
-            guard let sampleBuffer = metalCounterSampleBuffer else {
-                return nil
-            }
-            
-            var counters: [String: Double] = [:]
-            
-            do {
-                // Get sample at index 0 (start) and 1 (end)
-                guard let startSample = sampleBuffer.sample(at: 0),
-                      let endSample = sampleBuffer.sample(at: 1) else {
-                    return nil
-                }
+        var counters: [String: Double] = [:]
+        
+        if metalPerformanceTracking {
+            // Use the timestamps recorded by the completion handlers
+            if let startTime = metalTimestamps["start"],
+               let endTime = metalTimestamps["end"] {
+                // Calculate elapsed time in milliseconds
+                let elapsedTimeMs = Double(endTime - startTime) / 1_000_000.0
+                counters["gpuTimeMs"] = elapsedTimeMs
                 
-                // Calculate elapsed time
-                if let startTimestamp = startSample.timestamp,
-                   let endTimestamp = endSample.timestamp {
-                    // Convert to milliseconds
-                    let elapsedTimeMs = Double(endTimestamp - startTimestamp) / 1_000_000.0
-                    counters["gpuTimeMs"] = elapsedTimeMs
-                }
+                // Reset timestamps for next measurement
+                metalTimestamps = [:]
                 
                 return counters
-            } catch {
-                print("Failed to read Metal counters: \(error)")
-                return nil
             }
+            
+            return nil
         }
-        #endif
         
         return nil
     }
@@ -209,8 +203,16 @@ public class HDRPerformanceTestHelper {
                        let sampleBuffer = metalCounterSampleBuffer,
                        let commandBuffer = commandQueue.makeCommandBuffer() {
                         
-                        commandBuffer.sampleCounters(sampleBuffer, sampleIndex: 0, barrier: true)
-                        commandBuffer.commit()
+                        // Sample counters at the start
+                        if metalPerformanceTracking {
+                            // Create a workaround for the missing sampleCounters method
+                            // Instead of directly sampling, we'll add a completion handler
+                            // that will record the timestamp when the command buffer completes
+                            let startTime = DispatchTime.now().uptimeNanoseconds
+                            commandBuffer.addCompletedHandler { _ in
+                                self.metalTimestamps["start"] = startTime
+                            }
+                        }
                     }
                 }
                 #endif
@@ -234,15 +236,24 @@ public class HDRPerformanceTestHelper {
                        let sampleBuffer = metalCounterSampleBuffer,
                        let commandBuffer = commandQueue.makeCommandBuffer() {
                         
-                        commandBuffer.sampleCounters(sampleBuffer, sampleIndex: 1, barrier: true)
+                        // Sample counters at the end
+                        if metalPerformanceTracking {
+                            // Create a workaround for the missing sampleCounters method
+                            // Record the end timestamp when the command buffer completes
+                            let endTime = DispatchTime.now().uptimeNanoseconds
+                            commandBuffer.addCompletedHandler { _ in
+                                self.metalTimestamps["end"] = endTime
+                                
+                                // Read GPU time after both timestamps are recorded
+                                if let counters = self.readMetalCounters(),
+                                   let gpuTimeMs = counters["gpuTimeMs"] {
+                                    self.gpuTimes.append(gpuTimeMs / 1000.0) // Convert to seconds
+                                }
+                            }
+                        }
+                        
                         commandBuffer.commit()
                         commandBuffer.waitUntilCompleted()
-                        
-                        // Read GPU time
-                        if let counters = readMetalCounters(),
-                           let gpuTimeMs = counters["gpuTimeMs"] {
-                            gpuTimes.append(gpuTimeMs / 1000.0) // Convert to seconds
-                        }
                     }
                 }
                 #endif
@@ -331,8 +342,16 @@ public class HDRPerformanceTestHelper {
                        let sampleBuffer = metalCounterSampleBuffer,
                        let commandBuffer = commandQueue.makeCommandBuffer() {
                         
-                        commandBuffer.sampleCounters(sampleBuffer, sampleIndex: 0, barrier: true)
-                        commandBuffer.commit()
+                        // Sample counters at the start
+                        if metalPerformanceTracking {
+                            // Create a workaround for the missing sampleCounters method
+                            // Instead of directly sampling, we'll add a completion handler
+                            // that will record the timestamp when the command buffer completes
+                            let startTime = DispatchTime.now().uptimeNanoseconds
+                            commandBuffer.addCompletedHandler { _ in
+                                self.metalTimestamps["start"] = startTime
+                            }
+                        }
                     }
                 }
                 #endif
@@ -384,15 +403,24 @@ public class HDRPerformanceTestHelper {
                        let sampleBuffer = metalCounterSampleBuffer,
                        let commandBuffer = commandQueue.makeCommandBuffer() {
                         
-                        commandBuffer.sampleCounters(sampleBuffer, sampleIndex: 1, barrier: true)
+                        // Sample counters at the end
+                        if metalPerformanceTracking {
+                            // Create a workaround for the missing sampleCounters method
+                            // Record the end timestamp when the command buffer completes
+                            let endTime = DispatchTime.now().uptimeNanoseconds
+                            commandBuffer.addCompletedHandler { _ in
+                                self.metalTimestamps["end"] = endTime
+                                
+                                // Read GPU time after both timestamps are recorded
+                                if let counters = self.readMetalCounters(),
+                                   let gpuTimeMs = counters["gpuTimeMs"] {
+                                    self.gpuTimes.append(gpuTimeMs / 1000.0) // Convert to seconds
+                                }
+                            }
+                        }
+                        
                         commandBuffer.commit()
                         commandBuffer.waitUntilCompleted()
-                        
-                        // Read GPU time
-                        if let counters = readMetalCounters(),
-                           let gpuTimeMs = counters["gpuTimeMs"] {
-                            gpuTimes.append(gpuTimeMs / 1000.0) // Convert to seconds
-                        }
                     }
                 }
                 #endif

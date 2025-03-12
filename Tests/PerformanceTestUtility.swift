@@ -405,7 +405,8 @@ public final class PerformanceTestUtility {
     ///   - type: The metric type
     /// - Returns: The URL for the baseline file
     private func baselineFileURL(for name: String, type: MetricType) -> URL {
-        let testClass = String(describing: type(of: testCase!))
+        let testCase = self.testCase!
+        let testClass = String(describing: Swift.type(of: testCase))
         let sanitizedName = name.replacingOccurrences(of: " ", with: "_")
         let fileName = "\(sanitizedName)_\(type.displayName.replacingOccurrences(of: " ", with: "_")).baseline"
         
@@ -420,7 +421,8 @@ public final class PerformanceTestUtility {
     ///   - type: The metric type
     /// - Returns: The URL for the history file
     private func historyFileURL(for name: String, type: MetricType) -> URL {
-        let testClass = String(describing: type(of: testCase!))
+        let testCase = self.testCase!
+        let testClass = String(describing: Swift.type(of: testCase))
         let sanitizedName = name.replacingOccurrences(of: " ", with: "_")
         let fileName = "\(sanitizedName)_\(type.displayName.replacingOccurrences(of: " ", with: "_")).json"
         

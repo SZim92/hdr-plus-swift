@@ -122,6 +122,29 @@ class HDRVisualTests: XCTestCase {
         #endif
     }
     
+    /// Assert that an HDR image matches a reference image
+    /// - Parameters:
+    ///   - image: The image to test
+    ///   - referenceImageName: The name of the reference image (without extension)
+    /// - Throws: An error if the assertion fails
+    func assertHDRImage(_ image: CGImage, matchesReferenceNamed referenceImageName: String) throws {
+        // Get the reference image URL
+        let referenceURL = testBundle.url(forResource: referenceImageName, withExtension: "png")!
+        
+        // Load the reference image
+        guard let referenceImage = TestHelper.loadImage(from: referenceURL) else {
+            XCTFail("Failed to load reference image: \(referenceImageName)")
+            return
+        }
+        
+        // Compare the images
+        let imageData = TestHelper.imageToData(image)
+        let referenceData = TestHelper.imageToData(referenceImage)
+        
+        XCTAssertEqual(imageData.count, referenceData.count, "Image size doesn't match reference")
+        XCTAssertEqual(imageData, referenceData, "Image doesn't match reference")
+    }
+    
     // MARK: - Tests
     
     /// Test basic HDR processing with visual comparison

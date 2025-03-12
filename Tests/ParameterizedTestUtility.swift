@@ -150,10 +150,10 @@ public final class ParameterizedTestUtility {
     ///   - bundle: The bundle containing the file
     /// - Returns: A dictionary representing the JSON data
     public static func loadJSON(fileName: String, bundle: Bundle = Bundle.main) throws -> [String: Any] {
-        guard let url = bundle.url(forResource: fileName, withExtension: "json") ??
-                TestConfig.shared.testResourcesDir.appendingPathComponent("TestData").appendingPathComponent("\(fileName).json") else {
-            throw ParameterizedTestError.dataLoadError("JSON file '\(fileName).json' not found")
-        }
+        let bundleUrl = bundle.url(forResource: fileName, withExtension: "json")
+        let fallbackUrl = TestConfig.shared.testResourcesDir.appendingPathComponent("TestData").appendingPathComponent("\(fileName).json")
+        
+        let url = bundleUrl ?? fallbackUrl
         
         do {
             let data = try Data(contentsOf: url)
@@ -222,13 +222,13 @@ public final class ParameterizedTestUtility {
     ///   - hasHeader: Whether the CSV file has a header row
     /// - Returns: Array of string arrays representing CSV rows
     public static func loadCSV(fileName: String, bundle: Bundle = Bundle.main, hasHeader: Bool = true) throws -> [[String]] {
-        guard let url = bundle.url(forResource: fileName, withExtension: "csv") ??
-                TestConfig.shared.testResourcesDir.appendingPathComponent("TestData").appendingPathComponent("\(fileName).csv") else {
-            throw ParameterizedTestError.dataLoadError("CSV file '\(fileName).csv' not found")
-        }
+        let bundleUrl = bundle.url(forResource: fileName, withExtension: "csv")
+        let fallbackUrl = TestConfig.shared.testResourcesDir.appendingPathComponent("TestData").appendingPathComponent("\(fileName).csv")
+        
+        let url = bundleUrl ?? fallbackUrl
         
         do {
-            let csvString = try String(contentsOf: url)
+            let csvString = try String(contentsOf: url, encoding: .utf8)
             var rows: [[String]] = []
             
             // Split by new lines
